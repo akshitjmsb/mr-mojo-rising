@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const publicPaths = ["/login", "/signup", "/auth/callback"];
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -25,8 +27,27 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh the session
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const pathname = request.nextUrl.pathname;
+  const isPublic = publicPaths.some((p) => pathname.startsWith(p));
+  const isApi = pathname.startsWith("/api/");
+
+  // Redirect unauthenticated users to login (except public pages and API routes)
+  if (!user && !isPublic && !isApi) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect authenticated users away from login/signup
+  if (user && isPublic) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
+  }
 
   return supabaseResponse;
 }

@@ -1,11 +1,23 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
 interface HeaderProps {
   songTitle?: string;
   songArtist?: string;
 }
 
 export default function Header({ songTitle, songArtist }: HeaderProps) {
+  const router = useRouter();
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <header>
       <div className="flex items-start justify-between" style={{ padding: "22px 20px 0" }}>
@@ -40,36 +52,63 @@ export default function Header({ songTitle, songArtist }: HeaderProps) {
           </p>
         </div>
 
-        {/* Song info (only on player view) */}
-        {songTitle && (
-          <div style={{ textAlign: "right" }}>
-            <p
-              style={{
-                fontFamily: "var(--font-playfair), Georgia, serif",
-                fontSize: 13,
-                fontStyle: "italic",
-                color: "var(--color-text-secondary)",
-              }}
-            >
-              {songTitle}
-            </p>
-            {songArtist && (
+        {/* Right side: song info or sign out */}
+        <div style={{ textAlign: "right" }}>
+          {songTitle ? (
+            <>
               <p
                 style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 9,
-                  fontWeight: 100,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  color: "var(--color-text-muted)",
-                  marginTop: 2,
+                  fontFamily: "var(--font-playfair), Georgia, serif",
+                  fontSize: 13,
+                  fontStyle: "italic",
+                  color: "var(--color-text-secondary)",
                 }}
               >
-                {songArtist}
+                {songTitle}
               </p>
-            )}
-          </div>
-        )}
+              {songArtist && (
+                <p
+                  style={{
+                    fontFamily: "var(--font-josefin), sans-serif",
+                    fontSize: 9,
+                    fontWeight: 100,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    color: "var(--color-text-muted)",
+                    marginTop: 2,
+                  }}
+                >
+                  {songArtist}
+                </p>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={handleSignOut}
+              style={{
+                fontFamily: "var(--font-josefin), sans-serif",
+                fontSize: 9,
+                fontWeight: 300,
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "4px 0",
+                transition: "color 0.25s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--color-gold)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--color-text-muted)";
+              }}
+            >
+              Sign Out
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Decorative diamond rule */}
