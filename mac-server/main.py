@@ -5,10 +5,8 @@ Runs locally on the Mac with GPU access for Demucs processing.
 """
 
 import os
-import uuid
 import asyncio
-import subprocess
-import tempfile
+import wave
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Header
@@ -60,6 +58,11 @@ class StatusResponse(BaseModel):
 jobs: dict[str, str] = {}  # song_id -> status
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.post("/process", dependencies=[Depends(verify_token)])
 async def process_song(req: ProcessRequest):
     """Start processing a song: download, separate stems, detect sections."""
@@ -77,112 +80,144 @@ async def get_status(song_id: str):
     return StatusResponse(song_id=song_id, status=status)
 
 
+async def _run(cmd: list[str], label: str) -> tuple[bytes, bytes]:
+    """Run a subprocess and raise on failure."""
+    print(f"  [{label}] Running: {' '.join(cmd)}")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        print(f"  [{label}] FAILED (exit {proc.returncode})")
+        print(f"  stderr: {stderr.decode()[:500]}")
+        raise Exception(f"{label} failed (exit {proc.returncode})")
+    print(f"  [{label}] Done")
+    return stdout, stderr
+
+
 async def _process_pipeline(song_id: str, youtube_url: str):
     """Full processing pipeline: download -> demucs -> detect sections -> upload."""
     sb = get_supabase()
 
     try:
-        # Update status to processing
         sb.table("songs").update({"status": "processing"}).eq("id", song_id).execute()
+        print(f"\n{'='*60}")
+        print(f"Processing song {song_id}")
+        print(f"URL: {youtube_url}")
+        print(f"{'='*60}")
 
-        # Step 1: Download audio with yt-dlp
         work_dir = OUTPUT_DIR / song_id
         work_dir.mkdir(parents=True, exist_ok=True)
-        audio_path = work_dir / "original.wav"
 
-        dl_proc = await asyncio.create_subprocess_exec(
+        # Step 1: Download audio with yt-dlp
+        print("\nStep 1: Downloading audio...")
+        await _run([
             "yt-dlp",
             "-x",
             "--audio-format", "wav",
             "--audio-quality", "0",
-            "-o", str(audio_path),
+            "-o", str(work_dir / "original.%(ext)s"),
+            "--no-playlist",
             youtube_url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await dl_proc.communicate()
+        ], "yt-dlp download")
 
-        if dl_proc.returncode != 0:
-            raise Exception("yt-dlp download failed")
+        # Find the downloaded wav file
+        audio_path = work_dir / "original.wav"
+        if not audio_path.exists():
+            # yt-dlp might have kept the original format, convert with ffmpeg
+            for ext in ["webm", "m4a", "mp3", "opus", "ogg"]:
+                candidate = work_dir / f"original.{ext}"
+                if candidate.exists():
+                    await _run([
+                        "ffmpeg", "-i", str(candidate),
+                        "-ar", "44100", "-ac", "2",
+                        str(audio_path), "-y"
+                    ], "ffmpeg convert")
+                    break
 
-        # Try to extract title from yt-dlp
-        title_proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--get-title",
-            youtube_url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        title_stdout, _ = await title_proc.communicate()
-        title = title_stdout.decode().strip() if title_proc.returncode == 0 else "Unknown Title"
+        if not audio_path.exists():
+            raise Exception("No audio file found after download")
 
-        # Update title
-        sb.table("songs").update({"title": title}).eq("id", song_id).execute()
+        # Get title
+        print("  Fetching title...")
+        title_stdout, _ = await _run([
+            "yt-dlp", "--get-title", "--no-playlist", youtube_url
+        ], "yt-dlp title")
+        title = title_stdout.decode().strip() or "Unknown Title"
 
-        # Step 2: Run Demucs stem separation
-        demucs_out = work_dir / "demucs"
-        demucs_proc = await asyncio.create_subprocess_exec(
-            "python", "-m", "demucs",
-            "--two-stems=vocals",  # First pass: vocals vs accompaniment
+        # Try to parse "Artist - Title" format
+        artist = None
+        if " - " in title:
+            parts = title.split(" - ", 1)
+            artist = parts[0].strip()
+            title = parts[1].strip()
+
+        sb.table("songs").update({
+            "title": title,
+            **({"artist": artist} if artist else {}),
+        }).eq("id", song_id).execute()
+        print(f"  Title: {title}" + (f" by {artist}" if artist else ""))
+
+        # Step 2: Run Demucs 4-stem separation (htdemucs)
+        print("\nStep 2: Running Demucs stem separation...")
+        demucs_out = work_dir / "separated"
+        await _run([
+            "python3.11", "-m", "demucs",
+            "-n", "htdemucs",
             "-o", str(demucs_out),
             str(audio_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await demucs_proc.communicate()
+        ], "demucs")
 
-        # Run full 4-stem separation
-        demucs_full_proc = await asyncio.create_subprocess_exec(
-            "python", "-m", "demucs",
-            "-o", str(demucs_out),
-            "--name", "htdemucs",
-            str(audio_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await demucs_full_proc.communicate()
-
-        # Find output stems
+        # Find output stems — htdemucs outputs: vocals, drums, bass, other
         stems_dir = None
-        for d in demucs_out.rglob("*"):
-            if d.is_dir() and (d / "guitar.wav").exists():
-                stems_dir = d
-                break
-            # htdemucs uses "other" instead of "guitar"
-            if d.is_dir() and (d / "other.wav").exists():
+        for d in sorted(demucs_out.rglob("*")):
+            if d.is_dir() and (d / "vocals.wav").exists():
                 stems_dir = d
                 break
 
-        # Step 3: Upload stems to Supabase Storage
-        def upload_file(local_path: Path, storage_path: str):
+        if not stems_dir:
+            print("  WARNING: No stems found, falling back to original only")
+
+        # Step 3: Upload to Supabase Storage
+        print("\nStep 3: Uploading stems...")
+
+        def upload_file(local_path: Path, storage_path: str) -> str:
             with open(local_path, "rb") as f:
-                sb.storage.from_("stems").upload(storage_path, f.read())
+                data = f.read()
+            print(f"  Uploading {storage_path} ({len(data) // 1024}KB)")
+            sb.storage.from_("stems").upload(
+                storage_path, data,
+                file_options={"content-type": "audio/wav"}
+            )
             return sb.storage.from_("stems").get_public_url(storage_path)
 
-        # Upload original
         original_url = upload_file(audio_path, f"{song_id}/original.wav")
 
-        # Upload separated stems
         guitar_url = None
         vocals_url = None
         drums_url = None
         bass_url = None
 
         if stems_dir:
-            for stem_name in ["guitar", "other", "vocals", "drums", "bass"]:
+            stem_map = {
+                "other": "guitar_url",
+                "vocals": "vocals_url",
+                "drums": "drums_url",
+                "bass": "bass_url",
+            }
+            urls = {}
+            for stem_name, url_key in stem_map.items():
                 stem_file = stems_dir / f"{stem_name}.wav"
                 if stem_file.exists():
-                    url = upload_file(stem_file, f"{song_id}/{stem_name}.wav")
-                    if stem_name in ("guitar", "other"):
-                        guitar_url = url
-                    elif stem_name == "vocals":
-                        vocals_url = url
-                    elif stem_name == "drums":
-                        drums_url = url
-                    elif stem_name == "bass":
-                        bass_url = url
+                    urls[url_key] = upload_file(stem_file, f"{song_id}/{stem_name}.wav")
 
-        # Create stems record
+            guitar_url = urls.get("guitar_url")
+            vocals_url = urls.get("vocals_url")
+            drums_url = urls.get("drums_url")
+            bass_url = urls.get("bass_url")
+
         sb.table("stems").insert({
             "song_id": song_id,
             "original_url": original_url,
@@ -192,12 +227,11 @@ async def _process_pipeline(song_id: str, youtube_url: str):
             "bass_url": bass_url,
         }).execute()
 
-        # Step 4: Simple section detection (based on audio energy changes)
-        # For now, create basic sections based on duration
-        # A more sophisticated approach would use librosa for onset detection
-        import wave
+        # Step 4: Section detection
+        print("\nStep 4: Detecting sections...")
         with wave.open(str(audio_path), "r") as wf:
             duration = wf.getnframes() / wf.getframerate()
+        print(f"  Duration: {duration:.1f}s")
 
         sections = _detect_sections(duration)
         for section in sections:
@@ -207,13 +241,17 @@ async def _process_pipeline(song_id: str, youtube_url: str):
                 "start_time": section["start"],
                 "end_time": section["end"],
             }).execute()
+        print(f"  Created {len(sections)} sections")
 
-        # Mark as ready
+        # Done!
         sb.table("songs").update({"status": "ready"}).eq("id", song_id).execute()
         jobs[song_id] = "ready"
+        print(f"\n{'='*60}")
+        print(f"DONE — Song {song_id} is ready!")
+        print(f"{'='*60}\n")
 
     except Exception as e:
-        print(f"Processing failed for {song_id}: {e}")
+        print(f"\nFAILED — Song {song_id}: {e}")
         sb.table("songs").update({"status": "failed"}).eq("id", song_id).execute()
         jobs[song_id] = "failed"
 
@@ -224,10 +262,8 @@ def _detect_sections(duration: float) -> list[dict]:
     TODO: Replace with librosa-based onset/beat detection for real accuracy.
     """
     if duration < 60:
-        return [{"label": "Full Song", "start": 0, "end": duration}]
+        return [{"label": "Full Song", "start": 0, "end": round(duration, 2)}]
 
-    sections = []
-    # Simple heuristic: intro (8%), verse (20%), chorus (15%), verse (20%), chorus (15%), bridge (10%), outro (12%)
     markers = [
         ("Intro", 0.0, 0.08),
         ("Verse I", 0.08, 0.28),
@@ -237,11 +273,11 @@ def _detect_sections(duration: float) -> list[dict]:
         ("Bridge", 0.78, 0.88),
         ("Outro", 0.88, 1.0),
     ]
-    for label, start_pct, end_pct in markers:
-        sections.append({
+    return [
+        {
             "label": label,
             "start": round(start_pct * duration, 2),
             "end": round(end_pct * duration, 2),
-        })
-
-    return sections
+        }
+        for label, start_pct, end_pct in markers
+    ]
