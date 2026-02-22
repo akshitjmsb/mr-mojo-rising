@@ -5,11 +5,15 @@ import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
+import ChordDiagram from "@/components/ChordDiagram";
+import { parseLrc, findCurrentLineIndex } from "@/lib/lrc-parser";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
 type Stem = Database["public"]["Tables"]["stems"]["Row"];
 type Section = Database["public"]["Tables"]["sections"]["Row"];
+type Chord = Database["public"]["Tables"]["chords"]["Row"];
+type Lyrics = Database["public"]["Tables"]["lyrics"]["Row"];
 
 const SECTION_COLORS: Record<string, string> = {
   Intro: "#D4A844",
@@ -46,9 +50,12 @@ export default function SongPlayerPage() {
   const [song, setSong] = useState<Song | null>(null);
   const [stems, setStems] = useState<Stem | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
+  const [chords, setChords] = useState<Chord[]>([]);
+  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<"guitar" | "full">("guitar");
+  const [panelMode, setPanelMode] = useState<"chords" | "lyrics" | "both">("both");
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(true);
@@ -58,6 +65,7 @@ export default function SongPlayerPage() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
+  const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch song data
   useEffect(() => {
@@ -69,6 +77,8 @@ export default function SongPlayerPage() {
         setSong(data.song);
         setStems(data.stems);
         setSections(data.sections || []);
+        setChords(data.chords || []);
+        setLyrics(data.lyrics || null);
         if (data.sections?.length > 0) {
           setActiveSection(data.sections[0]);
         }
@@ -205,6 +215,22 @@ export default function SongPlayerPage() {
     const wave = Math.sin(i * 0.18) * 0.3 + Math.sin(i * 0.07) * 0.2;
     return Math.min(1, 0.12 + Math.abs(wave) + (Math.sin(i * 3.7) * 0.5 + 0.5) * 0.38);
   });
+
+  // Derive current chord from playback time
+  const currentChord = chords.find(
+    (c) => currentTime >= c.start_time && currentTime < c.end_time
+  ) || null;
+
+  // Find the next upcoming chord
+  const nextChord = currentChord
+    ? chords.find((c) => c.start_time > currentChord.end_time - 0.1) || null
+    : chords.find((c) => c.start_time > currentTime) || null;
+
+  // Parse LRC lyrics and find current line
+  const lrcLines = lyrics?.synced_lrc ? parseLrc(lyrics.synced_lrc) : [];
+  const currentLyricIndex = findCurrentLineIndex(lrcLines, currentTime);
+  const hasChords = chords.length > 0;
+  const hasLyrics = lyrics !== null;
 
   if (loading) {
     return (
@@ -630,6 +656,180 @@ export default function SongPlayerPage() {
             </button>
           ))}
         </div>
+
+        {/* Chords & Lyrics panel */}
+        {(hasChords || hasLyrics) && (
+          <div style={{ padding: "0 20px 14px" }}>
+            {/* Toggle pills */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {(["chords", "lyrics", "both"] as const).map((mode) => {
+                const enabled =
+                  mode === "chords" ? hasChords :
+                  mode === "lyrics" ? hasLyrics :
+                  hasChords || hasLyrics;
+                if (!enabled) return null;
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => setPanelMode(mode)}
+                    style={{
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 9,
+                      fontWeight: 300,
+                      letterSpacing: "0.18em",
+                      textTransform: "uppercase",
+                      padding: "7px 14px",
+                      background:
+                        panelMode === mode ? "rgba(212,168,68,0.06)" : "transparent",
+                      border: `1px solid ${panelMode === mode ? "var(--color-gold)" : "var(--color-border)"}`,
+                      color:
+                        panelMode === mode ? "var(--color-gold)" : "var(--color-text-dark)",
+                      cursor: "pointer",
+                      borderRadius: 1,
+                      transition: "all 0.25s",
+                    }}
+                  >
+                    {mode === "both" ? "Both" : mode === "chords" ? "Chords" : "Lyrics"}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Chord display */}
+            {(panelMode === "chords" || panelMode === "both") && hasChords && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  padding: "12px 16px",
+                  border: "1px solid var(--color-border-dark)",
+                  borderRadius: 2,
+                  marginBottom: panelMode === "both" && hasLyrics ? 10 : 0,
+                }}
+              >
+                {/* Current chord name + diagram */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 80 }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-playfair), Georgia, serif",
+                      fontSize: 28,
+                      fontStyle: "italic",
+                      color: "var(--color-gold)",
+                      lineHeight: 1,
+                      marginBottom: 6,
+                    }}
+                  >
+                    {currentChord?.chord_label || "—"}
+                  </span>
+                  {currentChord && (
+                    <ChordDiagram chordName={currentChord.chord_label} width={100} />
+                  )}
+                </div>
+
+                {/* Next chord preview */}
+                {nextChord && nextChord.chord_label !== currentChord?.chord_label && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      opacity: 0.4,
+                      marginLeft: "auto",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--font-josefin), sans-serif",
+                        fontSize: 8,
+                        fontWeight: 100,
+                        letterSpacing: "0.15em",
+                        textTransform: "uppercase",
+                        color: "var(--color-text-muted)",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Next
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-playfair), Georgia, serif",
+                        fontSize: 18,
+                        fontStyle: "italic",
+                        color: "var(--color-text-secondary)",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {nextChord.chord_label}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Lyrics display */}
+            {(panelMode === "lyrics" || panelMode === "both") && hasLyrics && (
+              <div
+                ref={lyricsContainerRef}
+                style={{
+                  maxHeight: 160,
+                  overflowY: "auto",
+                  padding: "12px 16px",
+                  border: "1px solid var(--color-border-dark)",
+                  borderRadius: 2,
+                  scrollBehavior: "smooth",
+                }}
+              >
+                {lrcLines.length > 0 ? (
+                  /* Synced lyrics */
+                  lrcLines.map((line, i) => {
+                    const isCurrent = i === currentLyricIndex;
+                    return (
+                      <p
+                        key={i}
+                        data-lyric-index={i}
+                        ref={(el) => {
+                          if (isCurrent && el && lyricsContainerRef.current) {
+                            const container = lyricsContainerRef.current;
+                            const top = el.offsetTop - container.offsetTop - 50;
+                            container.scrollTop = Math.max(0, top);
+                          }
+                        }}
+                        style={{
+                          fontFamily: "var(--font-josefin), sans-serif",
+                          fontSize: isCurrent ? 13 : 11,
+                          fontWeight: isCurrent ? 400 : 100,
+                          color: isCurrent
+                            ? "var(--color-gold)"
+                            : "var(--color-text-muted)",
+                          padding: "3px 0",
+                          transition: "all 0.2s",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {line.text}
+                      </p>
+                    );
+                  })
+                ) : lyrics?.plain_text ? (
+                  /* Static plain text */
+                  <p
+                    style={{
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 11,
+                      fontWeight: 100,
+                      color: "var(--color-text-secondary)",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    {lyrics.plain_text}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Sections list */}
         <div style={{ padding: "0 20px 24px" }}>

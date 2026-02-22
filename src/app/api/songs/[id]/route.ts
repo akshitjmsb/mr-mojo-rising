@@ -34,9 +34,25 @@ export async function GET(
     .eq("song_id", id)
     .order("start_time", { ascending: true });
 
+  // Fetch chords
+  const { data: chords } = await supabase
+    .from("chords")
+    .select("*")
+    .eq("song_id", id)
+    .order("start_time", { ascending: true });
+
+  // Fetch lyrics
+  const { data: lyrics } = await supabase
+    .from("lyrics")
+    .select("*")
+    .eq("song_id", id)
+    .single();
+
   return NextResponse.json({
     song,
     stems: stems || null,
     sections: sections || [],
+    chords: chords || [],
+    lyrics: lyrics || null,
   });
 }

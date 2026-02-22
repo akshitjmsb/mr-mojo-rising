@@ -109,6 +109,76 @@ export type Database = {
           },
         ];
       };
+      chords: {
+        Row: {
+          id: string;
+          song_id: string;
+          start_time: number;
+          end_time: number;
+          chord_label: string;
+          chord_standard: string;
+          confidence: number | null;
+        };
+        Insert: {
+          id?: string;
+          song_id: string;
+          start_time: number;
+          end_time: number;
+          chord_label: string;
+          chord_standard: string;
+          confidence?: number | null;
+        };
+        Update: {
+          id?: string;
+          song_id?: string;
+          start_time?: number;
+          end_time?: number;
+          chord_label?: string;
+          chord_standard?: string;
+          confidence?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chords_song_id_fkey";
+            columns: ["song_id"];
+            isOneToOne: false;
+            referencedRelation: "songs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      lyrics: {
+        Row: {
+          id: string;
+          song_id: string;
+          synced_lrc: string | null;
+          plain_text: string | null;
+          source: string;
+        };
+        Insert: {
+          id?: string;
+          song_id: string;
+          synced_lrc?: string | null;
+          plain_text?: string | null;
+          source: string;
+        };
+        Update: {
+          id?: string;
+          song_id?: string;
+          synced_lrc?: string | null;
+          plain_text?: string | null;
+          source?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "lyrics_song_id_fkey";
+            columns: ["song_id"];
+            isOneToOne: true;
+            referencedRelation: "songs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
