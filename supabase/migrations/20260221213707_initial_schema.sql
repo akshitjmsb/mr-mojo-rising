@@ -102,9 +102,9 @@ create policy "Service role can manage all sections"
   on public.sections for all
   using (auth.role() = 'service_role');
 
--- Storage bucket for stems (private)
+-- Storage bucket for stems (public so audio URLs are directly playable)
 insert into storage.buckets (id, name, public)
-values ('stems', 'stems', false);
+values ('stems', 'stems', true);
 
 -- Storage RLS: users can access their own stems
 create policy "Users can upload stems"

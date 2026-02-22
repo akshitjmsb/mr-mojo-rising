@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +25,7 @@ export default function SignupPage() {
     }
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
@@ -34,6 +36,14 @@ export default function SignupPage() {
       return;
     }
 
+    // If session exists, user was auto-confirmed (local Supabase)
+    // Redirect directly to the app
+    if (data.session) {
+      router.push("/");
+      return;
+    }
+
+    // Otherwise show "check your email" for production with email confirmation
     setSuccess(true);
     setLoading(false);
   }
