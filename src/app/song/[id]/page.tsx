@@ -56,6 +56,7 @@ export default function SongPlayerPage() {
 
   const [stemMode, setStemMode] = useState<"guitar" | "full">("guitar");
   const [showPanel, setShowPanel] = useState(false);
+  const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, + = lyrics earlier, - = lyrics later
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(true);
@@ -226,19 +227,25 @@ export default function SongPlayerPage() {
     [lyrics?.synced_lrc]
   );
 
+  // Apply offset to LRC timestamps so both highlighting and chord mapping stay in sync
+  const adjustedLrcLines = useMemo(
+    () => lrcLines.map((line) => ({ ...line, time: line.time + lyricsOffset })),
+    [lrcLines, lyricsOffset]
+  );
+
   // Find current lyric line index
   const currentLyricIndex = useMemo(
-    () => findCurrentLineIndex(lrcLines, currentTime),
-    [lrcLines, currentTime]
+    () => findCurrentLineIndex(adjustedLrcLines, currentTime),
+    [adjustedLrcLines, currentTime]
   );
 
   // Map each lyric line index → chord labels that start during that line
   const chordsForLine = useMemo(() => {
-    if (lrcLines.length === 0 || chords.length === 0) return new Map<number, string[]>();
+    if (adjustedLrcLines.length === 0 || chords.length === 0) return new Map<number, string[]>();
     const map = new Map<number, string[]>();
-    for (let i = 0; i < lrcLines.length; i++) {
-      const lineStart = lrcLines[i].time;
-      const lineEnd = i + 1 < lrcLines.length ? lrcLines[i + 1].time : Infinity;
+    for (let i = 0; i < adjustedLrcLines.length; i++) {
+      const lineStart = adjustedLrcLines[i].time;
+      const lineEnd = i + 1 < adjustedLrcLines.length ? adjustedLrcLines[i + 1].time : Infinity;
       const lineChords: string[] = [];
       let prev = "";
       for (const c of chords) {
@@ -251,7 +258,7 @@ export default function SongPlayerPage() {
       if (lineChords.length > 0) map.set(i, lineChords);
     }
     return map;
-  }, [lrcLines, chords]);
+  }, [adjustedLrcLines, chords]);
 
   const hasChords = chords.length > 0;
   const hasLyrics = lyrics !== null;
@@ -695,26 +702,85 @@ export default function SongPlayerPage() {
         {/* Chords & Lyrics toggle + combined panel */}
         {(hasChords || hasLyrics) && (
           <div style={{ padding: "0 20px 14px" }}>
-            <button
-              onClick={() => setShowPanel(!showPanel)}
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 9,
-                fontWeight: 300,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                padding: "7px 14px",
-                background: showPanel ? "rgba(212,168,68,0.06)" : "transparent",
-                border: `1px solid ${showPanel ? "var(--color-gold)" : "var(--color-border)"}`,
-                color: showPanel ? "var(--color-gold)" : "var(--color-text-dark)",
-                cursor: "pointer",
-                borderRadius: 1,
-                transition: "all 0.25s",
-                marginBottom: showPanel ? 12 : 0,
-              }}
-            >
-              Chords &amp; Lyrics
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: showPanel ? 12 : 0 }}>
+              <button
+                onClick={() => setShowPanel(!showPanel)}
+                style={{
+                  fontFamily: "var(--font-josefin), sans-serif",
+                  fontSize: 9,
+                  fontWeight: 300,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  padding: "7px 14px",
+                  background: showPanel ? "rgba(212,168,68,0.06)" : "transparent",
+                  border: `1px solid ${showPanel ? "var(--color-gold)" : "var(--color-border)"}`,
+                  color: showPanel ? "var(--color-gold)" : "var(--color-text-dark)",
+                  cursor: "pointer",
+                  borderRadius: 1,
+                  transition: "all 0.25s",
+                }}
+              >
+                Chords &amp; Lyrics
+              </button>
+
+              {/* Sync offset controls */}
+              {showPanel && lrcLines.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button
+                    onClick={() => setLyricsOffset((o) => Math.round((o - 0.5) * 10) / 10)}
+                    style={{
+                      width: 24, height: 24,
+                      background: "transparent",
+                      border: "1px solid var(--color-border-dark)",
+                      color: "var(--color-text-dark)",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 13,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 1,
+                    }}
+                  >
+                    &minus;
+                  </button>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 9,
+                      fontWeight: 300,
+                      letterSpacing: "0.06em",
+                      color: lyricsOffset === 0 ? "var(--color-text-muted)" : "var(--color-gold)",
+                      minWidth: 44,
+                      textAlign: "center",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => setLyricsOffset(0)}
+                    title="Click to reset"
+                  >
+                    {lyricsOffset === 0 ? "sync" : `${lyricsOffset > 0 ? "+" : ""}${lyricsOffset.toFixed(1)}s`}
+                  </span>
+                  <button
+                    onClick={() => setLyricsOffset((o) => Math.round((o + 0.5) * 10) / 10)}
+                    style={{
+                      width: 24, height: 24,
+                      background: "transparent",
+                      border: "1px solid var(--color-border-dark)",
+                      color: "var(--color-text-dark)",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 13,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 1,
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+              )}
+            </div>
 
             {showPanel && (
               <div

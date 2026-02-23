@@ -1,10 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
+
+const STAGES = [
+  { title: "Lighting the fire...", subtitle: "Validating & queuing your song", start: 0 },
+  { title: "Riding the highway...", subtitle: "Downloading audio from YouTube", start: 5 },
+  { title: "Breaking on through...", subtitle: "Separating guitar from the mix", start: 20 },
+  { title: "Mapping the strange days...", subtitle: "Detecting song sections", start: 90 },
+  { title: "Decoding the crystal ship...", subtitle: "Analyzing chord progressions", start: 130 },
+  { title: "Whispering the words...", subtitle: "Fetching synced lyrics", start: 170 },
+  { title: "The doors are open.", subtitle: "Ready to play", start: Infinity },
+];
+
+const DOORS_QUOTES = [
+  "The time to hesitate is through...",
+  "There's danger on the edge of town...",
+  "Can you give me sanctuary?",
+  "Let it roll, baby, roll...",
+  "Keep your eyes on the road, your hands upon the wheel...",
+  "The future's uncertain and the end is always near...",
+  "I found an island in your arms, a country in your eyes...",
+  "People are strange when you're a stranger...",
+  "No one here gets out alive...",
+  "We could plan a murder, or start a religion...",
+  "I am the Lizard King. I can do anything...",
+  "This is the end, beautiful friend...",
+];
 
 const STEPS = [
   { num: "I", text: "Paste a YouTube link to any song" },
@@ -17,8 +42,41 @@ export default function ImportPage() {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [importing, setImporting] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [quoteIndex, setQuoteIndex] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Timer: tick every second while importing
+  useEffect(() => {
+    if (!importing) return;
+    setElapsedTime(0);
+    const timer = setInterval(() => setElapsedTime((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [importing]);
+
+  // Quote rotation: cycle every 4s while importing
+  useEffect(() => {
+    if (!importing) return;
+    setQuoteIndex(0);
+    const rotator = setInterval(
+      () => setQuoteIndex((i) => (i + 1) % DOORS_QUOTES.length),
+      4000,
+    );
+    return () => clearInterval(rotator);
+  }, [importing]);
+
+  // Derive current stage index from elapsed time (cap at stage 5, index 0-5; stage 6 only on ready)
+  const currentStage = useMemo(() => {
+    if (finished) return 6;
+    for (let i = STAGES.length - 1; i >= 0; i--) {
+      if (elapsedTime >= STAGES[i].start) return i;
+    }
+    return 0;
+  }, [elapsedTime, finished]);
+
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   async function handleImport(e: React.FormEvent) {
     e.preventDefault();
@@ -26,7 +84,7 @@ export default function ImportPage() {
 
     setImporting(true);
     setError("");
-    setLogs(["Validating YouTube URL..."]);
+    setFinished(false);
 
     try {
       const res = await fetch("/api/songs/import", {
@@ -43,9 +101,6 @@ export default function ImportPage() {
         return;
       }
 
-      setLogs((prev) => [...prev, "Song queued for processing..."]);
-      setLogs((prev) => [...prev, "Sending to stem separator..."]);
-
       // Poll for status
       const songId = data.id;
       const poll = setInterval(async () => {
@@ -55,20 +110,26 @@ export default function ImportPage() {
 
           if (statusData.status === "ready") {
             clearInterval(poll);
-            setLogs((prev) => [...prev, "Processing complete!"]);
-            setTimeout(() => router.push(`/song/${songId}`), 800);
+            pollRef.current = null;
+            setFinished(true);
+            setTimeout(() => router.push(`/song/${songId}`), 1500);
           } else if (statusData.status === "failed") {
             clearInterval(poll);
-            setError("Processing failed. Please try again.");
+            pollRef.current = null;
+            setError("The music's over... Processing failed. Please try again.");
             setImporting(false);
           }
         } catch {
           // Continue polling
         }
       }, 3000);
+      pollRef.current = poll;
 
       // Stop polling after 5 minutes
-      setTimeout(() => clearInterval(poll), 300000);
+      setTimeout(() => {
+        clearInterval(poll);
+        if (pollRef.current === poll) pollRef.current = null;
+      }, 300000);
     } catch {
       setError("Could not connect to the server. Is the Mac server running?");
       setImporting(false);
@@ -200,37 +261,97 @@ export default function ImportPage() {
           </p>
         )}
 
-        {/* Processing log */}
-        {logs.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Doors-themed processing panel */}
+        {importing && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20, alignItems: "center", textAlign: "center" }}>
+            {/* Dot progress indicator */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {STAGES.map((_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: i <= currentStage ? "var(--color-gold)" : "var(--color-border)",
+                    opacity: i <= currentStage ? 1 : 0.35,
+                    transition: "background 0.5s, opacity 0.5s",
+                  }}
+                />
+              ))}
+              <span
+                style={{
+                  fontFamily: "var(--font-josefin), sans-serif",
+                  fontSize: 10,
+                  fontWeight: 300,
+                  letterSpacing: "0.1em",
+                  color: "var(--color-text-muted)",
+                  marginLeft: 8,
+                }}
+              >
+                Stage {currentStage + 1} of {STAGES.length}
+              </span>
+            </div>
+
+            {/* Stage title */}
+            <p
+              style={{
+                fontFamily: "var(--font-playfair), Georgia, serif",
+                fontSize: 24,
+                fontStyle: "italic",
+                fontWeight: 700,
+                color: "var(--color-gold)",
+                lineHeight: 1.3,
+                transition: "opacity 0.4s",
+              }}
+            >
+              {STAGES[currentStage].title}
+            </p>
+
+            {/* Stage subtitle */}
             <p
               style={{
                 fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 9,
-                letterSpacing: "0.2em",
-                textTransform: "uppercase",
+                fontSize: 11,
+                fontWeight: 300,
+                letterSpacing: "0.06em",
                 color: "var(--color-text-muted)",
+                marginTop: -12,
               }}
             >
-              Processing Log
+              {STAGES[currentStage].subtitle}
             </p>
-            {logs.map((log, i) => (
+
+            {/* Elapsed timer */}
+            <p
+              style={{
+                fontFamily: "var(--font-josefin), sans-serif",
+                fontSize: 13,
+                fontWeight: 300,
+                letterSpacing: "0.15em",
+                color: "var(--color-text-darker)",
+              }}
+            >
+              ⏱ {formatTime(elapsedTime)}
+            </p>
+
+            {/* Rotating Doors quote */}
+            {!finished && (
               <p
-                key={i}
+                key={quoteIndex}
                 className="fade-up"
                 style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 11,
-                  fontWeight: 300,
-                  letterSpacing: "0.06em",
-                  color: "var(--color-text-darker)",
-                  animationDelay: `${i * 0.15}s`,
-                  opacity: 0,
+                  fontFamily: "var(--font-playfair), Georgia, serif",
+                  fontSize: 13,
+                  fontStyle: "italic",
+                  color: "var(--color-text-muted)",
+                  opacity: 0.55,
+                  minHeight: 20,
                 }}
               >
-                {log}
+                &ldquo;{DOORS_QUOTES[quoteIndex]}&rdquo;
               </p>
-            ))}
+            )}
           </div>
         )}
 
