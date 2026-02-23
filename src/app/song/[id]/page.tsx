@@ -54,7 +54,7 @@ export default function SongPlayerPage() {
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [stemMode, setStemMode] = useState<"guitar" | "full">("guitar");
+  const [stemMode, setStemMode] = useState<"guitar" | "vocals" | "full">("guitar");
   const [showPanel, setShowPanel] = useState(false);
   const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, + = lyrics earlier, - = lyrics later
   const [activeSection, setActiveSection] = useState<Section | null>(null);
@@ -93,7 +93,10 @@ export default function SongPlayerPage() {
   }, [songId]);
 
   // Audio source URL
-  const audioUrl = stemMode === "guitar" ? stems?.guitar_url : stems?.original_url;
+  const audioUrl =
+    stemMode === "guitar" ? stems?.guitar_url :
+    stemMode === "vocals" ? stems?.vocals_url :
+    stems?.original_url;
 
   // Set up audio element
   useEffect(() => {
@@ -357,7 +360,7 @@ export default function SongPlayerPage() {
       <main style={{ flex: 1, overflow: "hidden" }}>
         {/* Stem toggle pills */}
         <div style={{ padding: "16px 20px 0", display: "flex", gap: 8 }}>
-          {(["guitar", "full"] as const).map((mode) => (
+          {(["guitar", "vocals", "full"] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => setStemMode(mode)}
@@ -378,7 +381,7 @@ export default function SongPlayerPage() {
                 transition: "all 0.25s",
               }}
             >
-              {mode === "guitar" ? "Guitar Stem" : "Full Mix"}
+              {mode === "guitar" ? "Guitar Stem" : mode === "vocals" ? "Vocal Stem" : "Full Mix"}
             </button>
           ))}
         </div>
