@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
@@ -56,6 +56,7 @@ export default function SongPlayerPage() {
 
   const [stemMode, setStemMode] = useState<"guitar" | "full">("guitar");
   const [panelMode, setPanelMode] = useState<"chords" | "lyrics" | "both">("both");
+  const [showPanel, setShowPanel] = useState(false);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(true);
@@ -210,27 +211,59 @@ export default function SongPlayerPage() {
         )
       : 0;
 
-  // Generate waveform bars (static visual representation)
-  const waveformBars = Array.from({ length: 90 }, (_, i) => {
-    const wave = Math.sin(i * 0.18) * 0.3 + Math.sin(i * 0.07) * 0.2;
-    return Math.min(1, 0.12 + Math.abs(wave) + (Math.sin(i * 3.7) * 0.5 + 0.5) * 0.38);
-  });
+  // Generate waveform bars (static — no deps, computed once)
+  const waveformBars = useMemo(
+    () =>
+      Array.from({ length: 90 }, (_, i) => {
+        const wave = Math.sin(i * 0.18) * 0.3 + Math.sin(i * 0.07) * 0.2;
+        return Math.min(1, 0.12 + Math.abs(wave) + (Math.sin(i * 3.7) * 0.5 + 0.5) * 0.38);
+      }),
+    []
+  );
 
   // Derive current chord from playback time
-  const currentChord = chords.find(
-    (c) => currentTime >= c.start_time && currentTime < c.end_time
-  ) || null;
+  const currentChord = useMemo(
+    () =>
+      chords.find(
+        (c) => currentTime >= c.start_time && currentTime < c.end_time
+      ) || null,
+    [chords, currentTime]
+  );
 
   // Find the next upcoming chord
-  const nextChord = currentChord
-    ? chords.find((c) => c.start_time > currentChord.end_time - 0.1) || null
-    : chords.find((c) => c.start_time > currentTime) || null;
+  const nextChord = useMemo(
+    () =>
+      currentChord
+        ? chords.find((c) => c.start_time > currentChord.end_time - 0.1) || null
+        : chords.find((c) => c.start_time > currentTime) || null,
+    [chords, currentChord, currentTime]
+  );
 
-  // Parse LRC lyrics and find current line
-  const lrcLines = lyrics?.synced_lrc ? parseLrc(lyrics.synced_lrc) : [];
-  const currentLyricIndex = findCurrentLineIndex(lrcLines, currentTime);
+  // Parse LRC lyrics (only re-parse when lyrics data changes)
+  const lrcLines = useMemo(
+    () => (lyrics?.synced_lrc ? parseLrc(lyrics.synced_lrc) : []),
+    [lyrics?.synced_lrc]
+  );
+
+  // Find current lyric line index
+  const currentLyricIndex = useMemo(
+    () => findCurrentLineIndex(lrcLines, currentTime),
+    [lrcLines, currentTime]
+  );
+
   const hasChords = chords.length > 0;
   const hasLyrics = lyrics !== null;
+
+  // Scroll lyrics to current line only when the index changes
+  useEffect(() => {
+    if (currentLyricIndex < 0 || !lyricsContainerRef.current) return;
+    const container = lyricsContainerRef.current;
+    const el = container.querySelector(`[data-lyric-index="${currentLyricIndex}"]`) as HTMLElement | null;
+    if (el) {
+      const top = el.offsetTop - container.offsetTop - 50;
+      container.scrollTop = Math.max(0, top);
+    }
+  }, [currentLyricIndex]);
 
   if (loading) {
     return (
@@ -660,18 +693,26 @@ export default function SongPlayerPage() {
         {/* Chords & Lyrics panel */}
         {(hasChords || hasLyrics) && (
           <div style={{ padding: "0 20px 14px" }}>
-            {/* Toggle pills */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {/* Toggle pills — clicking activates panel + selects mode; clicking active pill hides panel */}
+            <div style={{ display: "flex", gap: 8, marginBottom: showPanel ? 12 : 0 }}>
               {(["chords", "lyrics", "both"] as const).map((mode) => {
                 const enabled =
                   mode === "chords" ? hasChords :
                   mode === "lyrics" ? hasLyrics :
                   hasChords || hasLyrics;
                 if (!enabled) return null;
+                const isActive = showPanel && panelMode === mode;
                 return (
                   <button
                     key={mode}
-                    onClick={() => setPanelMode(mode)}
+                    onClick={() => {
+                      if (isActive) {
+                        setShowPanel(false);
+                      } else {
+                        setPanelMode(mode);
+                        setShowPanel(true);
+                      }
+                    }}
                     style={{
                       fontFamily: "var(--font-josefin), sans-serif",
                       fontSize: 9,
@@ -680,10 +721,10 @@ export default function SongPlayerPage() {
                       textTransform: "uppercase",
                       padding: "7px 14px",
                       background:
-                        panelMode === mode ? "rgba(212,168,68,0.06)" : "transparent",
-                      border: `1px solid ${panelMode === mode ? "var(--color-gold)" : "var(--color-border)"}`,
+                        isActive ? "rgba(212,168,68,0.06)" : "transparent",
+                      border: `1px solid ${isActive ? "var(--color-gold)" : "var(--color-border)"}`,
                       color:
-                        panelMode === mode ? "var(--color-gold)" : "var(--color-text-dark)",
+                        isActive ? "var(--color-gold)" : "var(--color-text-dark)",
                       cursor: "pointer",
                       borderRadius: 1,
                       transition: "all 0.25s",
@@ -696,7 +737,7 @@ export default function SongPlayerPage() {
             </div>
 
             {/* Chord display */}
-            {(panelMode === "chords" || panelMode === "both") && hasChords && (
+            {showPanel && (panelMode === "chords" || panelMode === "both") && hasChords && (
               <div
                 style={{
                   display: "flex",
@@ -768,7 +809,7 @@ export default function SongPlayerPage() {
             )}
 
             {/* Lyrics display */}
-            {(panelMode === "lyrics" || panelMode === "both") && hasLyrics && (
+            {showPanel && (panelMode === "lyrics" || panelMode === "both") && hasLyrics && (
               <div
                 ref={lyricsContainerRef}
                 style={{
@@ -788,13 +829,6 @@ export default function SongPlayerPage() {
                       <p
                         key={i}
                         data-lyric-index={i}
-                        ref={(el) => {
-                          if (isCurrent && el && lyricsContainerRef.current) {
-                            const container = lyricsContainerRef.current;
-                            const top = el.offsetTop - container.offsetTop - 50;
-                            container.scrollTop = Math.max(0, top);
-                          }
-                        }}
                         style={{
                           fontFamily: "var(--font-josefin), sans-serif",
                           fontSize: isCurrent ? 13 : 11,

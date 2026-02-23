@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, memo } from "react";
 import { SVGuitarChord, BarreChordStyle } from "svguitar";
 import { getChordVoicing } from "@/lib/chord-voicings";
 
@@ -9,11 +9,16 @@ interface ChordDiagramProps {
   width?: number;
 }
 
-export default function ChordDiagram({ chordName, width = 140 }: ChordDiagramProps) {
+function ChordDiagramInner({ chordName, width = 140 }: ChordDiagramProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevChordRef = useRef<string>("");
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Skip redraw if chord hasn't actually changed
+    if (prevChordRef.current === chordName) return;
+    prevChordRef.current = chordName;
 
     const voicing = getChordVoicing(chordName);
     if (!voicing) {
@@ -21,14 +26,14 @@ export default function ChordDiagram({ chordName, width = 140 }: ChordDiagramPro
       return;
     }
 
-    // Clear previous
-    containerRef.current.innerHTML = "";
+    // Double-buffer: draw into a temporary off-screen container, then swap
+    const tempContainer = document.createElement("div");
+    tempContainer.style.width = `${width}px`;
+    tempContainer.style.height = `${width * 1.2}px`;
 
-    const chart = new SVGuitarChord(containerRef.current);
+    const chart = new SVGuitarChord(tempContainer);
 
-    // Map voicing fingers to svguitar format: [string, fret, text?]
-    // svguitar uses 1=thickest(low E), 6=thinnest(high E) — same as our format
-    // but we need to deduplicate: barred strings are covered by the barre
+    // Deduplicate: barred strings are covered by the barre
     const barredStrings = new Set<string>();
     for (const barre of voicing.barres) {
       for (let s = barre.to; s <= barre.from; s++) {
@@ -39,12 +44,10 @@ export default function ChordDiagram({ chordName, width = 140 }: ChordDiagramPro
     const fingers: [number, number | "x"][] = [];
     for (const f of voicing.fingers) {
       const [string, fret] = f;
-      // Skip fingers that are part of a barre at the same fret
       if (barredStrings.has(`${string}-${fret}`)) continue;
       fingers.push([string, fret]);
     }
 
-    // Add muted strings
     for (const s of voicing.muted) {
       fingers.push([s, "x"]);
     }
@@ -76,7 +79,10 @@ export default function ChordDiagram({ chordName, width = 140 }: ChordDiagramPro
         position: voicing.baseFret,
       })
       .draw();
-  }, [chordName]);
+
+    // Swap: replace old content with newly drawn SVG in one operation
+    containerRef.current.replaceChildren(...Array.from(tempContainer.childNodes));
+  }, [chordName, width]);
 
   return (
     <div
@@ -91,3 +97,6 @@ export default function ChordDiagram({ chordName, width = 140 }: ChordDiagramPro
     />
   );
 }
+
+const ChordDiagram = memo(ChordDiagramInner);
+export default ChordDiagram;

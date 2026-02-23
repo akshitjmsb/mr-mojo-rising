@@ -8,15 +8,15 @@
   --color-purple: #8A6A9A;
   --color-text: #E8DCC8;
   --color-text-secondary: #C8B890;
-  --color-text-muted: #5A4E3A;
-  --color-text-dark: #4A3E2A;
-  --color-text-darker: #3A3020;
-  --color-text-darkest: #2A2018;
-  --color-border: #2A2218;
-  --color-border-dark: #1E1810;
-  --color-border-darkest: #161208;
-  --color-input-bg: #0E0C08;
-  --color-inactive: #1A1610;
+  --color-text-muted: #9A8C74;
+  --color-text-dark: #8A7C62;
+  --color-text-darker: #B8A888;
+  --color-text-darkest: #7A6E58;
+  --color-border: #4A4030;
+  --color-border-dark: #3A3024;
+  --color-border-darkest: #2A2218;
+  --color-input-bg: #161210;
+  --color-inactive: #2A2418;
   --font-playfair: var(--font-playfair);
   --font-josefin: var(--font-josefin);
 }
@@ -44,7 +44,7 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 999;
-  opacity: 0.6;
+  opacity: 0.3;
   mix-blend-mode: overlay;
 }
 
