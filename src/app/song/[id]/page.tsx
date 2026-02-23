@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
-import ChordDiagram from "@/components/ChordDiagram";
+import type { LrcLine } from "@/lib/lrc-parser";
 import { parseLrc, findCurrentLineIndex } from "@/lib/lrc-parser";
 import type { Database } from "@/lib/database.types";
 
@@ -55,7 +55,6 @@ export default function SongPlayerPage() {
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<"guitar" | "full">("guitar");
-  const [panelMode, setPanelMode] = useState<"chords" | "lyrics" | "both">("both");
   const [showPanel, setShowPanel] = useState(false);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -221,24 +220,6 @@ export default function SongPlayerPage() {
     []
   );
 
-  // Derive current chord from playback time
-  const currentChord = useMemo(
-    () =>
-      chords.find(
-        (c) => currentTime >= c.start_time && currentTime < c.end_time
-      ) || null,
-    [chords, currentTime]
-  );
-
-  // Find the next upcoming chord
-  const nextChord = useMemo(
-    () =>
-      currentChord
-        ? chords.find((c) => c.start_time > currentChord.end_time - 0.1) || null
-        : chords.find((c) => c.start_time > currentTime) || null,
-    [chords, currentChord, currentTime]
-  );
-
   // Parse LRC lyrics (only re-parse when lyrics data changes)
   const lrcLines = useMemo(
     () => (lyrics?.synced_lrc ? parseLrc(lyrics.synced_lrc) : []),
@@ -250,6 +231,27 @@ export default function SongPlayerPage() {
     () => findCurrentLineIndex(lrcLines, currentTime),
     [lrcLines, currentTime]
   );
+
+  // Map each lyric line index → chord labels that start during that line
+  const chordsForLine = useMemo(() => {
+    if (lrcLines.length === 0 || chords.length === 0) return new Map<number, string[]>();
+    const map = new Map<number, string[]>();
+    for (let i = 0; i < lrcLines.length; i++) {
+      const lineStart = lrcLines[i].time;
+      const lineEnd = i + 1 < lrcLines.length ? lrcLines[i + 1].time : Infinity;
+      const lineChords: string[] = [];
+      let prev = "";
+      for (const c of chords) {
+        if (c.start_time >= lineEnd) break;
+        if (c.start_time >= lineStart && c.chord_label !== prev) {
+          lineChords.push(c.chord_label);
+          prev = c.chord_label;
+        }
+      }
+      if (lineChords.length > 0) map.set(i, lineChords);
+    }
+    return map;
+  }, [lrcLines, chords]);
 
   const hasChords = chords.length > 0;
   const hasLyrics = lyrics !== null;
@@ -690,130 +692,35 @@ export default function SongPlayerPage() {
           ))}
         </div>
 
-        {/* Chords & Lyrics panel */}
+        {/* Chords & Lyrics toggle + combined panel */}
         {(hasChords || hasLyrics) && (
           <div style={{ padding: "0 20px 14px" }}>
-            {/* Toggle pills — clicking activates panel + selects mode; clicking active pill hides panel */}
-            <div style={{ display: "flex", gap: 8, marginBottom: showPanel ? 12 : 0 }}>
-              {(["chords", "lyrics", "both"] as const).map((mode) => {
-                const enabled =
-                  mode === "chords" ? hasChords :
-                  mode === "lyrics" ? hasLyrics :
-                  hasChords || hasLyrics;
-                if (!enabled) return null;
-                const isActive = showPanel && panelMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => {
-                      if (isActive) {
-                        setShowPanel(false);
-                      } else {
-                        setPanelMode(mode);
-                        setShowPanel(true);
-                      }
-                    }}
-                    style={{
-                      fontFamily: "var(--font-josefin), sans-serif",
-                      fontSize: 9,
-                      fontWeight: 300,
-                      letterSpacing: "0.18em",
-                      textTransform: "uppercase",
-                      padding: "7px 14px",
-                      background:
-                        isActive ? "rgba(212,168,68,0.06)" : "transparent",
-                      border: `1px solid ${isActive ? "var(--color-gold)" : "var(--color-border)"}`,
-                      color:
-                        isActive ? "var(--color-gold)" : "var(--color-text-dark)",
-                      cursor: "pointer",
-                      borderRadius: 1,
-                      transition: "all 0.25s",
-                    }}
-                  >
-                    {mode === "both" ? "Both" : mode === "chords" ? "Chords" : "Lyrics"}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              onClick={() => setShowPanel(!showPanel)}
+              style={{
+                fontFamily: "var(--font-josefin), sans-serif",
+                fontSize: 9,
+                fontWeight: 300,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                padding: "7px 14px",
+                background: showPanel ? "rgba(212,168,68,0.06)" : "transparent",
+                border: `1px solid ${showPanel ? "var(--color-gold)" : "var(--color-border)"}`,
+                color: showPanel ? "var(--color-gold)" : "var(--color-text-dark)",
+                cursor: "pointer",
+                borderRadius: 1,
+                transition: "all 0.25s",
+                marginBottom: showPanel ? 12 : 0,
+              }}
+            >
+              Chords &amp; Lyrics
+            </button>
 
-            {/* Chord display */}
-            {showPanel && (panelMode === "chords" || panelMode === "both") && hasChords && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  padding: "12px 16px",
-                  border: "1px solid var(--color-border-dark)",
-                  borderRadius: 2,
-                  marginBottom: panelMode === "both" && hasLyrics ? 10 : 0,
-                }}
-              >
-                {/* Current chord name + diagram */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 80 }}>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-playfair), Georgia, serif",
-                      fontSize: 28,
-                      fontStyle: "italic",
-                      color: "var(--color-gold)",
-                      lineHeight: 1,
-                      marginBottom: 6,
-                    }}
-                  >
-                    {currentChord?.chord_label || "—"}
-                  </span>
-                  {currentChord && (
-                    <ChordDiagram chordName={currentChord.chord_label} width={100} />
-                  )}
-                </div>
-
-                {/* Next chord preview */}
-                {nextChord && nextChord.chord_label !== currentChord?.chord_label && (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      opacity: 0.4,
-                      marginLeft: "auto",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "var(--font-josefin), sans-serif",
-                        fontSize: 8,
-                        fontWeight: 100,
-                        letterSpacing: "0.15em",
-                        textTransform: "uppercase",
-                        color: "var(--color-text-muted)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      Next
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-playfair), Georgia, serif",
-                        fontSize: 18,
-                        fontStyle: "italic",
-                        color: "var(--color-text-secondary)",
-                        lineHeight: 1,
-                      }}
-                    >
-                      {nextChord.chord_label}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Lyrics display */}
-            {showPanel && (panelMode === "lyrics" || panelMode === "both") && hasLyrics && (
+            {showPanel && (
               <div
                 ref={lyricsContainerRef}
                 style={{
-                  maxHeight: 160,
+                  maxHeight: 220,
                   overflowY: "auto",
                   padding: "12px 16px",
                   border: "1px solid var(--color-border-dark)",
@@ -822,31 +729,46 @@ export default function SongPlayerPage() {
                 }}
               >
                 {lrcLines.length > 0 ? (
-                  /* Synced lyrics */
                   lrcLines.map((line, i) => {
                     const isCurrent = i === currentLyricIndex;
+                    const lineChords = chordsForLine.get(i);
                     return (
-                      <p
-                        key={i}
-                        data-lyric-index={i}
-                        style={{
-                          fontFamily: "var(--font-josefin), sans-serif",
-                          fontSize: isCurrent ? 13 : 11,
-                          fontWeight: isCurrent ? 400 : 100,
-                          color: isCurrent
-                            ? "var(--color-gold)"
-                            : "var(--color-text-muted)",
-                          padding: "3px 0",
-                          transition: "all 0.2s",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {line.text}
-                      </p>
+                      <div key={i} data-lyric-index={i}>
+                        {lineChords && (
+                          <p
+                            style={{
+                              fontFamily: "var(--font-josefin), sans-serif",
+                              fontSize: 10,
+                              fontWeight: 400,
+                              letterSpacing: "0.08em",
+                              color: isCurrent ? "var(--color-gold)" : "var(--color-orange)",
+                              padding: "4px 0 0",
+                              lineHeight: 1.3,
+                              transition: "color 0.2s",
+                            }}
+                          >
+                            {lineChords.join("  ")}
+                          </p>
+                        )}
+                        <p
+                          style={{
+                            fontFamily: "var(--font-josefin), sans-serif",
+                            fontSize: isCurrent ? 13 : 11,
+                            fontWeight: isCurrent ? 400 : 100,
+                            color: isCurrent
+                              ? "var(--color-gold)"
+                              : "var(--color-text-muted)",
+                            padding: "1px 0 3px",
+                            transition: "all 0.2s",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {line.text}
+                        </p>
+                      </div>
                     );
                   })
                 ) : lyrics?.plain_text ? (
-                  /* Static plain text */
                   <p
                     style={{
                       fontFamily: "var(--font-josefin), sans-serif",
