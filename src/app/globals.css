@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-bg: #0A0806;
-  --color-gold: #D4A844;
-  --color-orange: #C8844A;
-  --color-terracotta: #B85C3A;
-  --color-purple: #8A6A9A;
-  --color-text: #E8DCC8;
-  --color-text-secondary: #C8B890;
-  --color-text-muted: #9A8C74;
-  --color-text-dark: #8A7C62;
-  --color-text-darker: #B8A888;
-  --color-text-darkest: #7A6E58;
-  --color-border: #4A4030;
-  --color-border-dark: #3A3024;
-  --color-border-darkest: #2A2218;
-  --color-input-bg: #161210;
-  --color-inactive: #2A2418;
+  --color-bg: #050403;
+  --color-gold: #EAC05E;
+  --color-orange: #E0965C;
+  --color-terracotta: #D46A45;
+  --color-purple: #A68AB6;
+  --color-text: #F8F2E8;
+  --color-text-secondary: #E8DCC0;
+  --color-text-muted: #C0B090;
+  --color-text-dark: #A09070;
+  --color-text-darker: #D0C0A0;
+  --color-text-darkest: #8F8068;
+  --color-border: #6A5C45;
+  --color-border-dark: #4A4030;
+  --color-border-darkest: #3A2E20;
+  --color-input-bg: #1F1A16;
+  --color-inactive: #352E22;
   --font-playfair: var(--font-playfair);
   --font-josefin: var(--font-josefin);
 }
@@ -44,7 +44,7 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 999;
-  opacity: 0.3;
+  opacity: 0.05;
   mix-blend-mode: overlay;
 }
 

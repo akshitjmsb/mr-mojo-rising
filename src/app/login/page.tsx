@@ -66,8 +66,8 @@ export default function LoginPage() {
         <p
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 9,
-            fontWeight: 100,
+            fontSize: 11,
+            fontWeight: 300,
             letterSpacing: "0.28em",
             textTransform: "uppercase",
             color: "var(--color-gold)",
@@ -86,8 +86,8 @@ export default function LoginPage() {
         <label
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 9,
-            fontWeight: 300,
+            fontSize: 11,
+            fontWeight: 400,
             letterSpacing: "0.2em",
             textTransform: "uppercase",
             color: "var(--color-text-muted)",
@@ -103,8 +103,8 @@ export default function LoginPage() {
           required
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 12,
-            fontWeight: 300,
+            fontSize: 13,
+            fontWeight: 400,
             letterSpacing: "0.06em",
             padding: "14px 16px",
             background: "var(--color-input-bg)",
@@ -118,8 +118,8 @@ export default function LoginPage() {
         <label
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 9,
-            fontWeight: 300,
+            fontSize: 11,
+            fontWeight: 400,
             letterSpacing: "0.2em",
             textTransform: "uppercase",
             color: "var(--color-text-muted)",
@@ -136,8 +136,8 @@ export default function LoginPage() {
           required
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 12,
-            fontWeight: 300,
+            fontSize: 13,
+            fontWeight: 400,
             letterSpacing: "0.06em",
             padding: "14px 16px",
             background: "var(--color-input-bg)",
@@ -152,8 +152,8 @@ export default function LoginPage() {
           <p
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 11,
-              fontWeight: 300,
+              fontSize: 12,
+              fontWeight: 400,
               color: "var(--color-terracotta)",
               letterSpacing: "0.06em",
               marginTop: 4,
@@ -168,8 +168,8 @@ export default function LoginPage() {
           disabled={loading}
           style={{
             fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 10,
-            fontWeight: 300,
+            fontSize: 11,
+            fontWeight: 400,
             letterSpacing: "0.2em",
             textTransform: "uppercase",
             padding: "14px 24px",
@@ -191,7 +191,7 @@ export default function LoginPage() {
       <p
         style={{
           fontFamily: "var(--font-josefin), sans-serif",
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 300,
           letterSpacing: "0.06em",
           color: "var(--color-text-muted)",

@@ -171,8 +171,8 @@ export default function ImportPage() {
           <p
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 12,
-              fontWeight: 100,
+              fontSize: 13,
+              fontWeight: 300,
               letterSpacing: "0.1em",
               lineHeight: 1.8,
               color: "var(--color-text-muted)",
@@ -195,8 +195,8 @@ export default function ImportPage() {
             disabled={importing}
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 12,
-              fontWeight: 300,
+              fontSize: 13,
+              fontWeight: 400,
               letterSpacing: "0.06em",
               padding: "14px 16px",
               background: "var(--color-input-bg)",
@@ -211,8 +211,8 @@ export default function ImportPage() {
             disabled={importing || !url.trim()}
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 10,
-              fontWeight: 300,
+              fontSize: 11,
+              fontWeight: 400,
               letterSpacing: "0.2em",
               textTransform: "uppercase",
               padding: "14px 24px",
@@ -251,8 +251,8 @@ export default function ImportPage() {
           <p
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 11,
-              fontWeight: 300,
+              fontSize: 12,
+              fontWeight: 400,
               color: "var(--color-terracotta)",
               letterSpacing: "0.06em",
             }}
@@ -282,8 +282,8 @@ export default function ImportPage() {
               <span
                 style={{
                   fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 10,
-                  fontWeight: 300,
+                  fontSize: 11,
+                  fontWeight: 400,
                   letterSpacing: "0.1em",
                   color: "var(--color-text-muted)",
                   marginLeft: 8,
@@ -312,8 +312,8 @@ export default function ImportPage() {
             <p
               style={{
                 fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 11,
-                fontWeight: 300,
+                fontSize: 12,
+                fontWeight: 400,
                 letterSpacing: "0.06em",
                 color: "var(--color-text-muted)",
                 marginTop: -12,
@@ -326,8 +326,8 @@ export default function ImportPage() {
             <p
               style={{
                 fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 13,
-                fontWeight: 300,
+                fontSize: 14,
+                fontWeight: 400,
                 letterSpacing: "0.15em",
                 color: "var(--color-text-darker)",
               }}
@@ -342,10 +342,10 @@ export default function ImportPage() {
                 className="fade-up"
                 style={{
                   fontFamily: "var(--font-playfair), Georgia, serif",
-                  fontSize: 13,
+                  fontSize: 14,
                   fontStyle: "italic",
                   color: "var(--color-text-muted)",
-                  opacity: 0.55,
+                  opacity: 0.75,
                   minHeight: 20,
                 }}
               >
@@ -360,7 +360,8 @@ export default function ImportPage() {
           <p
             style={{
               fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 9,
+              fontSize: 11,
+              fontWeight: 400,
               letterSpacing: "0.2em",
               textTransform: "uppercase",
               color: "var(--color-text-muted)",
@@ -379,10 +380,10 @@ export default function ImportPage() {
               <span
                 style={{
                   fontFamily: "var(--font-playfair), Georgia, serif",
-                  fontSize: 13,
+                  fontSize: 14,
                   fontStyle: "italic",
                   color: "var(--color-gold)",
-                  opacity: 0.7,
+                  opacity: 0.9,
                   minWidth: 20,
                 }}
               >
@@ -391,8 +392,8 @@ export default function ImportPage() {
               <p
                 style={{
                   fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 12,
-                  fontWeight: 300,
+                  fontSize: 13,
+                  fontWeight: 400,
                   letterSpacing: "0.04em",
                   lineHeight: 1.5,
                   color: "var(--color-text-dark)",
