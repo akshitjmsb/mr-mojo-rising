@@ -43,15 +43,16 @@ export default function ImportPage() {
   const [url, setUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [elapsedTime, setElapsedTime] = useState(0);
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [finished, setFinished] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Timer: tick every second while importing
   useEffect(() => {
     if (!importing) return;
-    setElapsedTime(0);
     const timer = setInterval(() => setElapsedTime((t) => t + 1), 1000);
     return () => clearInterval(timer);
   }, [importing]);
@@ -59,13 +60,25 @@ export default function ImportPage() {
   // Quote rotation: cycle every 4s while importing
   useEffect(() => {
     if (!importing) return;
-    setQuoteIndex(0);
     const rotator = setInterval(
       () => setQuoteIndex((i) => (i + 1) % DOORS_QUOTES.length),
       4000,
     );
     return () => clearInterval(rotator);
   }, [importing]);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Derive current stage index from elapsed time (cap at stage 5, index 0-5; stage 6 only on ready)
   const currentStage = useMemo(() => {
@@ -82,9 +95,21 @@ export default function ImportPage() {
     e.preventDefault();
     if (!url.trim()) return;
 
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
     setImporting(true);
     setError("");
+    setNotice("");
     setFinished(false);
+    setElapsedTime(0);
+    setQuoteIndex(0);
 
     try {
       const res = await fetch("/api/songs/import", {
@@ -111,12 +136,21 @@ export default function ImportPage() {
           if (statusData.status === "ready") {
             clearInterval(poll);
             pollRef.current = null;
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
             setFinished(true);
+            setNotice("Song ready. Opening player...");
             setTimeout(() => router.push(`/song/${songId}`), 1500);
           } else if (statusData.status === "failed") {
             clearInterval(poll);
             pollRef.current = null;
-            setError("The music's over... Processing failed. Please try again.");
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            setError(statusData.last_error || "The music's over... Processing failed. Please try again.");
             setImporting(false);
           }
         } catch {
@@ -126,9 +160,14 @@ export default function ImportPage() {
       pollRef.current = poll;
 
       // Stop polling after 5 minutes
-      setTimeout(() => {
+      timeoutRef.current = setTimeout(() => {
         clearInterval(poll);
-        if (pollRef.current === poll) pollRef.current = null;
+        if (pollRef.current === poll) {
+          pollRef.current = null;
+          setImporting(false);
+          setNotice("Still processing in the background. Check Library in a minute.");
+        }
+        timeoutRef.current = null;
       }, 300000);
     } catch {
       setError("Could not connect to the server. Is the Mac server running?");
@@ -258,6 +297,20 @@ export default function ImportPage() {
             }}
           >
             {error}
+          </p>
+        )}
+
+        {notice && (
+          <p
+            style={{
+              fontFamily: "var(--font-josefin), sans-serif",
+              fontSize: 12,
+              fontWeight: 300,
+              color: "var(--color-text-muted)",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {notice}
           </p>
         )}
 

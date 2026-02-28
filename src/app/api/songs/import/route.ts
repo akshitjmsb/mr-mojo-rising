@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
+type ProcessingJob = Database["public"]["Tables"]["processing_jobs"]["Row"];
 
 export async function POST(request: Request) {
   try {
@@ -45,7 +46,9 @@ export async function POST(request: Request) {
         user_id: user.id,
         title: "Processing...",
         youtube_url,
-        status: "pending",
+        status: "queued",
+        processing_stage: "queued",
+        last_error: null,
       })
       .select()
       .single();
@@ -59,36 +62,40 @@ export async function POST(request: Request) {
 
     const songRow = song as Song;
 
-    // Call Mac FastAPI server to start processing
-    const macApiUrl = process.env.MAC_API_URL;
-    const macApiSecret = process.env.MAC_API_SECRET;
+    const { data: job, error: jobError } = await supabase
+      .from("processing_jobs")
+      .insert({
+        song_id: songRow.id,
+        user_id: user.id,
+        youtube_url,
+        status: "queued",
+      })
+      .select()
+      .single();
 
-    if (macApiUrl) {
-      try {
-        await fetch(`${macApiUrl}/process`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${macApiSecret}`,
-          },
-          body: JSON.stringify({
-            song_id: songRow.id,
-            youtube_url,
-          }),
-        });
+    if (jobError || !job) {
+      await supabase
+        .from("songs")
+        .update({
+          status: "failed",
+          processing_stage: "failed",
+          last_error: "Failed to queue processing job",
+        })
+        .eq("id", songRow.id);
 
-        // Update status to processing
-        await supabase
-          .from("songs")
-          .update({ status: "processing" as const })
-          .eq("id", songRow.id);
-      } catch {
-        // Mac server not available — song stays in pending state
-        console.error("Mac server not available");
-      }
+      return NextResponse.json(
+        { error: "Failed to queue processing job" },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json(songRow);
+    const jobRow = job as ProcessingJob;
+
+    return NextResponse.json({
+      id: songRow.id,
+      status: songRow.status,
+      job_id: jobRow.id,
+    });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },

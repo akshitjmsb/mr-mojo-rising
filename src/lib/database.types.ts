@@ -16,8 +16,11 @@ export type Database = {
           title: string;
           artist: string | null;
           youtube_url: string;
-          status: "pending" | "processing" | "ready" | "failed";
+          status: "pending" | "queued" | "processing" | "ready" | "failed";
+          processing_stage: string | null;
+          last_error: string | null;
           created_at: string;
+          updated_at: string;
         };
         Insert: {
           id?: string;
@@ -25,8 +28,11 @@ export type Database = {
           title: string;
           artist?: string | null;
           youtube_url: string;
-          status?: "pending" | "processing" | "ready" | "failed";
+          status?: "pending" | "queued" | "processing" | "ready" | "failed";
+          processing_stage?: string | null;
+          last_error?: string | null;
           created_at?: string;
+          updated_at?: string;
         };
         Update: {
           id?: string;
@@ -34,8 +40,11 @@ export type Database = {
           title?: string;
           artist?: string | null;
           youtube_url?: string;
-          status?: "pending" | "processing" | "ready" | "failed";
+          status?: "pending" | "queued" | "processing" | "ready" | "failed";
+          processing_stage?: string | null;
+          last_error?: string | null;
           created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -179,9 +188,97 @@ export type Database = {
           },
         ];
       };
+      processing_jobs: {
+        Row: {
+          id: string;
+          song_id: string;
+          user_id: string;
+          youtube_url: string;
+          status: "queued" | "running" | "retryable" | "failed" | "succeeded";
+          attempt_count: number;
+          max_attempts: number;
+          run_after: string;
+          locked_by: string | null;
+          locked_at: string | null;
+          heartbeat_at: string | null;
+          last_error: string | null;
+          error_code: string | null;
+          created_at: string;
+          updated_at: string;
+          started_at: string | null;
+          finished_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          song_id: string;
+          user_id: string;
+          youtube_url: string;
+          status?: "queued" | "running" | "retryable" | "failed" | "succeeded";
+          attempt_count?: number;
+          max_attempts?: number;
+          run_after?: string;
+          locked_by?: string | null;
+          locked_at?: string | null;
+          heartbeat_at?: string | null;
+          last_error?: string | null;
+          error_code?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          started_at?: string | null;
+          finished_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          song_id?: string;
+          user_id?: string;
+          youtube_url?: string;
+          status?: "queued" | "running" | "retryable" | "failed" | "succeeded";
+          attempt_count?: number;
+          max_attempts?: number;
+          run_after?: string;
+          locked_by?: string | null;
+          locked_at?: string | null;
+          heartbeat_at?: string | null;
+          last_error?: string | null;
+          error_code?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          started_at?: string | null;
+          finished_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "processing_jobs_song_id_fkey";
+            columns: ["song_id"];
+            isOneToOne: true;
+            referencedRelation: "songs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "processing_jobs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      claim_next_job: {
+        Args: {
+          worker_id: string;
+        };
+        Returns: Database["public"]["Tables"]["processing_jobs"]["Row"][];
+      };
+      requeue_stale_jobs: {
+        Args: {
+          timeout_seconds?: number;
+        };
+        Returns: Database["public"]["Tables"]["processing_jobs"]["Row"][];
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
-import type { LrcLine } from "@/lib/lrc-parser";
 import { parseLrc, findCurrentLineIndex } from "@/lib/lrc-parser";
 import type { Database } from "@/lib/database.types";
 

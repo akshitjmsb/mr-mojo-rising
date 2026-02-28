@@ -187,6 +187,19 @@ export default function LibraryPage() {
                     Processing
                   </p>
                 )}
+                {song.status === "queued" && (
+                  <p
+                    style={{
+                      fontFamily: "var(--font-josefin), sans-serif",
+                      fontSize: 9,
+                      letterSpacing: "0.15em",
+                      textTransform: "uppercase",
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    Queued
+                  </p>
+                )}
                 {song.status === "failed" && (
                   <p
                     style={{

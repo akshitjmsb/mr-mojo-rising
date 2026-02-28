@@ -11,7 +11,7 @@ export async function GET(
 
   const { data: song, error } = await supabase
     .from("songs")
-    .select("id, status, title, artist")
+    .select("id, status, processing_stage, last_error, updated_at")
     .eq("id", id)
     .single();
 
