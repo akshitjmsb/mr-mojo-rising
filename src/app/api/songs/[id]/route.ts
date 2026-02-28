@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(
   _request: Request,
@@ -55,4 +56,63 @@ export async function GET(
     chords: chords || [],
     lyrics: lyrics || null,
   });
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
+
+  // Verify ownership first (RLS scoped).
+  const { data: song, error: songError } = await supabase
+    .from("songs")
+    .select("id")
+    .eq("id", id)
+    .single();
+
+  if (songError || !song) {
+    return NextResponse.json({ error: "Song not found" }, { status: 404 });
+  }
+
+  // Best-effort storage cleanup for common stem paths.
+  const knownPaths = [
+    `${id}/original.wav`,
+    `${id}/other.wav`,
+    `${id}/vocals.wav`,
+    `${id}/drums.wav`,
+    `${id}/bass.wav`,
+  ];
+
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = createAdminClient();
+      await admin.storage.from("stems").remove(knownPaths);
+    } catch (error) {
+      console.error("Failed to delete stem files", error);
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("songs")
+    .delete()
+    .eq("id", id);
+
+  if (deleteError) {
+    return NextResponse.json(
+      { error: "Failed to delete song" },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ success: true, id });
 }
