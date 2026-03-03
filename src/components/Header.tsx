@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 interface HeaderProps {
   songTitle?: string;
@@ -12,8 +11,9 @@ export default function Header({ songTitle, songArtist }: HeaderProps) {
   const router = useRouter();
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await fetch("/api/auth/voice/logout", {
+      method: "POST",
+    });
     router.push("/login");
     router.refresh();
   }

@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mr. Mojo Rising
 
-## Getting Started
+AI-powered guitar practice studio:
+- import from YouTube
+- isolate stems
+- detect sections/chords/lyrics
+- practice loops at variable speed
 
-First, run the development server:
+## Voice-Only Authentication (Single Mac)
+
+This app now uses **voice-passphrase unlock only** on the login screen.
+
+- Browser target: **Chrome or Edge on macOS**
+- No fallback auth path (no password login in UI)
+- Unlock scope: once per browser session
+- Listening starts automatically when `/login` opens
+- First successful unlock enrolls an owner voice profile in Supabase auth user metadata
+
+### Required env vars (`.env.local`)
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54331
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+
+VOICE_PASSPHRASE=your secret spoken phrase
+VOICE_LOGIN_EMAIL=voice-auth-local@example.com
+VOICE_LOGIN_PASSWORD=choose-a-strong-password
+VOICE_COOKIE_SECRET=long-random-secret
+```
+
+## One-time Local Voice User Bootstrap
+
+Create/update the Supabase auth user that the voice endpoint signs in as:
+
+```bash
+npm run auth:ensure-voice-user
+```
+
+This command reads from `.env.local` and ensures:
+- `VOICE_LOGIN_EMAIL` exists
+- password is set to `VOICE_LOGIN_PASSWORD`
+- email is confirmed
+
+## Run Locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+./mac-server/start.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000), go to `/login`, and use **Start Voice Unlock**.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Owner Voice Profile Notes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- The first successful unlock enrolls the current voiceprint as owner.
+- Future unlock attempts must match both:
+  - passphrase text
+  - enrolled voice profile similarity threshold
+- To re-enroll a different owner voice, remove `voice_profile_vector` from the voice auth user's metadata (or recreate that user with `npm run auth:ensure-voice-user` and then clear metadata).

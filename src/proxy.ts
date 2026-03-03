@@ -1,7 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { VOICE_UNLOCK_COOKIE, verifyVoiceSessionCookie } from "@/lib/voice-auth";
 
-const publicPaths = ["/login", "/signup", "/auth/callback"];
+const publicPaths = ["/login", "/auth/callback"];
+
+function clearVoiceCookie(response: NextResponse) {
+  response.cookies.set({
+    name: VOICE_UNLOCK_COOKIE,
+    value: "",
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    expires: new Date(0),
+  });
+}
 
 export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -41,16 +54,51 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isPublic = publicPaths.some((p) => pathname.startsWith(p));
   const isApi = pathname.startsWith("/api/");
+  const isVoiceApi = pathname.startsWith("/api/auth/voice/");
+  const voiceCookieValue = request.cookies.get(VOICE_UNLOCK_COOKIE)?.value;
+  const voiceSession = verifyVoiceSessionCookie(voiceCookieValue, process.env.VOICE_COOKIE_SECRET);
 
-  // Redirect unauthenticated users to login (except public pages and API routes)
-  if (!user && !isPublic && !isApi) {
+  if (isVoiceApi) {
+    return supabaseResponse;
+  }
+
+  if (isApi) {
+    return supabaseResponse;
+  }
+
+  if (voiceCookieValue && !voiceSession) {
+    if (isPublic) {
+      clearVoiceCookie(supabaseResponse);
+      return supabaseResponse;
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    const response = NextResponse.redirect(url);
+    clearVoiceCookie(response);
+    return response;
+  }
+
+  if (voiceSession && !user) {
+    if (isPublic) {
+      clearVoiceCookie(supabaseResponse);
+      return supabaseResponse;
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    const response = NextResponse.redirect(url);
+    clearVoiceCookie(response);
+    return response;
+  }
+
+  // Redirect unauthenticated voice sessions for app routes.
+  if (!isPublic && !voiceSession) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from login/signup
-  if (user && isPublic) {
+  // Redirect unlocked users away from login.
+  if (voiceSession && user && isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

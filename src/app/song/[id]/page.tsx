@@ -41,6 +41,7 @@ const SPEEDS = [
   { label: "75%", value: 0.75 },
   { label: "Full", value: 1.0 },
 ];
+const SEEK_STEP_SECONDS = 10;
 
 export default function SongPlayerPage() {
   const params = useParams();
@@ -66,6 +67,8 @@ export default function SongPlayerPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
+  const sectionProgressRef = useRef<HTMLDivElement | null>(null);
+  const isScrubbingRef = useRef(false);
 
   // Fetch song data
   useEffect(() => {
@@ -127,24 +130,79 @@ export default function SongPlayerPage() {
     }
   }, [speed]);
 
+  const findSectionForTime = useCallback(
+    (time: number) => {
+      if (sections.length === 0) return null;
+      const match = sections.find((s) => time >= s.start_time && time < s.end_time);
+      if (match) return match;
+      if (time >= sections[sections.length - 1].end_time) return sections[sections.length - 1];
+      return sections[0];
+    },
+    [sections]
+  );
+
+  const syncActiveSectionWithTime = useCallback(
+    (time: number) => {
+      const section = findSectionForTime(time);
+      if (section && section.id !== activeSection?.id) {
+        setActiveSection(section);
+      }
+      return section;
+    },
+    [activeSection?.id, findSectionForTime]
+  );
+
+  const seekTo = useCallback(
+    (time: number) => {
+      if (!audioRef.current) return;
+      const audio = audioRef.current;
+      const maxDuration =
+        Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
+      const clamped = Math.max(0, Math.min(time, maxDuration || 0));
+      audio.currentTime = clamped;
+      setCurrentTime(clamped);
+      syncActiveSectionWithTime(clamped);
+    },
+    [duration, syncActiveSectionWithTime]
+  );
+
+  const seekBy = useCallback(
+    (seconds: number) => {
+      if (!audioRef.current) return;
+      seekTo(audioRef.current.currentTime + seconds);
+    },
+    [seekTo]
+  );
+
+  const rewind = useCallback(() => {
+    seekBy(-SEEK_STEP_SECONDS);
+  }, [seekBy]);
+
+  const forward = useCallback(() => {
+    seekBy(SEEK_STEP_SECONDS);
+  }, [seekBy]);
+
   // Animation frame for tracking time
   const updateTime = useCallback(() => {
     if (!audioRef.current) return;
 
     const audio = audioRef.current;
-    setCurrentTime(audio.currentTime);
+    const now = audio.currentTime;
+    setCurrentTime(now);
+    const section = syncActiveSectionWithTime(now);
 
     // Loop within active section
-    if (activeSection && isLooping) {
-      if (audio.currentTime >= activeSection.end_time) {
-        audio.currentTime = activeSection.start_time;
+    if (section && isLooping) {
+      if (now >= section.end_time) {
+        audio.currentTime = section.start_time;
+        setCurrentTime(section.start_time);
       }
     }
 
     if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(updateTime);
     }
-  }, [isPlaying, activeSection, isLooping]);
+  }, [isPlaying, isLooping, syncActiveSectionWithTime]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -178,27 +236,73 @@ export default function SongPlayerPage() {
     }
   }
 
-  // Prev/Next section
-  function prevSection() {
-    if (!activeSection || sections.length === 0) return;
-    const idx = sections.findIndex((s) => s.id === activeSection.id);
-    const prev = sections[Math.max(0, idx - 1)];
-    handleSelectSection(prev);
-  }
-
-  function nextSection() {
-    if (!activeSection || sections.length === 0) return;
-    const idx = sections.findIndex((s) => s.id === activeSection.id);
-    const next = sections[Math.min(sections.length - 1, idx + 1)];
-    handleSelectSection(next);
-  }
-
   // Cycle speed
   function cycleSpeed() {
     const currentIdx = SPEEDS.findIndex((s) => s.value === speed);
     const nextIdx = (currentIdx + 1) % SPEEDS.length;
     setSpeed(SPEEDS[nextIdx].value);
   }
+
+  const seekFromClientX = useCallback(
+    (clientX: number) => {
+      if (!activeSection) return;
+      if (!sectionProgressRef.current) return;
+      const rect = sectionProgressRef.current.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const nextTime =
+        activeSection.start_time +
+        ratio * (activeSection.end_time - activeSection.start_time);
+      seekTo(nextTime);
+    },
+    [activeSection, seekTo]
+  );
+
+  const handleSectionProgressPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      isScrubbingRef.current = true;
+      seekFromClientX(e.clientX);
+    },
+    [seekFromClientX]
+  );
+
+  useEffect(() => {
+    function onPointerMove(event: PointerEvent) {
+      if (!isScrubbingRef.current) return;
+      seekFromClientX(event.clientX);
+    }
+
+    function onPointerUp() {
+      isScrubbingRef.current = false;
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [seekFromClientX]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        rewind();
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        forward();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [forward, rewind]);
 
   // Calculate section progress
   const sectionProgress =
@@ -452,7 +556,11 @@ export default function SongPlayerPage() {
             </span>
 
             {/* Progress bar */}
-            <div style={{ flex: 1, position: "relative", height: 4 }}>
+            <div
+              ref={sectionProgressRef}
+              onPointerDown={handleSectionProgressPointerDown}
+              style={{ flex: 1, position: "relative", height: 4, cursor: "ew-resize" }}
+            >
               <div
                 style={{
                   position: "absolute",
@@ -569,9 +677,11 @@ export default function SongPlayerPage() {
             </svg>
           </button>
 
-          {/* Previous */}
+          {/* Rewind */}
           <button
-            onClick={prevSection}
+            onClick={rewind}
+            title={`Rewind ${SEEK_STEP_SECONDS}s`}
+            aria-label={`Rewind ${SEEK_STEP_SECONDS} seconds`}
             style={{
               background: "none",
               border: "none",
@@ -631,9 +741,11 @@ export default function SongPlayerPage() {
             )}
           </button>
 
-          {/* Next */}
+          {/* Forward */}
           <button
-            onClick={nextSection}
+            onClick={forward}
+            title={`Forward ${SEEK_STEP_SECONDS}s`}
+            aria-label={`Forward ${SEEK_STEP_SECONDS} seconds`}
             style={{
               background: "none",
               border: "none",

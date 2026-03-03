@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "auth:ensure-voice-user": "npx --yes tsx scripts/ensure-voice-user.ts",
     "start:local": "npm-run-all --parallel start:db start:app",
     "start:db": "npx supabase start",
     "start:app": "npm run dev"
