@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(
@@ -8,7 +7,7 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Fetch song
   const { data: song, error: songError } = await supabase
@@ -63,17 +62,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-  }
-
-  // Verify ownership first (RLS scoped).
   const { data: song, error: songError } = await supabase
     .from("songs")
     .select("id")

@@ -14,7 +14,7 @@ export default function Header({ songTitle, songArtist }: HeaderProps) {
     await fetch("/api/auth/voice/logout", {
       method: "POST",
     });
-    router.push("/login");
+    router.push("/");
     router.refresh();
   }
 

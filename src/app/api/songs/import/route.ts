@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
@@ -25,25 +25,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabase = await createClient();
-
-    // Check if user is authenticated
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
+    const supabase = createAdminClient();
 
     // Create song record
     const { data: song, error: songError } = await supabase
       .from("songs")
       .insert({
-        user_id: user.id,
         title: "Processing...",
         youtube_url,
         status: "queued",
@@ -66,7 +53,6 @@ export async function POST(request: Request) {
       .from("processing_jobs")
       .insert({
         song_id: songRow.id,
-        user_id: user.id,
         youtube_url,
         status: "queued",
       })

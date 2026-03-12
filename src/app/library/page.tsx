@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
-import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
@@ -19,13 +18,9 @@ export default function LibraryPage() {
 
   useEffect(() => {
     async function fetchSongs() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("songs")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      setSongs((data as Song[]) || []);
+      const res = await fetch("/api/songs");
+      const data = await res.json();
+      setSongs(Array.isArray(data) ? (data as Song[]) : []);
       setLoading(false);
     }
 
