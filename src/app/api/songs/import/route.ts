@@ -5,22 +5,6 @@ import type { Database } from "@/lib/database.types";
 type Song = Database["public"]["Tables"]["songs"]["Row"];
 type ProcessingJob = Database["public"]["Tables"]["processing_jobs"]["Row"];
 
-async function getOwnerUserId(): Promise<string | null> {
-  const email = process.env.VOICE_LOGIN_EMAIL;
-  if (!email) return null;
-  const admin = createAdminClient();
-  let page = 1;
-  const perPage = 200;
-  while (true) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-    if (error) return null;
-    const found = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-    if (found) return found.id;
-    if (data.users.length < perPage) return null;
-    page += 1;
-  }
-}
-
 export async function POST(request: Request) {
   try {
     const { youtube_url } = await request.json();
@@ -32,7 +16,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Basic YouTube URL validation
     const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/;
     if (!ytRegex.test(youtube_url)) {
       return NextResponse.json(
@@ -43,19 +26,10 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
 
-    const userId = await getOwnerUserId();
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Owner user not found. Run: npm run auth:ensure-voice-user" },
-        { status: 500 }
-      );
-    }
-
-    // Create song record
     const { data: song, error: songError } = await supabase
       .from("songs")
       .insert({
-        user_id: userId,
+        user_id: null,
         title: "Processing...",
         youtube_url,
         status: "queued",
@@ -78,7 +52,7 @@ export async function POST(request: Request) {
       .from("processing_jobs")
       .insert({
         song_id: songRow.id,
-        user_id: userId,
+        user_id: null,
         youtube_url,
         status: "queued",
       })

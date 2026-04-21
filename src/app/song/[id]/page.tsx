@@ -42,6 +42,7 @@ const SPEEDS = [
   { label: "Full", value: 1.0 },
 ];
 const SEEK_STEP_SECONDS = 10;
+type DownloadStemKey = "full" | "guitar" | "vocals" | "drums" | "bass";
 
 export default function SongPlayerPage() {
   const params = useParams();
@@ -63,12 +64,24 @@ export default function SongPlayerPage() {
   const [speed, setSpeed] = useState(1.0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [downloadingStem, setDownloadingStem] = useState<DownloadStemKey | null>(null);
+  const [downloadError, setDownloadError] = useState("");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const sectionProgressRef = useRef<HTMLDivElement | null>(null);
   const isScrubbingRef = useRef(false);
+  const downloadLockRef = useRef(false);
+
+  // Metronome
+  const [metronomeOn, setMetronomeOn] = useState(false);
+  const metronomeRef = useRef<{
+    ctx: AudioContext;
+    nextBeatTime: number;
+    beatInterval: number;
+    timerId: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
 
   // Fetch song data
   useEffect(() => {
@@ -182,6 +195,65 @@ export default function SongPlayerPage() {
     seekBy(SEEK_STEP_SECONDS);
   }, [seekBy]);
 
+  // Metronome engine
+  useEffect(() => {
+    if (!metronomeOn || !song?.bpm) {
+      // Stop any running metronome.
+      if (metronomeRef.current) {
+        if (metronomeRef.current.timerId !== null) {
+          clearTimeout(metronomeRef.current.timerId);
+        }
+        metronomeRef.current.ctx.close();
+        metronomeRef.current = null;
+      }
+      return;
+    }
+
+    const ctx = new AudioContext();
+    // Beat interval adjusted for current playback speed.
+    const beatInterval = 60 / (song.bpm * speed);
+    metronomeRef.current = { ctx, nextBeatTime: ctx.currentTime + 0.1, beatInterval, timerId: null };
+
+    function scheduleClick(time: number, accent: boolean) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = accent ? 1200 : 900;
+      gain.gain.setValueAtTime(accent ? 0.5 : 0.3, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+      osc.start(time);
+      osc.stop(time + 0.05);
+    }
+
+    let beatCount = 0;
+    const LOOKAHEAD_MS = 100;
+    const SCHEDULE_AHEAD = 0.2; // seconds
+
+    function tick() {
+      const m = metronomeRef.current;
+      if (!m) return;
+      while (m.nextBeatTime < m.ctx.currentTime + SCHEDULE_AHEAD) {
+        scheduleClick(m.nextBeatTime, beatCount % 4 === 0);
+        beatCount++;
+        m.nextBeatTime += m.beatInterval;
+      }
+      m.timerId = setTimeout(tick, LOOKAHEAD_MS);
+    }
+
+    tick();
+
+    return () => {
+      if (metronomeRef.current) {
+        if (metronomeRef.current.timerId !== null) {
+          clearTimeout(metronomeRef.current.timerId);
+        }
+        metronomeRef.current.ctx.close();
+        metronomeRef.current = null;
+      }
+    };
+  }, [metronomeOn, song?.bpm, speed]);
+
   // Animation frame for tracking time
   const updateTime = useCallback(() => {
     if (!audioRef.current) return;
@@ -217,6 +289,7 @@ export default function SongPlayerPage() {
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
+      setMetronomeOn(false);
     } else {
       audioRef.current.play();
       setIsPlaying(true);
@@ -242,6 +315,110 @@ export default function SongPlayerPage() {
     const nextIdx = (currentIdx + 1) % SPEEDS.length;
     setSpeed(SPEEDS[nextIdx].value);
   }
+
+  function getDefaultFileName(stem: DownloadStemKey): string {
+    const baseTitle = (song?.title || "song")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "song";
+    return `${baseTitle}-${stem}.wav`;
+  }
+
+  function getFileNameFromContentDisposition(disposition: string | null): string | null {
+    if (!disposition) return null;
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1]);
+      } catch {
+        // Ignore malformed encoding and continue with fallback parsing.
+      }
+    }
+    const quotedMatch = disposition.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) return quotedMatch[1];
+    const unquotedMatch = disposition.match(/filename=([^;]+)/i);
+    if (unquotedMatch?.[1]) return unquotedMatch[1].trim();
+    return null;
+  }
+
+  async function downloadStem(stem: DownloadStemKey): Promise<boolean> {
+    if (downloadLockRef.current) return false;
+    downloadLockRef.current = true;
+    setDownloadError("");
+    setDownloadingStem(stem);
+
+    try {
+      const res = await fetch(`/api/songs/${songId}/download?stem=${stem}`);
+      if (!res.ok) {
+        let errorMessage = "Failed to download file";
+        try {
+          const data = await res.json();
+          if (typeof data?.error === "string") {
+            errorMessage = data.error;
+          }
+        } catch {
+          // Keep default error message.
+        }
+        setDownloadError(errorMessage);
+        return false;
+      }
+
+      const blob = await res.blob();
+      const fileName =
+        getFileNameFromContentDisposition(res.headers.get("content-disposition")) ||
+        getDefaultFileName(stem);
+
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(blobUrl);
+      return true;
+    } catch {
+      setDownloadError("Failed to download file");
+      return false;
+    } finally {
+      setDownloadingStem(null);
+      downloadLockRef.current = false;
+    }
+  }
+
+  function DownloadIcon({ color = "currentColor" }: { color?: string }) {
+    return (
+      <svg
+        aria-hidden="true"
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M4 20h16" />
+      </svg>
+    );
+  }
+
+  const currentDownloadStem: DownloadStemKey =
+    stemMode === "full" ? "full" : stemMode;
+  const downloadableStems: Array<{
+    key: DownloadStemKey;
+    label: string;
+    available: boolean;
+  }> = [
+    { key: "full", label: "Full Mix", available: Boolean(stems?.original_url) },
+    { key: "guitar", label: "Guitar", available: Boolean(stems?.guitar_url) },
+    { key: "vocals", label: "Vocals", available: Boolean(stems?.vocals_url) },
+    { key: "drums", label: "Drums", available: Boolean(stems?.drums_url) },
+    { key: "bass", label: "Bass", available: Boolean(stems?.bass_url) },
+  ];
 
   const seekFromClientX = useCallback(
     (clientX: number) => {
@@ -489,6 +666,56 @@ export default function SongPlayerPage() {
           ))}
         </div>
 
+        {/* Download controls */}
+        <div style={{ padding: "8px 20px 0", display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {downloadableStems.map((item) => (
+            <button
+              key={item.key}
+              onClick={() => downloadStem(item.key)}
+              disabled={!item.available || downloadingStem !== null}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                minWidth: 92,
+                fontFamily: "var(--font-josefin), sans-serif",
+                fontSize: 9,
+                fontWeight: 300,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                padding: "6px 10px",
+                background: "transparent",
+                border:
+                  item.key === currentDownloadStem
+                    ? "1px solid var(--color-gold)"
+                    : "1px solid var(--color-border-dark)",
+                color: item.available ? "var(--color-text-dark)" : "var(--color-text-darkest)",
+                cursor: !item.available || downloadingStem !== null ? "default" : "pointer",
+                opacity: !item.available || downloadingStem !== null ? 0.45 : 1,
+                borderRadius: 1,
+              }}
+            >
+              <span>{item.label}</span>
+              <DownloadIcon color={item.available ? "currentColor" : "var(--color-text-darkest)"} />
+            </button>
+          ))}
+        </div>
+        {downloadError && (
+          <p
+            style={{
+              padding: "8px 20px 0",
+              margin: 0,
+              fontFamily: "var(--font-josefin), sans-serif",
+              fontSize: 10,
+              letterSpacing: "0.08em",
+              color: "var(--color-terracotta)",
+            }}
+          >
+            {downloadError}
+          </p>
+        )}
+
         {/* Waveform visualization */}
         <div style={{ padding: "16px 20px 8px" }}>
           <div
@@ -676,6 +903,39 @@ export default function SongPlayerPage() {
               <path d="M21 13v2a4 4 0 01-4 4H3" />
             </svg>
           </button>
+
+          {/* Metronome toggle */}
+          {song?.bpm && (
+            <button
+              onClick={() => setMetronomeOn((v) => !v)}
+              title={metronomeOn ? `Metronome on — ${song.bpm} BPM` : `Metronome off — ${song.bpm} BPM`}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 10,
+                cursor: "pointer",
+                color: metronomeOn ? "var(--color-gold)" : "var(--color-text-muted)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 1,
+              }}
+            >
+              {/* Metronome icon — pendulum shape */}
+              <svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <polygon points="8,1 15,17 1,17" strokeLinejoin="round" />
+                <line x1="8" y1="17" x2="8" y2="6" />
+                <circle cx={metronomeOn ? "10.5" : "5.5"} cy="10" r="1.2" fill="currentColor" stroke="none">
+                  {metronomeOn && (
+                    <animate attributeName="cx" values="5.5;10.5;5.5" dur={`${(60 / (song.bpm * speed)) * 2}s`} repeatCount="indefinite" />
+                  )}
+                </circle>
+              </svg>
+              <span style={{ fontFamily: "var(--font-josefin), sans-serif", fontSize: 8, letterSpacing: "0.04em" }}>
+                {Math.round(song.bpm)}
+              </span>
+            </button>
+          )}
 
           {/* Rewind */}
           <button

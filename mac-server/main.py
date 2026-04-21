@@ -742,7 +742,7 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
         with wave.open(str(audio_path), "r") as wav_file:
             duration = wav_file.getnframes() / wav_file.getframerate()
 
-        sections = detect_sections(duration)
+        sections = await asyncio.to_thread(detect_sections, str(audio_path), duration)
         sb.table("sections").delete().eq("song_id", song_id).execute()
         if sections:
             sb.table("sections").insert(
@@ -758,7 +758,10 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
             ).execute()
 
         try:
-            chords = await asyncio.to_thread(detect_chords, str(audio_path))
+            chords, bpm = await asyncio.to_thread(detect_chords, str(audio_path))
+            # Store BPM on the song record.
+            sb.table("songs").update({"bpm": bpm}).eq("id", song_id).execute()
+            log_event("pipeline.bpm_detected", song_id=song_id, job_id=job_id, bpm=bpm)
             sb.table("chords").delete().eq("song_id", song_id).execute()
             if chords:
                 sb.table("chords").insert(
@@ -825,160 +828,299 @@ def classify_error(exc: Exception) -> str:
 
 def detect_chords(audio_path: str) -> list[dict]:
     """
-    Detect chords from audio using librosa chroma features + template matching.
+    Detect chords from audio using beat-synchronised chroma CENS + expanded template matching.
+    Improvements over the previous version:
+      - chroma_cens: more robust to timbre/dynamics than chroma_cqt
+      - Beat-synchronised frames: snaps analysis to the rhythmic grid, eliminating sub-beat flicker
+      - Expanded templates: major, minor, dom7, maj7, min7, sus2, sus4
+      - Median-filter smoothing on beat-level labels before merging
     Returns list of {start, end, label, standard, confidence}.
     """
     note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-    def make_template(root_idx: int, minor: bool = False) -> np.ndarray:
-        template = np.zeros(12)
-        template[root_idx % 12] = 1.0
-        template[(root_idx + (3 if minor else 4)) % 12] = 0.8
-        template[(root_idx + 7) % 12] = 0.8
-        norm = np.linalg.norm(template)
-        return template / norm if norm > 0 else template
+    # Intervals in semitones for each chord quality.
+    QUALITIES: list[tuple[str, list[int], list[float]]] = [
+        ("",    [0, 4, 7],       [1.0, 0.8, 0.8]),   # major triad
+        ("m",   [0, 3, 7],       [1.0, 0.8, 0.8]),   # minor triad
+        ("7",   [0, 4, 7, 10],   [1.0, 0.7, 0.7, 0.6]),  # dominant 7
+        ("maj7",[0, 4, 7, 11],   [1.0, 0.7, 0.7, 0.6]),  # major 7
+        ("m7",  [0, 3, 7, 10],   [1.0, 0.7, 0.7, 0.6]),  # minor 7
+        ("sus2",[0, 2, 7],       [1.0, 0.7, 0.7]),   # suspended 2
+        ("sus4",[0, 5, 7],       [1.0, 0.7, 0.7]),   # suspended 4
+    ]
 
-    templates = {}
+    def make_template(root: int, intervals: list[int], weights: list[float]) -> np.ndarray:
+        t = np.zeros(12)
+        for interval, w in zip(intervals, weights):
+            t[(root + interval) % 12] = w
+        norm = np.linalg.norm(t)
+        return t / norm if norm > 0 else t
+
+    templates: dict[str, np.ndarray] = {}
     for i, name in enumerate(note_names):
-        templates[name] = make_template(i, minor=False)
-        templates[f"{name}m"] = make_template(i, minor=True)
+        for suffix, intervals, weights in QUALITIES:
+            templates[f"{name}{suffix}"] = make_template(i, intervals, weights)
 
+    hop_length = 512
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
     y_harm = librosa.effects.harmonic(y)
-    chroma = librosa.feature.chroma_cqt(y=y_harm, sr=sr, hop_length=512)
-    hop_length = 512
-    frame_duration = hop_length / sr
 
-    raw_chords = []
-    for frame_idx in range(chroma.shape[1]):
-        frame_vec = chroma[:, frame_idx]
-        frame_norm = np.linalg.norm(frame_vec)
-        if frame_norm < 0.01:
-            raw_chords.append(("N", 0.0))
+    # chroma_cens is more stable across dynamics/timbre than chroma_cqt.
+    chroma = librosa.feature.chroma_cens(y=y_harm, sr=sr, hop_length=hop_length)
+
+    # Beat-synchronise: average chroma within each beat window.
+    # beat_track returns (tempo_scalar_or_array, beat_frames).
+    tempo_raw, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+    tempo = float(np.atleast_1d(tempo_raw)[0])
+    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+    beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length).tolist()
+    # Append song end as the final boundary.
+    song_duration = float(len(y) / sr)
+    beat_times.append(song_duration)
+
+    # Classify each beat.
+    raw: list[tuple[str, float]] = []
+    for b in range(beat_chroma.shape[1]):
+        vec = beat_chroma[:, b]
+        norm = float(np.linalg.norm(vec))
+        if norm < 0.05:
+            raw.append(("N", 0.0))
             continue
-
-        frame_vec_n = frame_vec / frame_norm
-
-        best_chord = "N"
-        best_sim = -1.0
+        vec_n = vec / norm
+        best, best_sim = "N", -1.0
         for chord_name, tmpl in templates.items():
-            sim = float(np.dot(frame_vec_n, tmpl))
+            sim = float(np.dot(vec_n, tmpl))
             if sim > best_sim:
-                best_sim = sim
-                best_chord = chord_name
+                best_sim, best = sim, chord_name
+        raw.append((best, best_sim))
 
-        raw_chords.append((best_chord, best_sim))
+    if not raw:
+        return []
 
-    min_duration = 0.3
+    # Median-filter labels over a 3-beat window to suppress single-beat noise.
+    labels = [r[0] for r in raw]
+    confs  = [r[1] for r in raw]
+    smoothed_labels: list[str] = []
+    for i in range(len(labels)):
+        window = labels[max(0, i - 1): i + 2]
+        # Pick the most common label in the window; ties keep current.
+        counts: dict[str, int] = {}
+        for lbl in window:
+            counts[lbl] = counts.get(lbl, 0) + 1
+        best_lbl = max(counts, key=lambda k: (counts[k], k == labels[i]))
+        smoothed_labels.append(best_lbl)
+
+    # Merge consecutive identical labels, tracking avg confidence.
+    min_duration = 0.5  # seconds — ignore sub-half-second blips
     merged: list[dict] = []
+    cur_label = smoothed_labels[0]
+    cur_start = beat_times[0]
+    cur_conf_sum = confs[0]
+    cur_count = 1
 
-    if raw_chords:
-        current_label = raw_chords[0][0]
-        current_start = 0.0
-        current_conf_sum = raw_chords[0][1]
-        current_count = 1
+    for i in range(1, len(smoothed_labels)):
+        lbl = smoothed_labels[i]
+        if lbl == cur_label:
+            cur_conf_sum += confs[i]
+            cur_count += 1
+        else:
+            end_t = beat_times[i]
+            if end_t - cur_start >= min_duration and cur_label != "N":
+                merged.append({
+                    "start": round(cur_start, 3),
+                    "end": round(end_t, 3),
+                    "label": cur_label,
+                    "standard": cur_label,
+                    "confidence": round(cur_conf_sum / cur_count, 3),
+                })
+            cur_label, cur_start = lbl, beat_times[i]
+            cur_conf_sum, cur_count = confs[i], 1
 
-        for i in range(1, len(raw_chords)):
-            label, conf = raw_chords[i]
-            time = i * frame_duration
+    # Flush last segment.
+    end_t = beat_times[len(smoothed_labels)]
+    if end_t - cur_start >= min_duration and cur_label != "N":
+        merged.append({
+            "start": round(cur_start, 3),
+            "end": round(end_t, 3),
+            "label": cur_label,
+            "standard": cur_label,
+            "confidence": round(cur_conf_sum / cur_count, 3),
+        })
 
-            if label == current_label:
-                current_conf_sum += conf
-                current_count += 1
-            else:
-                end_time = time
-                duration = end_time - current_start
-                if duration >= min_duration and current_label != "N":
-                    merged.append(
-                        {
-                            "start": round(current_start, 3),
-                            "end": round(end_time, 3),
-                            "label": current_label,
-                            "standard": current_label,
-                            "confidence": round(current_conf_sum / current_count, 3),
-                        }
-                    )
-                current_label = label
-                current_start = time
-                current_conf_sum = conf
-                current_count = 1
-
-        end_time = len(raw_chords) * frame_duration
-        duration = end_time - current_start
-        if duration >= min_duration and current_label != "N":
-            merged.append(
-                {
-                    "start": round(current_start, 3),
-                    "end": round(end_time, 3),
-                    "label": current_label,
-                    "standard": current_label,
-                    "confidence": round(current_conf_sum / current_count, 3),
-                }
-            )
-
-    return merged
+    return merged, round(tempo, 2)
 
 
 def fetch_lyrics(title: str, artist: str | None) -> dict | None:
     """
-    Fetch synced lyrics using syncedlyrics library.
-    Returns {synced_lrc, plain_text, source} or None.
+    Fetch lyrics using a multi-source, multi-query fallback chain.
+
+    Strategy (stops at first hit):
+      1. Synced LRC — Lrclib, Musixmatch, Deezer, NetEase  (best accuracy)
+      2. Word-level sync — Musixmatch enhanced=True         (finest granularity)
+      3. Synced LRC — all remaining providers               (Genius, Megalobiz)
+      4. Plain text  — all providers                        (last resort)
+
+    Each tier is tried with up to 3 query variants:
+      "{title} {artist}", "{artist} {title}", "{title}"
     """
-    search_query = f"{title} {artist}" if artist else title
+    # Build query variants, deduplicated while preserving order.
+    queries: list[str] = []
+    for q in [
+        f"{title} {artist}" if artist else None,
+        f"{artist} {title}" if artist else None,
+        title,
+    ]:
+        if q and q not in queries:
+            queries.append(q)
 
-    try:
-        lrc = syncedlyrics.search(search_query, synced_only=True)
-        if lrc:
-            return {
-                "synced_lrc": lrc,
-                "plain_text": None,
-                "source": "syncedlyrics",
-            }
-    except Exception as exc:
-        log_event("lyrics.synced_search_error", query=search_query, error=str(exc))
+    def _try(query: str, *, providers: list[str] | None = None,
+             synced_only: bool = False, plain_only: bool = False,
+             enhanced: bool = False) -> str | None:
+        kwargs: dict = {}
+        if providers:
+            kwargs["providers"] = providers
+        if synced_only:
+            kwargs["synced_only"] = True
+        if plain_only:
+            kwargs["plain_only"] = True
+        if enhanced:
+            kwargs["enhanced"] = True
+        try:
+            return syncedlyrics.search(query, **kwargs)
+        except Exception as exc:
+            log_event("lyrics.provider_error", query=query, providers=providers, error=str(exc))
+            return None
 
-    try:
-        plain = syncedlyrics.search(search_query, synced_only=False)
-        if plain:
-            if plain.strip().startswith("["):
-                return {
-                    "synced_lrc": plain,
-                    "plain_text": None,
-                    "source": "syncedlyrics",
-                }
-            return {
-                "synced_lrc": None,
-                "plain_text": plain,
-                "source": "syncedlyrics",
-            }
-    except Exception as exc:
-        log_event("lyrics.plain_search_error", query=search_query, error=str(exc))
+    # Tier 1 — best synced providers.
+    SYNCED_PRIORITY = ["Lrclib", "Musixmatch", "Deezer", "NetEase"]
+    for q in queries:
+        result = _try(q, providers=SYNCED_PRIORITY, synced_only=True)
+        if result:
+            log_event("lyrics.found", query=q, tier="synced_priority", enhanced=False)
+            return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/synced"}
 
+    # Tier 2 — Musixmatch word-level sync.
+    for q in queries:
+        result = _try(q, providers=["Musixmatch"], synced_only=True, enhanced=True)
+        if result:
+            log_event("lyrics.found", query=q, tier="musixmatch_enhanced")
+            return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/musixmatch_enhanced"}
+
+    # Tier 3 — all remaining providers synced.
+    for q in queries:
+        result = _try(q, synced_only=True)
+        if result:
+            log_event("lyrics.found", query=q, tier="synced_all")
+            return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/synced_all"}
+
+    # Tier 4 — plain text fallback across all providers.
+    for q in queries:
+        result = _try(q, plain_only=True)
+        if result:
+            # Some providers return LRC even when plain_only is requested.
+            if result.strip().startswith("["):
+                log_event("lyrics.found", query=q, tier="plain_as_lrc")
+                return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/plain_as_lrc"}
+            log_event("lyrics.found", query=q, tier="plain")
+            return {"synced_lrc": None, "plain_text": result, "source": "syncedlyrics/plain"}
+
+    log_event("lyrics.not_found", title=title, artist=artist)
     return None
 
 
-def detect_sections(duration: float) -> list[dict]:
+def detect_sections(audio_path: str, duration: float) -> list[dict]:
     """
-    Basic section detection based on common song structure.
-    TODO: Replace with librosa-based onset/beat detection for real accuracy.
+    Detect song sections using librosa's structural segmentation (MFCC + recurrence matrix).
+    Falls back to heuristic percentage-based markers if librosa analysis fails.
     """
-    if duration < 60:
-        return [{"label": "Full Song", "start": 0, "end": round(duration, 2)}]
+    _SECTION_NAMES = ["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Outro"]
 
-    markers = [
-        ("Intro", 0.0, 0.08),
-        ("Verse I", 0.08, 0.28),
-        ("Chorus", 0.28, 0.43),
-        ("Verse II", 0.43, 0.63),
-        ("Chorus", 0.63, 0.78),
-        ("Bridge", 0.78, 0.88),
-        ("Outro", 0.88, 1.0),
-    ]
-    return [
-        {
-            "label": label,
-            "start": round(start_pct * duration, 2),
-            "end": round(end_pct * duration, 2),
-        }
-        for label, start_pct, end_pct in markers
-    ]
+    def heuristic_fallback() -> list[dict]:
+        if duration < 60:
+            return [{"label": "Full Song", "start": 0, "end": round(duration, 2)}]
+        markers = [
+            ("Intro", 0.0, 0.08),
+            ("Verse I", 0.08, 0.28),
+            ("Chorus", 0.28, 0.43),
+            ("Verse II", 0.43, 0.63),
+            ("Chorus", 0.63, 0.78),
+            ("Bridge", 0.78, 0.88),
+            ("Outro", 0.88, 1.0),
+        ]
+        return [
+            {"label": label, "start": round(s * duration, 2), "end": round(e * duration, 2)}
+            for label, s, e in markers
+        ]
+
+    try:
+        # Load mono at reduced sample rate for speed.
+        y, sr = librosa.load(audio_path, sr=11025, mono=True)
+
+        # MFCC-based feature matrix (efficient for structural segmentation).
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc = librosa.util.normalize(mfcc, axis=1)
+
+        # Build recurrence matrix and compute structural novelty.
+        rec = librosa.segment.recurrence_matrix(
+            mfcc, width=max(1, int(sr * 8 / 512)), mode="affinity", sym=True
+        )
+        novelty = librosa.segment.timelag_filter(np.diff)(rec, axis=1)
+        novelty_curve = np.mean(np.abs(novelty), axis=0)
+
+        # Smooth the novelty curve to avoid micro-segmentation.
+        kernel_size = max(3, int(sr * 4 / 512) | 1)  # ~4s, must be odd
+        novelty_smooth = np.convolve(novelty_curve, np.hanning(kernel_size), mode="same")
+
+        # Pick boundary frames as local maxima above the mean.
+        threshold = novelty_smooth.mean() + 0.5 * novelty_smooth.std()
+        frame_times = librosa.frames_to_time(np.arange(len(novelty_smooth)), sr=sr, hop_length=512)
+        min_gap_frames = int(sr * 20 / 512)  # at least 20s between sections
+
+        boundaries = [0.0]
+        last_peak = -min_gap_frames
+        for i in range(1, len(novelty_smooth) - 1):
+            if (
+                novelty_smooth[i] > novelty_smooth[i - 1]
+                and novelty_smooth[i] > novelty_smooth[i + 1]
+                and novelty_smooth[i] > threshold
+                and i - last_peak >= min_gap_frames
+            ):
+                boundaries.append(float(frame_times[i]))
+                last_peak = i
+        boundaries.append(float(duration))
+
+        # Deduplicate and sort.
+        boundaries = sorted(set(round(b, 2) for b in boundaries))
+
+        # Need at least 2 boundaries to form a section.
+        if len(boundaries) < 2:
+            return heuristic_fallback()
+
+        # Assign human-readable labels by position.
+        n = len(boundaries) - 1
+        sections = []
+        for i in range(n):
+            pct = i / max(n - 1, 1)
+            if i == 0:
+                label = "Intro"
+            elif i == n - 1:
+                label = "Outro"
+            elif pct < 0.35:
+                label = f"Verse {i}"
+            elif pct < 0.65:
+                label = "Chorus"
+            elif pct < 0.85:
+                label = f"Verse {i}"
+            else:
+                label = "Bridge"
+            sections.append({
+                "label": label,
+                "start": boundaries[i],
+                "end": boundaries[i + 1],
+            })
+
+        return sections
+
+    except Exception as exc:
+        log_event("sections.librosa_failed", audio_path=audio_path, error=str(exc))
+        return heuristic_fallback()

@@ -51,6 +51,38 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000), go to `/login`, and use **Start Voice Unlock**.
 
+## Mac Dock Launcher
+
+Use this setup to install a one-click app on your Dock with the project icon.
+
+1. Make scripts executable and run the installer:
+
+   ```bash
+   npm run dock:install
+   ```
+
+2. Drag `Mr. Mojo Rising.app` from `/Applications` to the Dock.
+
+3. Click the new Dock icon to launch:
+   - Next.js app (`npm run dev`)
+   - If port `3000` is busy, it auto-falls back to the next free port (`3001`, `3002`, ...)
+   - mac-server backend (`./mac-server/start.sh`)
+   - opens the selected local URL in Chrome (or default browser if Chrome is unavailable)
+   - launches through Terminal to avoid macOS Desktop-folder permission issues
+
+Logs are written to:
+- `~/Library/Logs/MrMojoRising-launch.log` (launcher process)
+- `./.mmr-logs/web.log` and `./.mmr-logs/server.log` (app/server logs)
+- `./.mmr-logs/npm-install.log` (when dependency install is needed)
+
+### Additional control commands
+
+- `npm run dock:start` starts services and opens the app.
+  - If dependencies are missing, it will run `npm install` automatically.
+  - If required env vars are missing, it will notify you and stop.
+- `npm run dock:stop` stops running app services.
+- `npm run dock:restart` forces a clean stop then start.
+
 ## Owner Voice Profile Notes
 
 - The first successful unlock enrolls the current voiceprint as owner.

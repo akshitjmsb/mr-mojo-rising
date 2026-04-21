@@ -1,23 +1,9 @@
-"use client";
-
-import { useRouter } from "next/navigation";
-
 interface HeaderProps {
   songTitle?: string;
   songArtist?: string;
 }
 
 export default function Header({ songTitle, songArtist }: HeaderProps) {
-  const router = useRouter();
-
-  async function handleSignOut() {
-    await fetch("/api/auth/voice/logout", {
-      method: "POST",
-    });
-    router.push("/");
-    router.refresh();
-  }
-
   return (
     <header>
       <div className="flex items-start justify-between" style={{ padding: "22px 20px 0" }}>
@@ -82,32 +68,7 @@ export default function Header({ songTitle, songArtist }: HeaderProps) {
                 </p>
               )}
             </>
-          ) : (
-            <button
-              onClick={handleSignOut}
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 9,
-                fontWeight: 300,
-                letterSpacing: "0.15em",
-                textTransform: "uppercase",
-                color: "var(--color-text-muted)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px 0",
-                transition: "color 0.25s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = "var(--color-gold)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = "var(--color-text-muted)";
-              }}
-            >
-              Sign Out
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
 

@@ -1,0 +1,5 @@
+mac-server
+.mmr-logs
+supabase/.branches
+supabase/.temp
+scripts/*.command

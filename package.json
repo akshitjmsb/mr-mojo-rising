@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "auth:ensure-voice-user": "npx --yes tsx scripts/ensure-voice-user.ts",
+    "dock:install": "./scripts/install-mr-mojo-dock-app.sh",
+    "dock:start": "./scripts/start-mr-mojo.command",
+    "dock:stop": "./scripts/stop-mr-mojo.command",
+    "dock:restart": "./scripts/restart-mr-mojo.command",
     "start:local": "npm-run-all --parallel start:db start:app",
     "start:db": "npx supabase start",
     "start:app": "npm run dev"
