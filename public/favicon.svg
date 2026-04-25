@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <radialGradient id="bg-glow" cx="50%" cy="40%" r="52%">
+      <stop offset="0%" stop-color="#EAC05E" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#EAC05E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pick-grad" x1="28%" y1="4%" x2="72%" y2="96%">
+      <stop offset="0%" stop-color="#F4D878"/>
+      <stop offset="42%" stop-color="#EAC05E"/>
+      <stop offset="100%" stop-color="#A86C10"/>
+    </linearGradient>
+    <filter id="pick-shadow" x="-10%" y="-5%" width="120%" height="120%">
+      <feDropShadow dx="1" dy="2" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100" height="100" rx="15" fill="#050403"/>
+
+  <!-- Atmospheric amber glow -->
+  <rect width="100" height="100" rx="15" fill="url(#bg-glow)"/>
+
+  <!-- Guitar pick (pointed lozenge — standard pick shape) -->
+  <path
+    d="M50 91 C23 68 13 50 13 37 C13 15 29 5 50 5 C71 5 87 15 87 37 C87 50 77 68 50 91Z"
+    fill="url(#pick-grad)"
+    filter="url(#pick-shadow)"
+  />
+
+  <!-- Pick surface highlight (left-side sheen) -->
+  <path
+    d="M34 12 C23 19 17 29 17 39 C17 51 23 63 38 77"
+    stroke="rgba(255,248,212,0.40)"
+    stroke-width="3.5"
+    fill="none"
+    stroke-linecap="round"
+  />
+
+  <!-- Bold serif M -->
+  <text
+    x="50"
+    y="52"
+    text-anchor="middle"
+    font-family="Georgia, 'Palatino Linotype', Palatino, 'Book Antiqua', serif"
+    font-weight="900"
+    font-size="50"
+    fill="#050403"
+    letter-spacing="-2"
+  >M</text>
+</svg>

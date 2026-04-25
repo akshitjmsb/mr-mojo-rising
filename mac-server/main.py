@@ -7,6 +7,7 @@ and lyrics fetching.
 import asyncio
 import json
 import os
+import subprocess
 import tempfile
 import traceback
 import wave
@@ -592,8 +593,26 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
     await run_cmd(fallback_cmd, "demucs (cpu fallback)", song_id, job_id)
 
 
+def compress_wav_to_mp3(wav_path: Path) -> Path:
+    mp3_path = wav_path.with_suffix(".mp3")
+    if mp3_path.exists():
+        return mp3_path
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(wav_path), "-q:a", "2", str(mp3_path)],
+        check=True,
+        capture_output=True,
+    )
+    return mp3_path
+
+
 def upload_file_sync(local_path: Path, storage_path: str) -> str:
+    # Compress WAV to MP3 to stay under Supabase's storage size limit.
+    if local_path.suffix.lower() == ".wav":
+        local_path = compress_wav_to_mp3(local_path)
+        storage_path = storage_path.rsplit(".", 1)[0] + ".mp3"
+
     local_sb = get_supabase()
+    content_type = "audio/mpeg" if local_path.suffix.lower() == ".mp3" else "audio/wav"
     with open(local_path, "rb") as f:
         data = f.read()
 
@@ -601,15 +620,14 @@ def upload_file_sync(local_path: Path, storage_path: str) -> str:
         local_sb.storage.from_("stems").upload(
             storage_path,
             data,
-            file_options={"content-type": "audio/wav", "upsert": "true"},
+            file_options={"content-type": content_type, "upsert": "true"},
         )
     except Exception:
-        # Defensive fallback for SDK/storage mismatches.
         local_sb.storage.from_("stems").remove([storage_path])
         local_sb.storage.from_("stems").upload(
             storage_path,
             data,
-            file_options={"content-type": "audio/wav", "upsert": "true"},
+            file_options={"content-type": content_type, "upsert": "true"},
         )
 
     return local_sb.storage.from_("stems").get_public_url(storage_path)
