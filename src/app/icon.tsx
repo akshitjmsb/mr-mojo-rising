@@ -13,48 +13,29 @@ export default function Icon() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: "19%",
-        position: "relative",
+        borderRadius: "14%",
       }}
     >
       <svg viewBox="0 0 100 100" width="32" height="32">
-        <path
-          d="M50 91 C23 68 13 50 13 37 C13 15 29 5 50 5 C71 5 87 15 87 37 C87 50 77 68 50 91Z"
-          fill="#EAC05E"
-        />
-        <path
-          d="M34 12 C23 19 17 29 17 39 C17 51 23 63 38 77"
-          stroke="rgba(255,248,212,0.35)"
-          strokeWidth="3.5"
-          fill="none"
-          strokeLinecap="round"
-        />
+        <defs>
+          <radialGradient id="p" cx="50%" cy="45%" r="55%">
+            <stop offset="0%" stopColor="#FFF8D8" />
+            <stop offset="22%" stopColor="#F7CC48" />
+            <stop offset="58%" stopColor="#C47818" />
+            <stop offset="100%" stopColor="#5A2C08" />
+          </radialGradient>
+          <linearGradient id="f" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#9A6828" />
+            <stop offset="100%" stopColor="#4E3012" />
+          </linearGradient>
+        </defs>
+        {/* Arch frame */}
+        <path d="M 10 92 L 10 50 A 40 40 0 0 1 90 50 L 90 92 Z" fill="url(#f)" />
+        {/* Arch opening — golden light */}
+        <path d="M 18 92 L 18 50 A 32 32 0 0 1 82 50 L 82 92 Z" fill="url(#p)" />
+        {/* Keystone */}
+        <polygon points="43,20 44.5,8 55.5,8 57,20" fill="#B07030" />
       </svg>
-      <div
-        style={{
-          position: "absolute",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 4,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "serif",
-            fontWeight: 900,
-            fontSize: 15,
-            color: "#050403",
-            lineHeight: 1,
-            letterSpacing: "-0.5px",
-          }}
-        >
-          M
-        </span>
-      </div>
     </div>,
     { ...size }
   );

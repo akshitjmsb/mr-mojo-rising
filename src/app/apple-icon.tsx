@@ -13,10 +13,9 @@ export default function AppleIcon() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        position: "relative",
       }}
     >
-      {/* Amber glow */}
+      {/* Atmospheric amber bloom */}
       <div
         style={{
           position: "absolute",
@@ -25,56 +24,53 @@ export default function AppleIcon() {
           right: 0,
           bottom: 0,
           background:
-            "radial-gradient(ellipse 65% 65% at 50% 38%, rgba(234,192,94,0.18) 0%, transparent 100%)",
+            "radial-gradient(ellipse 80% 80% at 50% 52%, rgba(234,192,94,0.18) 0%, transparent 100%)",
         }}
       />
 
-      {/* Guitar pick */}
-      <svg
-        viewBox="0 0 100 100"
-        width="155"
-        height="155"
-        style={{ position: "absolute" }}
-      >
+      <svg viewBox="0 0 100 100" width="180" height="180">
+        <defs>
+          <radialGradient id="portal" cx="50%" cy="45%" r="55%">
+            <stop offset="0%" stopColor="#FFF8D8" />
+            <stop offset="22%" stopColor="#F7CC48" />
+            <stop offset="58%" stopColor="#C47818" />
+            <stop offset="100%" stopColor="#5A2C08" />
+          </radialGradient>
+          <linearGradient id="frame" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#9A6828" />
+            <stop offset="100%" stopColor="#4E3012" />
+          </linearGradient>
+          <linearGradient id="keystone" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#C08030" />
+            <stop offset="100%" stopColor="#8A5520" />
+          </linearGradient>
+        </defs>
+
+        {/* Arch frame — spring line y=50, outer radius 40 */}
+        <path d="M 10 92 L 10 50 A 40 40 0 0 1 90 50 L 90 92 Z" fill="url(#frame)" />
+
+        {/* Arch opening — golden light, inner radius 32 */}
+        <path d="M 18 92 L 18 50 A 32 32 0 0 1 82 50 L 82 92 Z" fill="url(#portal)" />
+
+        {/* Keystone at crown */}
+        <polygon points="43,20 44.5,8 55.5,8 57,20" fill="url(#keystone)" />
+        <line x1="50" y1="8" x2="50" y2="20" stroke="#3A1E08" strokeWidth="0.9" opacity="0.55" />
+
+        {/* Soft halo at crown of arch interior */}
+        <ellipse cx="50" cy="38" rx="14" ry="9" fill="#FFF8D8" opacity="0.30" />
+
+        {/* Threshold / floor bar */}
+        <rect x="18" y="88" width="64" height="4" rx="0.5" fill="#3A2010" opacity="0.75" />
+
+        {/* Inner-edge shadow for depth */}
         <path
-          d="M50 91 C23 68 13 50 13 37 C13 15 29 5 50 5 C71 5 87 15 87 37 C87 50 77 68 50 91Z"
-          fill="#EAC05E"
-        />
-        <path
-          d="M34 12 C23 19 17 29 17 39 C17 51 23 63 38 77"
-          stroke="rgba(255,248,212,0.38)"
-          strokeWidth="3.5"
+          d="M 18 92 L 18 50 A 32 32 0 0 1 82 50 L 82 92 Z"
           fill="none"
-          strokeLinecap="round"
+          stroke="#050403"
+          strokeWidth="1.5"
+          opacity="0.28"
         />
       </svg>
-
-      {/* Serif M */}
-      <div
-        style={{
-          position: "absolute",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 20,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "serif",
-            fontWeight: 900,
-            fontSize: 82,
-            color: "#050403",
-            lineHeight: 1,
-            letterSpacing: "-3px",
-          }}
-        >
-          M
-        </span>
-      </div>
     </div>,
     { ...size }
   );
