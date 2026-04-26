@@ -56,7 +56,7 @@ export default function SongPlayerPage() {
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<"guitar" | "vocals" | "full">("guitar");
-  const [showPanel, setShowPanel] = useState(false);
+  const [showPanel, setShowPanel] = useState(true);
   const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, + = lyrics earlier, - = lyrics later
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -66,6 +66,7 @@ export default function SongPlayerPage() {
   const [duration, setDuration] = useState(0);
   const [downloadingStem, setDownloadingStem] = useState<DownloadStemKey | null>(null);
   const [downloadError, setDownloadError] = useState("");
+  const [showDownloads, setShowDownloads] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
@@ -284,7 +285,7 @@ export default function SongPlayerPage() {
   }, [isPlaying, updateTime]);
 
   // Play/Pause
-  function togglePlay() {
+  const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
     if (isPlaying) {
       audioRef.current.pause();
@@ -294,7 +295,7 @@ export default function SongPlayerPage() {
       audioRef.current.play();
       setIsPlaying(true);
     }
-  }
+  }, [isPlaying]);
 
   // Select section
   function handleSelectSection(section: Section) {
@@ -307,13 +308,6 @@ export default function SongPlayerPage() {
         setIsPlaying(true);
       }
     }
-  }
-
-  // Cycle speed
-  function cycleSpeed() {
-    const currentIdx = SPEEDS.findIndex((s) => s.value === speed);
-    const nextIdx = (currentIdx + 1) % SPEEDS.length;
-    setSpeed(SPEEDS[nextIdx].value);
   }
 
   function getDefaultFileName(stem: DownloadStemKey): string {
@@ -475,11 +469,15 @@ export default function SongPlayerPage() {
         event.preventDefault();
         forward();
       }
+      if (event.key === " ") {
+        event.preventDefault();
+        togglePlay();
+      }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [forward, rewind]);
+  }, [forward, rewind, togglePlay]);
 
   // Calculate section progress
   const sectionProgress =
@@ -634,7 +632,7 @@ export default function SongPlayerPage() {
         zIndex: 1,
       }}
     >
-      <Header songTitle={song.title} songArtist={song.artist || undefined} />
+      <Header songTitle={song.title} songArtist={song.artist || undefined} backHref="/library" />
       <TabNav />
 
       <main style={{ flex: 1, overflow: "hidden" }}>
@@ -666,41 +664,68 @@ export default function SongPlayerPage() {
           ))}
         </div>
 
-        {/* Download controls */}
-        <div style={{ padding: "8px 20px 0", display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {downloadableStems.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => downloadStem(item.key)}
-              disabled={!item.available || downloadingStem !== null}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                minWidth: 92,
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 9,
-                fontWeight: 300,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                padding: "6px 10px",
-                background: "transparent",
-                border:
-                  item.key === currentDownloadStem
-                    ? "1px solid var(--color-gold)"
-                    : "1px solid var(--color-border-dark)",
-                color: item.available ? "var(--color-text-dark)" : "var(--color-text-darkest)",
-                cursor: !item.available || downloadingStem !== null ? "default" : "pointer",
-                opacity: !item.available || downloadingStem !== null ? 0.45 : 1,
-                borderRadius: 1,
-              }}
-            >
-              <span>{item.label}</span>
-              <DownloadIcon color={item.available ? "currentColor" : "var(--color-text-darkest)"} />
-            </button>
-          ))}
+        {/* Download trigger */}
+        <div style={{ padding: "8px 20px 0" }}>
+          <button
+            onClick={() => setShowDownloads((v) => !v)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontFamily: "var(--font-josefin), sans-serif",
+              fontSize: 9,
+              fontWeight: 300,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              padding: "7px 14px",
+              background: showDownloads ? "rgba(212,168,68,0.06)" : "transparent",
+              border: `1px solid ${showDownloads ? "var(--color-gold)" : "var(--color-border)"}`,
+              color: showDownloads ? "var(--color-gold)" : "var(--color-text-dark)",
+              cursor: "pointer",
+              borderRadius: 1,
+              transition: "all 0.25s",
+            }}
+          >
+            <span>Download</span>
+            <DownloadIcon color="currentColor" />
+          </button>
         </div>
+        {showDownloads && (
+          <div style={{ padding: "8px 20px 0", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {downloadableStems.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => downloadStem(item.key)}
+                disabled={!item.available || downloadingStem !== null}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  minWidth: 92,
+                  fontFamily: "var(--font-josefin), sans-serif",
+                  fontSize: 9,
+                  fontWeight: 300,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  padding: "6px 10px",
+                  background: "transparent",
+                  border:
+                    item.key === currentDownloadStem
+                      ? "1px solid var(--color-gold)"
+                      : "1px solid var(--color-border-dark)",
+                  color: item.available ? "var(--color-text-dark)" : "var(--color-text-darkest)",
+                  cursor: !item.available || downloadingStem !== null ? "default" : "pointer",
+                  opacity: !item.available || downloadingStem !== null ? 0.45 : 1,
+                  borderRadius: 1,
+                }}
+              >
+                <span>{item.label}</span>
+                <DownloadIcon color={item.available ? "currentColor" : "var(--color-text-darkest)"} />
+              </button>
+            ))}
+          </div>
+        )}
         {downloadError && (
           <p
             style={{
@@ -756,6 +781,31 @@ export default function SongPlayerPage() {
                 />
               );
             })}
+          </div>
+        </div>
+
+        {/* Full-song progress (orientation only) */}
+        <div style={{ padding: "0 20px" }}>
+          <div
+            style={{
+              position: "relative",
+              height: 2,
+              background: "var(--color-border-darkest)",
+              borderRadius: 1,
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                bottom: 0,
+                width: `${(duration > 0 ? currentTime / duration : 0) * 100}%`,
+                background: "rgba(212,168,68,0.45)",
+                borderRadius: 1,
+                transition: "width 0.1s linear",
+              }}
+            />
           </div>
         </div>
 
@@ -1021,30 +1071,6 @@ export default function SongPlayerPage() {
             </svg>
           </button>
 
-          {/* Speed */}
-          <button
-            onClick={cycleSpeed}
-            style={{
-              background: "none",
-              border: "none",
-              padding: 10,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 12,
-                fontWeight: 300,
-                letterSpacing: "0.05em",
-                color: "var(--color-text-dark)",
-              }}
-            >
-              {speed === 1 ? "1x" : `${speed}x`}
-            </span>
-          </button>
         </div>
 
         {/* Speed presets */}
@@ -1125,14 +1151,18 @@ export default function SongPlayerPage() {
                       fontWeight: 300,
                       letterSpacing: "0.06em",
                       color: lyricsOffset === 0 ? "var(--color-text-muted)" : "var(--color-gold)",
-                      minWidth: 44,
+                      minWidth: 64,
                       textAlign: "center",
                       cursor: "pointer",
                     }}
                     onClick={() => setLyricsOffset(0)}
-                    title="Click to reset"
+                    title={lyricsOffset === 0 ? undefined : "Click to reset"}
                   >
-                    {lyricsOffset === 0 ? "sync" : `${lyricsOffset > 0 ? "+" : ""}${lyricsOffset.toFixed(1)}s`}
+                    {lyricsOffset === 0
+                      ? "in sync"
+                      : lyricsOffset > 0
+                        ? "lyrics early"
+                        : "lyrics late"}
                   </span>
                   <button
                     onClick={() => setLyricsOffset((o) => Math.round((o + 0.5) * 10) / 10)}

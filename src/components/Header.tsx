@@ -1,14 +1,44 @@
+import Link from "next/link";
+
 interface HeaderProps {
   songTitle?: string;
   songArtist?: string;
+  backHref?: string;
 }
 
-export default function Header({ songTitle, songArtist }: HeaderProps) {
+export default function Header({ songTitle, songArtist, backHref }: HeaderProps) {
   return (
     <header>
-      <div className="flex items-start justify-between" style={{ padding: "22px 20px 0" }}>
+      <div className="flex items-start justify-between" style={{ padding: "22px 20px 0", gap: 12 }}>
+        {/* Back button */}
+        {backHref && (
+          <Link
+            href={backHref}
+            aria-label="Back"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 32,
+              height: 32,
+              marginTop: 2,
+              color: "var(--color-text-muted)",
+              textDecoration: "none",
+              border: "1px solid var(--color-border-dark)",
+              borderRadius: 1,
+              flexShrink: 0,
+              transition: "color 0.2s, border-color 0.2s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
+          </Link>
+        )}
+
         {/* Logo */}
-        <div>
+        <div style={{ flex: 1 }}>
           <h1
             className="flicker"
             style={{

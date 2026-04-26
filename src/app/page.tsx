@@ -49,6 +49,7 @@ export default function ImportPage() {
   const [finished, setFinished] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importingSongIdRef = useRef<string | null>(null);
 
   // Timer: tick every second while importing
   useEffect(() => {
@@ -93,7 +94,14 @@ export default function ImportPage() {
 
   async function handleImport(e: React.FormEvent) {
     e.preventDefault();
-    if (!url.trim()) return;
+    const trimmed = url.trim();
+    if (!trimmed) return;
+
+    const isYouTube = /^https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be\/)/.test(trimmed);
+    if (!isYouTube) {
+      setError("Please paste a YouTube link (youtube.com/watch or youtu.be/...)");
+      return;
+    }
 
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -128,6 +136,7 @@ export default function ImportPage() {
 
       // Poll for status
       const songId = data.id;
+      importingSongIdRef.current = songId;
       const poll = setInterval(async () => {
         try {
           const statusRes = await fetch(`/api/songs/${songId}/status`);
@@ -140,6 +149,7 @@ export default function ImportPage() {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
+            importingSongIdRef.current = null;
             setFinished(true);
             setNotice("Song ready. Opening player...");
             setTimeout(() => router.push(`/song/${songId}`), 1500);
@@ -150,6 +160,7 @@ export default function ImportPage() {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
+            importingSongIdRef.current = null;
             setError(statusData.last_error || "The music's over... Processing failed. Please try again.");
             setImporting(false);
           }
@@ -164,6 +175,7 @@ export default function ImportPage() {
         clearInterval(poll);
         if (pollRef.current === poll) {
           pollRef.current = null;
+          importingSongIdRef.current = null;
           setImporting(false);
           setNotice("Still processing in the background. Check Library in a minute.");
         }
@@ -172,6 +184,29 @@ export default function ImportPage() {
     } catch {
       setError("Could not connect to the server. Is the Mac server running?");
       setImporting(false);
+    }
+  }
+
+  function handleCancelImport() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    const songId = importingSongIdRef.current;
+    importingSongIdRef.current = null;
+    setImporting(false);
+    setFinished(false);
+    setNotice("Import canceled.");
+
+    if (songId) {
+      fetch(`/api/songs/${songId}`, { method: "DELETE" }).catch(() => {
+        // Best-effort cleanup; ignore failures.
+      });
     }
   }
 
@@ -404,6 +439,30 @@ export default function ImportPage() {
               >
                 &ldquo;{DOORS_QUOTES[quoteIndex]}&rdquo;
               </p>
+            )}
+
+            {/* Cancel link */}
+            {!finished && (
+              <button
+                type="button"
+                onClick={handleCancelImport}
+                style={{
+                  fontFamily: "var(--font-josefin), sans-serif",
+                  fontSize: 10,
+                  fontWeight: 300,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: "var(--color-text-muted)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                  textDecoration: "underline",
+                  textUnderlineOffset: 4,
+                }}
+              >
+                Cancel
+              </button>
             )}
           </div>
         )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
@@ -14,24 +14,60 @@ export default function LibraryPage() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
+  const [retryingSongId, setRetryingSongId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function fetchSongs() {
-      const res = await fetch("/api/songs");
-      const data = await res.json();
-      setSongs(Array.isArray(data) ? (data as Song[]) : []);
-      setLoading(false);
-    }
-
-    fetchSongs();
+  const fetchSongs = useCallback(async () => {
+    const res = await fetch("/api/songs");
+    const data = await res.json();
+    setSongs(Array.isArray(data) ? (data as Song[]) : []);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await fetchSongs();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchSongs]);
+
+  // Auto-refresh while any song is processing/queued
+  useEffect(() => {
+    const hasInflight = songs.some(
+      (s) => s.status === "processing" || s.status === "queued"
+    );
+    if (!hasInflight) return;
+    const interval = setInterval(() => {
+      fetchSongs();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [songs, fetchSongs]);
+
+  // Reset delete confirmation when clicking outside that song row
+  useEffect(() => {
+    if (!confirmDeleteId) return;
+    function onMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest(`[data-confirm-target="${confirmDeleteId}"]`)) {
+        setConfirmDeleteId(null);
+      }
+    }
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [confirmDeleteId]);
+
   async function handleDeleteSong(song: Song) {
-    const confirmed = window.confirm(`Delete "${song.title}"?`);
-    if (!confirmed) return;
+    if (confirmDeleteId !== song.id) {
+      setConfirmDeleteId(song.id);
+      return;
+    }
 
     setError("");
+    setConfirmDeleteId(null);
     setDeletingSongId(song.id);
 
     try {
@@ -50,6 +86,35 @@ export default function LibraryPage() {
       setError("Failed to delete song");
     } finally {
       setDeletingSongId(null);
+    }
+  }
+
+  async function handleRetrySong(song: Song) {
+    setError("");
+    setRetryingSongId(song.id);
+
+    try {
+      // Delete the failed row so retry doesn't leave a duplicate behind.
+      await fetch(`/api/songs/${song.id}`, { method: "DELETE" });
+
+      const res = await fetch("/api/songs/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ youtube_url: song.youtube_url }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Failed to retry song");
+        await fetchSongs();
+        return;
+      }
+
+      await fetchSongs();
+    } catch {
+      setError("Failed to retry song");
+    } finally {
+      setRetryingSongId(null);
     }
   }
 
@@ -256,7 +321,30 @@ export default function LibraryPage() {
                   )}
                 </div>
               </button>
+              {song.status === "failed" && (
+                <button
+                  onClick={() => handleRetrySong(song)}
+                  disabled={retryingSongId === song.id || deletingSongId === song.id}
+                  style={{
+                    fontFamily: "var(--font-josefin), sans-serif",
+                    fontSize: 9,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "var(--color-gold)",
+                    background: "transparent",
+                    border: "none",
+                    borderLeft: "1px solid var(--color-border-darkest)",
+                    padding: "0 14px",
+                    minWidth: 64,
+                    cursor: retryingSongId === song.id ? "default" : "pointer",
+                    opacity: retryingSongId === song.id ? 0.5 : 1,
+                  }}
+                >
+                  {retryingSongId === song.id ? "..." : "Retry"}
+                </button>
+              )}
               <button
+                data-confirm-target={song.id}
                 onClick={() => handleDeleteSong(song)}
                 disabled={deletingSongId === song.id}
                 style={{
@@ -264,17 +352,26 @@ export default function LibraryPage() {
                   fontSize: 9,
                   letterSpacing: "0.14em",
                   textTransform: "uppercase",
-                  color: "var(--color-terracotta)",
-                  background: "transparent",
+                  color:
+                    confirmDeleteId === song.id
+                      ? "var(--color-terracotta)"
+                      : "var(--color-text-muted)",
+                  background:
+                    confirmDeleteId === song.id ? "rgba(184,92,58,0.08)" : "transparent",
                   border: "none",
                   borderLeft: "1px solid var(--color-border-darkest)",
                   padding: "0 14px",
-                  minWidth: 72,
+                  minWidth: 80,
                   cursor: deletingSongId === song.id ? "default" : "pointer",
                   opacity: deletingSongId === song.id ? 0.5 : 1,
+                  transition: "color 0.2s, background 0.2s",
                 }}
               >
-                {deletingSongId === song.id ? "..." : "Delete"}
+                {deletingSongId === song.id
+                  ? "..."
+                  : confirmDeleteId === song.id
+                    ? "Confirm?"
+                    : "Delete"}
               </button>
             </div>
           ))}
