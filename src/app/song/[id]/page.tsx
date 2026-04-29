@@ -2,9 +2,6 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
-import Header from "@/components/Header";
-import TabNav from "@/components/TabNav";
-import Footer from "@/components/Footer";
 import { parseLrc, findCurrentLineIndex } from "@/lib/lrc-parser";
 import type { Database } from "@/lib/database.types";
 
@@ -557,85 +554,41 @@ export default function SongPlayerPage() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          maxWidth: 420,
-          margin: "0 auto",
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        <Header />
-        <TabNav />
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg
-            className="spinning"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-gold)"
-            strokeWidth="2"
-          >
-            <path d="M21 12a9 9 0 11-6.219-8.56" />
-          </svg>
-        </div>
-        <Footer />
+      <div className="flex flex-1 items-center justify-center">
+        <svg
+          className="spinning"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-gold)"
+          strokeWidth="2"
+        >
+          <path d="M21 12a9 9 0 11-6.219-8.56" />
+        </svg>
       </div>
     );
   }
 
   if (!song) {
     return (
-      <div
-        style={{
-          maxWidth: 420,
-          margin: "0 auto",
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        <Header />
-        <TabNav />
-        <div style={{ flex: 1, padding: 24 }}>
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 12,
-              fontWeight: 100,
-              color: "var(--color-text-muted)",
-            }}
-          >
-            Song not found.
-          </p>
-        </div>
-        <Footer />
+      <div className="flex-1 p-6">
+        <p
+          style={{
+            fontFamily: "var(--font-josefin), sans-serif",
+            fontSize: 12,
+            fontWeight: 100,
+            color: "var(--color-text-muted)",
+          }}
+        >
+          Song not found.
+        </p>
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 420,
-        margin: "0 auto",
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        zIndex: 1,
-      }}
-    >
-      <Header songTitle={song.title} songArtist={song.artist || undefined} backHref="/library" />
-      <TabNav />
-
-      <main style={{ flex: 1, overflow: "hidden" }}>
+    <main style={{ flex: 1, overflow: "hidden" }}>
         {/* Stem toggle pills */}
         <div style={{ padding: "16px 20px 0", display: "flex", gap: 8 }}>
           {(["guitar", "vocals", "full"] as const).map((mode) => (
@@ -1361,9 +1314,6 @@ export default function SongPlayerPage() {
             )}
           </div>
         </div>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   );
 }

@@ -2,9 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Header from "@/components/Header";
-import TabNav from "@/components/TabNav";
-import Footer from "@/components/Footer";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
@@ -119,21 +116,7 @@ export default function LibraryPage() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 420,
-        margin: "0 auto",
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        zIndex: 1,
-      }}
-    >
-      <Header />
-      <TabNav />
-
-      <main style={{ flex: 1 }}>
+    <main style={{ flex: 1 }}>
         {/* Song count */}
         <div style={{ padding: "16px 20px 10px" }}>
           <p
@@ -393,9 +376,6 @@ export default function LibraryPage() {
             </div>
           )}
         </div>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   );
 }

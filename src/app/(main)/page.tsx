@@ -2,9 +2,6 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Header from "@/components/Header";
-import TabNav from "@/components/TabNav";
-import Footer from "@/components/Footer";
 
 const STAGES = [
   { title: "Lighting the fire...", subtitle: "Validating & queuing your song", start: 0 },
@@ -211,21 +208,7 @@ export default function ImportPage() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 420,
-        margin: "0 auto",
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        zIndex: 1,
-      }}
-    >
-      <Header />
-      <TabNav />
-
-      <main style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", gap: 30 }}>
+    <main style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", gap: 30 }}>
         {/* Hero text */}
         <div>
           <p
@@ -516,9 +499,6 @@ export default function ImportPage() {
             </div>
           ))}
         </div>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   );
 }
