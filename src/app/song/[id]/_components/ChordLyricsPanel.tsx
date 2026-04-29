@@ -23,7 +23,7 @@ export default function ChordLyricsPanel({ chords, lyrics, currentTime }: Props)
 
   const lrcLines = useMemo(
     () => (lyrics?.synced_lrc ? parseLrc(lyrics.synced_lrc) : []),
-    [lyrics?.synced_lrc],
+    [lyrics],
   );
 
   const adjustedLines = useMemo(

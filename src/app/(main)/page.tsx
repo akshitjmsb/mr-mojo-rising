@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import type { Database } from "@/lib/database.types";
+
+type Song = Database["public"]["Tables"]["songs"]["Row"];
 
 const STAGES = [
   { title: "Lighting the fire...", subtitle: "Validating & queuing your song", start: 0 },
@@ -44,9 +48,9 @@ export default function ImportPage() {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [finished, setFinished] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importingSongIdRef = useRef<string | null>(null);
+  const [importingSongId, setImportingSongId] = useState<string | null>(null);
 
   // Timer: tick every second while importing
   useEffect(() => {
@@ -67,16 +71,59 @@ export default function ImportPage() {
 
   useEffect(() => {
     return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
     };
   }, []);
+
+  // Subscribe to the imported song's row via Realtime — replaces 3s polling.
+  useEffect(() => {
+    if (!importingSongId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`song-${importingSongId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "songs",
+          filter: `id=eq.${importingSongId}`,
+        },
+        (payload) => {
+          const next = payload.new as Song;
+          if (next.status === "ready") {
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            importingSongIdRef.current = null;
+            setFinished(true);
+            setNotice("Song ready. Opening player...");
+            setTimeout(() => router.push(`/song/${next.id}`), 1500);
+          } else if (next.status === "failed") {
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            importingSongIdRef.current = null;
+            setError(
+              next.last_error ||
+                "The music's over... Processing failed. Please try again.",
+            );
+            setImporting(false);
+            setImportingSongId(null);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [importingSongId, router]);
 
   // Derive current stage index from elapsed time (cap at stage 5, index 0-5; stage 6 only on ready)
   const currentStage = useMemo(() => {
@@ -100,10 +147,6 @@ export default function ImportPage() {
       return;
     }
 
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -115,6 +158,7 @@ export default function ImportPage() {
     setFinished(false);
     setElapsedTime(0);
     setQuoteIndex(0);
+    setImportingSongId(null);
 
     try {
       const res = await fetch("/api/songs/import", {
@@ -131,50 +175,20 @@ export default function ImportPage() {
         return;
       }
 
-      // Poll for status
-      const songId = data.id;
+      const songId = data.id as string;
       importingSongIdRef.current = songId;
-      const poll = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`/api/songs/${songId}/status`);
-          const statusData = await statusRes.json();
+      setImportingSongId(songId);
 
-          if (statusData.status === "ready") {
-            clearInterval(poll);
-            pollRef.current = null;
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            importingSongIdRef.current = null;
-            setFinished(true);
-            setNotice("Song ready. Opening player...");
-            setTimeout(() => router.push(`/song/${songId}`), 1500);
-          } else if (statusData.status === "failed") {
-            clearInterval(poll);
-            pollRef.current = null;
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            importingSongIdRef.current = null;
-            setError(statusData.last_error || "The music's over... Processing failed. Please try again.");
-            setImporting(false);
-          }
-        } catch {
-          // Continue polling
-        }
-      }, 3000);
-      pollRef.current = poll;
-
-      // Stop polling after 5 minutes
+      // Safety timeout: detach the subscription after 5 minutes if the worker
+      // never reports terminal status (e.g. mac-server is down).
       timeoutRef.current = setTimeout(() => {
-        clearInterval(poll);
-        if (pollRef.current === poll) {
-          pollRef.current = null;
+        if (importingSongIdRef.current === songId) {
           importingSongIdRef.current = null;
           setImporting(false);
-          setNotice("Still processing in the background. Check Library in a minute.");
+          setImportingSongId(null);
+          setNotice(
+            "Still processing in the background. Check Library in a minute.",
+          );
         }
         timeoutRef.current = null;
       }, 300000);
@@ -185,10 +199,6 @@ export default function ImportPage() {
   }
 
   function handleCancelImport() {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -197,6 +207,7 @@ export default function ImportPage() {
     const songId = importingSongIdRef.current;
     importingSongIdRef.current = null;
     setImporting(false);
+    setImportingSongId(null);
     setFinished(false);
     setNotice("Import canceled.");
 

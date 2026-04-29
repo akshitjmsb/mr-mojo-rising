@@ -2,19 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import Spinner from "@/components/Spinner";
 import type { Database } from "@/lib/database.types";
 import StemSelector, { type StemMode } from "./_components/StemSelector";
-import DownloadPanel, {
-  type DownloadStemKey,
-} from "./_components/DownloadPanel";
-import Waveform from "./_components/Waveform";
+import type { DownloadStemKey } from "./_components/DownloadPanel";
 import Scrubber from "./_components/Scrubber";
 import TransportControls from "./_components/TransportControls";
 import SpeedPresets from "./_components/SpeedPresets";
-import ChordLyricsPanel from "./_components/ChordLyricsPanel";
-import SectionList from "./_components/SectionList";
 import { useMetronome } from "./_hooks/useMetronome";
+
+// Heavy or interaction-on-demand panels — split out of the initial bundle.
+const Waveform = dynamic(() => import("./_components/Waveform"), {
+  loading: () => <div className="h-[60px] px-5 pt-4 pb-2" />,
+});
+const DownloadPanel = dynamic(() => import("./_components/DownloadPanel"));
+const ChordLyricsPanel = dynamic(
+  () => import("./_components/ChordLyricsPanel"),
+);
+const SectionList = dynamic(() => import("./_components/SectionList"));
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
 type Stem = Database["public"]["Tables"]["stems"]["Row"];

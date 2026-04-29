@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/database.types";
 
 type Song = Database["public"]["Tables"]["songs"]["Row"];
@@ -32,17 +33,37 @@ export default function LibraryPage() {
     };
   }, [fetchSongs]);
 
-  // Auto-refresh while any song is processing/queued
+  // Live song-list updates via Supabase Realtime — no polling.
   useEffect(() => {
-    const hasInflight = songs.some(
-      (s) => s.status === "processing" || s.status === "queued"
-    );
-    if (!hasInflight) return;
-    const interval = setInterval(() => {
-      fetchSongs();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [songs, fetchSongs]);
+    const supabase = createClient();
+    const channel = supabase
+      .channel("library-songs")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "songs" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const next = payload.new as Song;
+            setSongs((prev) =>
+              prev.some((s) => s.id === next.id) ? prev : [next, ...prev],
+            );
+          } else if (payload.eventType === "UPDATE") {
+            const next = payload.new as Song;
+            setSongs((prev) =>
+              prev.map((s) => (s.id === next.id ? next : s)),
+            );
+          } else if (payload.eventType === "DELETE") {
+            const oldRow = payload.old as { id: string };
+            setSongs((prev) => prev.filter((s) => s.id !== oldRow.id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Reset delete confirmation when tapping outside that song row
   useEffect(() => {
