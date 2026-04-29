@@ -47,16 +47,7 @@ export default function PracticePage() {
 
   return (
     <div className="flex flex-1 items-center justify-center p-6 text-center">
-      <p
-        style={{
-          fontFamily: "var(--font-josefin), sans-serif",
-          fontSize: 12,
-          fontWeight: 100,
-          letterSpacing: "0.1em",
-          color: "var(--color-text-muted)",
-          lineHeight: 1.8,
-        }}
-      >
+      <p className="font-josefin text-[12px] font-thin leading-[1.8] tracking-[0.1em] text-text-muted">
         No songs ready to practice yet.
         <br />
         Import one to get started.

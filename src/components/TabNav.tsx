@@ -18,34 +18,23 @@ export default function TabNav() {
   }
 
   return (
-    <nav
-      style={{
-        display: "flex",
-        gap: 28,
-        padding: "0 20px",
-        borderBottom: "1px solid var(--color-border-darkest)",
-      }}
-    >
-      {TABS.map((tab) => (
-        <Link
-          key={tab.href}
-          href={tab.href}
-          style={{
-            fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 10,
-            fontWeight: 300,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-            color: isActive(tab.href) ? "var(--color-gold)" : "var(--color-text-muted)",
-            borderBottom: isActive(tab.href) ? "1px solid var(--color-gold)" : "1px solid transparent",
-            padding: "12px 0",
-            textDecoration: "none",
-            transition: "color 0.25s, border-color 0.25s",
-          }}
-        >
-          {tab.label}
-        </Link>
-      ))}
+    <nav className="flex gap-7 border-b border-border-darkest px-5">
+      {TABS.map((tab) => {
+        const active = isActive(tab.href);
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className={`block border-b py-3 font-josefin text-[10px] font-light uppercase tracking-[0.2em] transition-colors duration-300 ${
+              active
+                ? "border-gold text-gold"
+                : "border-transparent text-text-muted"
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

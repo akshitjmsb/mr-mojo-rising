@@ -44,17 +44,17 @@ export default function LibraryPage() {
     return () => clearInterval(interval);
   }, [songs, fetchSongs]);
 
-  // Reset delete confirmation when clicking outside that song row
+  // Reset delete confirmation when tapping outside that song row
   useEffect(() => {
     if (!confirmDeleteId) return;
-    function onMouseDown(e: MouseEvent) {
+    function onPointerDown(e: PointerEvent) {
       const target = e.target as HTMLElement | null;
       if (!target?.closest(`[data-confirm-target="${confirmDeleteId}"]`)) {
         setConfirmDeleteId(null);
       }
     }
-    window.addEventListener("mousedown", onMouseDown);
-    return () => window.removeEventListener("mousedown", onMouseDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [confirmDeleteId]);
 
   async function handleDeleteSong(song: Song) {
@@ -116,266 +116,140 @@ export default function LibraryPage() {
   }
 
   return (
-    <main style={{ flex: 1 }}>
-        {/* Song count */}
-        <div style={{ padding: "16px 20px 10px" }}>
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 9,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            {loading ? "Loading..." : `${songs.length} song${songs.length !== 1 ? "s" : ""}`}
+    <main className="flex-1">
+      <div className="px-5 pt-4 pb-2.5">
+        <p className="font-josefin text-[9px] uppercase tracking-[0.2em] text-text-muted">
+          {loading
+            ? "Loading..."
+            : `${songs.length} song${songs.length !== 1 ? "s" : ""}`}
+        </p>
+        {error && (
+          <p className="mt-2 font-josefin text-[11px] tracking-[0.08em] text-terracotta">
+            {error}
           </p>
-          {error && (
-            <p
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 11,
-                letterSpacing: "0.08em",
-                color: "var(--color-terracotta)",
-                marginTop: 8,
+        )}
+      </div>
+
+      <div>
+        {songs.map((song) => (
+          <div
+            key={song.id}
+            className="flex items-center border-b border-border-darkest"
+          >
+            <button
+              onClick={() => {
+                if (song.status === "ready") {
+                  router.push(`/song/${song.id}`);
+                }
               }}
+              className={`flex w-full items-center gap-3.5 border-none bg-transparent py-4 pl-5 pr-3 text-left transition-colors duration-200 ${
+                song.status === "ready"
+                  ? "cursor-pointer hover:bg-gold/5"
+                  : "cursor-default"
+              }`}
             >
-              {error}
+              <div className="flex h-[38px] w-[38px] shrink-0 items-center justify-center border border-border">
+                {song.status === "processing" ? (
+                  <svg
+                    className="spinning"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--color-text-muted)"
+                    strokeWidth="2"
+                  >
+                    <path d="M21 12a9 9 0 11-6.219-8.56" />
+                  </svg>
+                ) : song.status === "ready" ? (
+                  <svg
+                    width="12"
+                    height="14"
+                    viewBox="0 0 12 14"
+                    fill="var(--color-text-muted)"
+                  >
+                    <path d="M0 0L12 7L0 14V0Z" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--color-text-muted)"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4M12 16h.01" />
+                  </svg>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[14px] italic text-text">
+                  {song.title}
+                </p>
+                <p className="mt-0.5 font-josefin text-[10px] font-thin uppercase tracking-[0.12em] text-text-dark">
+                  {song.artist || "Unknown Artist"}
+                </p>
+              </div>
+
+              <div className="shrink-0 text-right">
+                {song.status === "processing" && (
+                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
+                    Processing
+                  </p>
+                )}
+                {song.status === "queued" && (
+                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-text-muted">
+                    Queued
+                  </p>
+                )}
+                {song.status === "failed" && (
+                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-terracotta">
+                    Failed
+                  </p>
+                )}
+              </div>
+            </button>
+            {song.status === "failed" && (
+              <button
+                onClick={() => handleRetrySong(song)}
+                disabled={
+                  retryingSongId === song.id || deletingSongId === song.id
+                }
+                className="min-w-[64px] cursor-pointer border-none border-l border-l-border-darkest bg-transparent px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold disabled:cursor-default disabled:opacity-50"
+              >
+                {retryingSongId === song.id ? "..." : "Retry"}
+              </button>
+            )}
+            <button
+              data-confirm-target={song.id}
+              onClick={() => handleDeleteSong(song)}
+              disabled={deletingSongId === song.id}
+              className={`min-w-[80px] cursor-pointer border-none border-l border-l-border-darkest px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] transition-colors duration-200 disabled:cursor-default disabled:opacity-50 ${
+                confirmDeleteId === song.id
+                  ? "bg-terracotta/10 text-terracotta"
+                  : "bg-transparent text-text-muted"
+              }`}
+            >
+              {deletingSongId === song.id
+                ? "..."
+                : confirmDeleteId === song.id
+                  ? "Confirm?"
+                  : "Delete"}
+            </button>
+          </div>
+        ))}
+
+        {!loading && songs.length === 0 && (
+          <div className="px-5 py-10 text-center">
+            <p className="font-josefin text-[12px] font-thin leading-[1.8] tracking-[0.1em] text-text-muted">
+              No songs yet. Import one to get started.
             </p>
-          )}
-        </div>
-
-        {/* Song list */}
-        <div>
-          {songs.map((song) => (
-            <div
-              key={song.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                borderBottom: "1px solid var(--color-border-darkest)",
-              }}
-            >
-              <button
-                onClick={() => {
-                  if (song.status === "ready") {
-                    router.push(`/song/${song.id}`);
-                  }
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: "16px 12px 16px 20px",
-                  width: "100%",
-                  background: "transparent",
-                  border: "none",
-                  cursor: song.status === "ready" ? "pointer" : "default",
-                  textAlign: "left",
-                  transition: "background 0.2s",
-                }}
-                onMouseEnter={(e) => {
-                  if (song.status === "ready") {
-                    e.currentTarget.style.background = "rgba(212,168,68,0.03)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                {/* Play icon / Spinner */}
-                <div
-                  style={{
-                    width: 38,
-                    height: 38,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: "1px solid var(--color-border)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {song.status === "processing" ? (
-                    <svg
-                      className="spinning"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="var(--color-text-muted)"
-                      strokeWidth="2"
-                    >
-                      <path d="M21 12a9 9 0 11-6.219-8.56" />
-                    </svg>
-                  ) : song.status === "ready" ? (
-                    <svg
-                      width="12"
-                      height="14"
-                      viewBox="0 0 12 14"
-                      fill="var(--color-text-muted)"
-                    >
-                      <path d="M0 0L12 7L0 14V0Z" />
-                    </svg>
-                  ) : (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="var(--color-text-muted)"
-                      strokeWidth="2"
-                    >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 8v4M12 16h.01" />
-                    </svg>
-                  )}
-                </div>
-
-                {/* Song info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p
-                    style={{
-                      fontFamily: "var(--font-playfair), Georgia, serif",
-                      fontSize: 14,
-                      fontStyle: "italic",
-                      color: "var(--color-text)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {song.title}
-                  </p>
-                  <p
-                    style={{
-                      fontFamily: "var(--font-josefin), sans-serif",
-                      fontSize: 10,
-                      fontWeight: 100,
-                      letterSpacing: "0.12em",
-                      textTransform: "uppercase",
-                      color: "var(--color-text-dark)",
-                      marginTop: 2,
-                    }}
-                  >
-                    {song.artist || "Unknown Artist"}
-                  </p>
-                </div>
-
-                {/* Status */}
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  {song.status === "processing" && (
-                    <p
-                      style={{
-                        fontFamily: "var(--font-josefin), sans-serif",
-                        fontSize: 9,
-                        letterSpacing: "0.15em",
-                        textTransform: "uppercase",
-                        color: "var(--color-orange)",
-                      }}
-                    >
-                      Processing
-                    </p>
-                  )}
-                  {song.status === "queued" && (
-                    <p
-                      style={{
-                        fontFamily: "var(--font-josefin), sans-serif",
-                        fontSize: 9,
-                        letterSpacing: "0.15em",
-                        textTransform: "uppercase",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Queued
-                    </p>
-                  )}
-                  {song.status === "failed" && (
-                    <p
-                      style={{
-                        fontFamily: "var(--font-josefin), sans-serif",
-                        fontSize: 9,
-                        letterSpacing: "0.15em",
-                        textTransform: "uppercase",
-                        color: "var(--color-terracotta)",
-                      }}
-                    >
-                      Failed
-                    </p>
-                  )}
-                </div>
-              </button>
-              {song.status === "failed" && (
-                <button
-                  onClick={() => handleRetrySong(song)}
-                  disabled={retryingSongId === song.id || deletingSongId === song.id}
-                  style={{
-                    fontFamily: "var(--font-josefin), sans-serif",
-                    fontSize: 9,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "var(--color-gold)",
-                    background: "transparent",
-                    border: "none",
-                    borderLeft: "1px solid var(--color-border-darkest)",
-                    padding: "0 14px",
-                    minWidth: 64,
-                    cursor: retryingSongId === song.id ? "default" : "pointer",
-                    opacity: retryingSongId === song.id ? 0.5 : 1,
-                  }}
-                >
-                  {retryingSongId === song.id ? "..." : "Retry"}
-                </button>
-              )}
-              <button
-                data-confirm-target={song.id}
-                onClick={() => handleDeleteSong(song)}
-                disabled={deletingSongId === song.id}
-                style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 9,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color:
-                    confirmDeleteId === song.id
-                      ? "var(--color-terracotta)"
-                      : "var(--color-text-muted)",
-                  background:
-                    confirmDeleteId === song.id ? "rgba(184,92,58,0.08)" : "transparent",
-                  border: "none",
-                  borderLeft: "1px solid var(--color-border-darkest)",
-                  padding: "0 14px",
-                  minWidth: 80,
-                  cursor: deletingSongId === song.id ? "default" : "pointer",
-                  opacity: deletingSongId === song.id ? 0.5 : 1,
-                  transition: "color 0.2s, background 0.2s",
-                }}
-              >
-                {deletingSongId === song.id
-                  ? "..."
-                  : confirmDeleteId === song.id
-                    ? "Confirm?"
-                    : "Delete"}
-              </button>
-            </div>
-          ))}
-
-          {!loading && songs.length === 0 && (
-            <div style={{ padding: "40px 20px", textAlign: "center" }}>
-              <p
-                style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 12,
-                  fontWeight: 100,
-                  letterSpacing: "0.1em",
-                  color: "var(--color-text-muted)",
-                  lineHeight: 1.8,
-                }}
-              >
-                No songs yet. Import one to get started.
-              </p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

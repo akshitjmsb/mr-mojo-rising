@@ -9,26 +9,12 @@ interface HeaderProps {
 export default function Header({ songTitle, songArtist, backHref }: HeaderProps) {
   return (
     <header>
-      <div className="flex items-start justify-between" style={{ padding: "22px 20px 0", gap: 12 }}>
-        {/* Back button */}
+      <div className="flex items-start justify-between gap-3 pt-[22px] pr-5 pl-5">
         {backHref && (
           <Link
             href={backHref}
             aria-label="Back"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-              marginTop: 2,
-              color: "var(--color-text-muted)",
-              textDecoration: "none",
-              border: "1px solid var(--color-border-dark)",
-              borderRadius: 1,
-              flexShrink: 0,
-              transition: "color 0.2s, border-color 0.2s",
-            }}
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[1px] border border-border-dark text-text-muted transition-colors hover:text-gold hover:border-gold"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5" />
@@ -37,63 +23,23 @@ export default function Header({ songTitle, songArtist, backHref }: HeaderProps)
           </Link>
         )}
 
-        {/* Logo */}
-        <div style={{ flex: 1 }}>
-          <h1
-            className="flicker"
-            style={{
-              fontFamily: "var(--font-playfair), Georgia, serif",
-              fontSize: 26,
-              fontWeight: 900,
-              fontStyle: "italic",
-              letterSpacing: "-0.01em",
-              lineHeight: 1,
-              color: "var(--color-text)",
-            }}
-          >
+        <div className="flex-1">
+          <h1 className="flicker font-playfair text-[26px] font-black italic leading-none tracking-[-0.01em] text-text">
             Mr. Mojo Rising
           </h1>
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 9,
-              fontWeight: 100,
-              letterSpacing: "0.28em",
-              textTransform: "uppercase",
-              color: "var(--color-gold)",
-              marginTop: 6,
-            }}
-          >
+          <p className="mt-1.5 font-josefin text-[9px] font-thin uppercase tracking-[0.28em] text-gold">
             Guitar Practice Studio
           </p>
         </div>
 
-        {/* Right side: song info or sign out */}
-        <div style={{ textAlign: "right" }}>
+        <div className="text-right">
           {songTitle ? (
             <>
-              <p
-                style={{
-                  fontFamily: "var(--font-playfair), Georgia, serif",
-                  fontSize: 13,
-                  fontStyle: "italic",
-                  color: "var(--color-text-secondary)",
-                }}
-              >
+              <p className="font-playfair text-[13px] italic text-text-secondary">
                 {songTitle}
               </p>
               {songArtist && (
-                <p
-                  style={{
-                    fontFamily: "var(--font-josefin), sans-serif",
-                    fontSize: 9,
-                    fontWeight: 100,
-                    letterSpacing: "0.18em",
-                    textTransform: "uppercase",
-                    color: "var(--color-text-muted)",
-                    marginTop: 2,
-                  }}
-                >
+                <p className="mt-0.5 font-josefin text-[9px] font-thin uppercase tracking-[0.18em] text-text-muted">
                   {songArtist}
                 </p>
               )}
@@ -102,39 +48,10 @@ export default function Header({ songTitle, songArtist, backHref }: HeaderProps)
         </div>
       </div>
 
-      {/* Decorative diamond rule */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "0 20px",
-          marginTop: 16,
-        }}
-      >
-        <div
-          style={{
-            flex: 1,
-            height: 1,
-            background: "linear-gradient(to right, transparent, var(--color-border-dark))",
-          }}
-        />
-        <div
-          style={{
-            width: 4,
-            height: 4,
-            background: "var(--color-gold)",
-            transform: "rotate(45deg)",
-            opacity: 0.6,
-            margin: "0 8px",
-          }}
-        />
-        <div
-          style={{
-            flex: 1,
-            height: 1,
-            background: "linear-gradient(to left, transparent, var(--color-border-dark))",
-          }}
-        />
+      <div className="mt-4 flex items-center px-5">
+        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-border-dark" />
+        <div className="mx-2 h-1 w-1 rotate-45 bg-gold opacity-60" />
+        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-border-dark" />
       </div>
     </header>
   );

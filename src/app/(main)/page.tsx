@@ -207,298 +207,137 @@ export default function ImportPage() {
     }
   }
 
+  const submitDisabled = importing || !url.trim();
+
   return (
-    <main style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", gap: 30 }}>
-        {/* Hero text */}
-        <div>
-          <p
-            style={{
-              fontFamily: "var(--font-playfair), Georgia, serif",
-              fontSize: 32,
-              fontWeight: 700,
-              fontStyle: "italic",
-              lineHeight: 1.25,
-              color: "var(--color-text)",
-            }}
-          >
-            Break on through
-            <br />
-            to the other side.
-          </p>
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 13,
-              fontWeight: 300,
-              letterSpacing: "0.1em",
-              lineHeight: 1.8,
-              color: "var(--color-text-muted)",
-              marginTop: 14,
-            }}
-          >
-            Paste a YouTube link. We&apos;ll isolate the guitar,
-            <br />
-            detect the sections, and let you practice at any speed.
-          </p>
-        </div>
+    <main className="flex flex-1 flex-col gap-[30px] p-6">
+      <div>
+        <p className="font-playfair text-[32px] font-bold italic leading-[1.25] text-text">
+          Break on through
+          <br />
+          to the other side.
+        </p>
+        <p className="mt-3.5 font-josefin text-[13px] font-light leading-[1.8] tracking-[0.1em] text-text-muted">
+          Paste a YouTube link. We&apos;ll isolate the guitar,
+          <br />
+          detect the sections, and let you practice at any speed.
+        </p>
+      </div>
 
-        {/* URL Input Form */}
-        <form onSubmit={handleImport} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://youtube.com/watch?v=..."
-            disabled={importing}
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 13,
-              fontWeight: 400,
-              letterSpacing: "0.06em",
-              padding: "14px 16px",
-              background: "var(--color-input-bg)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text)",
-              outline: "none",
-              width: "100%",
-            }}
-          />
-          <button
-            type="submit"
-            disabled={importing || !url.trim()}
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 11,
-              fontWeight: 400,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-              padding: "14px 24px",
-              background: "transparent",
-              border: "1px solid var(--color-gold)",
-              color: "var(--color-gold)",
-              cursor: importing || !url.trim() ? "default" : "pointer",
-              opacity: importing || !url.trim() ? 0.5 : 1,
-              transition: "background 0.25s, opacity 0.25s",
-              width: "100%",
-            }}
-          >
-            {importing ? (
-              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <svg
-                  className="spinning"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M21 12a9 9 0 11-6.219-8.56" />
-                </svg>
-                Processing...
-              </span>
-            ) : (
-              "Import Song"
-            )}
-          </button>
-        </form>
+      <form onSubmit={handleImport} className="flex flex-col gap-2.5">
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://youtube.com/watch?v=..."
+          disabled={importing}
+          className="w-full bg-input-bg border border-border px-4 py-3.5 font-josefin text-[13px] tracking-[0.06em] text-text outline-none"
+        />
+        <button
+          type="submit"
+          disabled={submitDisabled}
+          className="w-full border border-gold bg-transparent px-6 py-3.5 font-josefin text-[11px] uppercase tracking-[0.2em] text-gold transition-opacity duration-300 disabled:cursor-default disabled:opacity-50"
+        >
+          {importing ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg
+                className="spinning"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M21 12a9 9 0 11-6.219-8.56" />
+              </svg>
+              Processing...
+            </span>
+          ) : (
+            "Import Song"
+          )}
+        </button>
+      </form>
 
-        {/* Error */}
-        {error && (
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 12,
-              fontWeight: 400,
-              color: "var(--color-terracotta)",
-              letterSpacing: "0.06em",
-            }}
-          >
-            {error}
-          </p>
-        )}
+      {error && (
+        <p className="font-josefin text-[12px] tracking-[0.06em] text-terracotta">
+          {error}
+        </p>
+      )}
 
-        {notice && (
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 12,
-              fontWeight: 300,
-              color: "var(--color-text-muted)",
-              letterSpacing: "0.06em",
-            }}
-          >
-            {notice}
-          </p>
-        )}
+      {notice && (
+        <p className="font-josefin text-[12px] font-light tracking-[0.06em] text-text-muted">
+          {notice}
+        </p>
+      )}
 
-        {/* Doors-themed processing panel */}
-        {importing && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 20, alignItems: "center", textAlign: "center" }}>
-            {/* Dot progress indicator */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {STAGES.map((_, i) => (
-                <span
-                  key={i}
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: i <= currentStage ? "var(--color-gold)" : "var(--color-border)",
-                    opacity: i <= currentStage ? 1 : 0.35,
-                    transition: "background 0.5s, opacity 0.5s",
-                  }}
-                />
-              ))}
+      {importing && (
+        <div className="flex flex-col items-center gap-5 text-center">
+          <div className="flex items-center gap-2">
+            {STAGES.map((_, i) => (
               <span
-                style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 11,
-                  fontWeight: 400,
-                  letterSpacing: "0.1em",
-                  color: "var(--color-text-muted)",
-                  marginLeft: 8,
-                }}
-              >
-                Stage {currentStage + 1} of {STAGES.length}
-              </span>
-            </div>
-
-            {/* Stage title */}
-            <p
-              style={{
-                fontFamily: "var(--font-playfair), Georgia, serif",
-                fontSize: 24,
-                fontStyle: "italic",
-                fontWeight: 700,
-                color: "var(--color-gold)",
-                lineHeight: 1.3,
-                transition: "opacity 0.4s",
-              }}
-            >
-              {STAGES[currentStage].title}
-            </p>
-
-            {/* Stage subtitle */}
-            <p
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 12,
-                fontWeight: 400,
-                letterSpacing: "0.06em",
-                color: "var(--color-text-muted)",
-                marginTop: -12,
-              }}
-            >
-              {STAGES[currentStage].subtitle}
-            </p>
-
-            {/* Elapsed timer */}
-            <p
-              style={{
-                fontFamily: "var(--font-josefin), sans-serif",
-                fontSize: 14,
-                fontWeight: 400,
-                letterSpacing: "0.15em",
-                color: "var(--color-text-darker)",
-              }}
-            >
-              ⏱ {formatTime(elapsedTime)}
-            </p>
-
-            {/* Rotating Doors quote */}
-            {!finished && (
-              <p
-                key={quoteIndex}
-                className="fade-up"
-                style={{
-                  fontFamily: "var(--font-playfair), Georgia, serif",
-                  fontSize: 14,
-                  fontStyle: "italic",
-                  color: "var(--color-text-muted)",
-                  opacity: 0.75,
-                  minHeight: 20,
-                }}
-              >
-                &ldquo;{DOORS_QUOTES[quoteIndex]}&rdquo;
-              </p>
-            )}
-
-            {/* Cancel link */}
-            {!finished && (
-              <button
-                type="button"
-                onClick={handleCancelImport}
-                style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 10,
-                  fontWeight: 300,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  color: "var(--color-text-muted)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "4px 8px",
-                  textDecoration: "underline",
-                  textUnderlineOffset: 4,
-                }}
-              >
-                Cancel
-              </button>
-            )}
+                key={i}
+                className={`h-2 w-2 rounded-full transition-all duration-500 ${
+                  i <= currentStage
+                    ? "bg-gold opacity-100"
+                    : "bg-border opacity-35"
+                }`}
+              />
+            ))}
+            <span className="ml-2 font-josefin text-[11px] tracking-[0.1em] text-text-muted">
+              Stage {currentStage + 1} of {STAGES.length}
+            </span>
           </div>
-        )}
 
-        {/* How it works */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <p
-            style={{
-              fontFamily: "var(--font-josefin), sans-serif",
-              fontSize: 11,
-              fontWeight: 400,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            How it works
+          <p className="font-playfair text-[24px] font-bold italic leading-[1.3] text-gold">
+            {STAGES[currentStage].title}
           </p>
-          <div
-            style={{
-              height: 1,
-              background: "var(--color-border-dark)",
-            }}
-          />
-          {STEPS.map((step, i) => (
-            <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-              <span
-                style={{
-                  fontFamily: "var(--font-playfair), Georgia, serif",
-                  fontSize: 14,
-                  fontStyle: "italic",
-                  color: "var(--color-gold)",
-                  opacity: 0.9,
-                  minWidth: 20,
-                }}
-              >
-                {step.num}
-              </span>
-              <p
-                style={{
-                  fontFamily: "var(--font-josefin), sans-serif",
-                  fontSize: 13,
-                  fontWeight: 400,
-                  letterSpacing: "0.04em",
-                  lineHeight: 1.5,
-                  color: "var(--color-text-dark)",
-                }}
-              >
-                {step.text}
-              </p>
-            </div>
-          ))}
+
+          <p className="-mt-3 font-josefin text-[12px] tracking-[0.06em] text-text-muted">
+            {STAGES[currentStage].subtitle}
+          </p>
+
+          <p className="font-josefin text-[14px] tracking-[0.15em] text-text-darker">
+            ⏱ {formatTime(elapsedTime)}
+          </p>
+
+          {!finished && (
+            <p
+              key={quoteIndex}
+              className="fade-up min-h-5 font-playfair text-[14px] italic text-text-muted opacity-75"
+            >
+              &ldquo;{DOORS_QUOTES[quoteIndex]}&rdquo;
+            </p>
+          )}
+
+          {!finished && (
+            <button
+              type="button"
+              onClick={handleCancelImport}
+              className="cursor-pointer border-none bg-transparent px-2 py-1 font-josefin text-[10px] font-light uppercase tracking-[0.18em] text-text-muted underline underline-offset-4"
+            >
+              Cancel
+            </button>
+          )}
         </div>
+      )}
+
+      <div className="flex flex-col gap-4">
+        <p className="font-josefin text-[11px] uppercase tracking-[0.2em] text-text-muted">
+          How it works
+        </p>
+        <div className="h-px bg-border-dark" />
+        {STEPS.map((step, i) => (
+          <div key={i} className="flex items-start gap-3.5">
+            <span className="min-w-5 font-playfair text-[14px] italic text-gold opacity-90">
+              {step.num}
+            </span>
+            <p className="font-josefin text-[13px] leading-[1.5] tracking-[0.04em] text-text-dark">
+              {step.text}
+            </p>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

@@ -1,41 +1,12 @@
 export default function Footer() {
   return (
-    <footer
-      style={{
-        padding: "10px 20px 16px",
-        borderTop: "1px solid var(--color-border-darkest)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div
-          style={{
-            flex: 1,
-            maxWidth: 60,
-            height: 1,
-            background: "linear-gradient(to right, transparent, var(--color-border-dark))",
-          }}
-        />
-        <span
-          style={{
-            fontFamily: "var(--font-josefin), sans-serif",
-            fontSize: 8,
-            fontWeight: 100,
-            letterSpacing: "0.25em",
-            textTransform: "uppercase",
-            color: "var(--color-text-darkest)",
-            margin: "0 10px",
-          }}
-        >
+    <footer className="border-t border-border-darkest pt-2.5 pb-4 px-5">
+      <div className="flex items-center justify-center">
+        <div className="h-px max-w-[60px] flex-1 bg-gradient-to-r from-transparent to-border-dark" />
+        <span className="mx-2.5 font-josefin text-[8px] font-thin uppercase tracking-[0.25em] text-text-darkest">
           m &middot; m &middot; r
         </span>
-        <div
-          style={{
-            flex: 1,
-            maxWidth: 60,
-            height: 1,
-            background: "linear-gradient(to left, transparent, var(--color-border-dark))",
-          }}
-        />
+        <div className="h-px max-w-[60px] flex-1 bg-gradient-to-l from-transparent to-border-dark" />
       </div>
     </footer>
   );
