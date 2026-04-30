@@ -2,11 +2,11 @@
 """
 One-time backfill: re-run BTC chord detection for every song with status='ready'.
 
-Run from `mac-server/` so the imports resolve:
+Run from `mac-server/`:
 
-    ./venv/bin/python scripts/backfill_chords.py            # all ready songs
-    ./venv/bin/python scripts/backfill_chords.py --limit 1  # one song
-    ./venv/bin/python scripts/backfill_chords.py --song-id <uuid>
+    ./venv/bin/python backfill_chords.py            # all ready songs
+    ./venv/bin/python backfill_chords.py --limit 1  # one song
+    ./venv/bin/python backfill_chords.py --song-id <uuid>
 
 Reads SUPABASE_URL / SUPABASE_SERVICE_KEY from the environment, same as the
 worker. The script downloads each song's original mix from the `stems` bucket,
@@ -19,15 +19,10 @@ import argparse
 import os
 import sys
 import time
-from pathlib import Path
 
-# Allow `python scripts/backfill_chords.py` from the mac-server/ directory.
-HERE = Path(__file__).resolve()
-sys.path.insert(0, str(HERE.parent.parent))
+from supabase import create_client
 
-from supabase import create_client  # noqa: E402
-
-from chord_reanalyze import AudioNotFound, SongNotFound, reanalyze_chords  # noqa: E402
+from chord_reanalyze import AudioNotFound, SongNotFound, reanalyze_chords
 
 
 def parse_args() -> argparse.Namespace:

@@ -210,7 +210,7 @@ async def process_song(req: ProcessRequest):
     return {"song_id": req.song_id, "status": "queued"}
 
 
-@app.post("/reanalyze-chords/{song_id}", dependencies=[Depends(verify_token)])
+@app.post("/api/reanalyze-chords/{song_id}", dependencies=[Depends(verify_token)])
 async def reanalyze_chords_endpoint(song_id: str):
     """Re-run BTC chord detection for one song and replace its chord rows."""
     sb = get_supabase()

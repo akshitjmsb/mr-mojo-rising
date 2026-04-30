@@ -1,8 +1,8 @@
 """Re-run BTC chord detection for an existing song and rewrite the chords table.
 
 Used by:
-  - The `/reanalyze-chords/{song_id}` API endpoint in `main.py`.
-  - The one-time backfill script in `scripts/backfill_chords.py`.
+  - The `/api/reanalyze-chords/{song_id}` API endpoint in `main.py`.
+  - The one-time backfill script in `backfill_chords.py`.
 
 The function downloads the song's original mix from the `stems` Supabase bucket,
 runs `btc.inference.predict_chords()` on it, derives BPM with librosa, replaces
