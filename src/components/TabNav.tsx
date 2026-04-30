@@ -7,6 +7,7 @@ const TABS = [
   { label: "Import", href: "/" },
   { label: "Library", href: "/library" },
   { label: "Last Played", href: "/practice" },
+  { label: "Tuner", href: "/tuner" },
 ];
 
 export default function TabNav() {
