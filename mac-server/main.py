@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import Client, create_client
 
+from btc.inference import predict_chords as btc_predict_chords
+
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
 
 app.add_middleware(
@@ -796,7 +798,17 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
                     ]
                 ).execute()
         except Exception as exc:
-            log_event("pipeline.chords_non_fatal", song_id=song_id, job_id=job_id, error=str(exc))
+            error_text = f"chord_detection_failed: {exc}"
+            log_event(
+                "pipeline.chords_failed",
+                song_id=song_id,
+                job_id=job_id,
+                error=str(exc),
+                traceback=traceback.format_exc(),
+            )
+            sb.table("processing_jobs").update({"last_error": error_text}).eq(
+                "id", job_id
+            ).execute()
         finally:
             stage_done(stage="analyze", song_id=song_id, job_id=job_id, started=analyze_started)
             analyze_stage_closed = True
@@ -844,128 +856,20 @@ def classify_error(exc: Exception) -> str:
     return "pipeline_error"
 
 
-def detect_chords(audio_path: str) -> list[dict]:
+def detect_chords(audio_path: str) -> tuple[list[dict], float]:
     """
-    Detect chords from audio using beat-synchronised chroma CENS + expanded template matching.
-    Improvements over the previous version:
-      - chroma_cens: more robust to timbre/dynamics than chroma_cqt
-      - Beat-synchronised frames: snaps analysis to the rhythmic grid, eliminating sub-beat flicker
-      - Expanded templates: major, minor, dom7, maj7, min7, sus2, sus4
-      - Median-filter smoothing on beat-level labels before merging
-    Returns list of {start, end, label, standard, confidence}.
+    Run chord recognition with the BTC (Bi-directional Transformer for Chord
+    Recognition) model from BTC-ISMIR19, plus librosa beat tracking for BPM.
+
+    Returns ([{start, end, label, standard, confidence}, ...], bpm).
     """
-    note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    chords = btc_predict_chords(audio_path)
 
-    # Intervals in semitones for each chord quality.
-    QUALITIES: list[tuple[str, list[int], list[float]]] = [
-        ("",    [0, 4, 7],       [1.0, 0.8, 0.8]),   # major triad
-        ("m",   [0, 3, 7],       [1.0, 0.8, 0.8]),   # minor triad
-        ("7",   [0, 4, 7, 10],   [1.0, 0.7, 0.7, 0.6]),  # dominant 7
-        ("maj7",[0, 4, 7, 11],   [1.0, 0.7, 0.7, 0.6]),  # major 7
-        ("m7",  [0, 3, 7, 10],   [1.0, 0.7, 0.7, 0.6]),  # minor 7
-        ("sus2",[0, 2, 7],       [1.0, 0.7, 0.7]),   # suspended 2
-        ("sus4",[0, 5, 7],       [1.0, 0.7, 0.7]),   # suspended 4
-    ]
-
-    def make_template(root: int, intervals: list[int], weights: list[float]) -> np.ndarray:
-        t = np.zeros(12)
-        for interval, w in zip(intervals, weights):
-            t[(root + interval) % 12] = w
-        norm = np.linalg.norm(t)
-        return t / norm if norm > 0 else t
-
-    templates: dict[str, np.ndarray] = {}
-    for i, name in enumerate(note_names):
-        for suffix, intervals, weights in QUALITIES:
-            templates[f"{name}{suffix}"] = make_template(i, intervals, weights)
-
-    hop_length = 512
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
-    y_harm = librosa.effects.harmonic(y)
+    tempo_raw, _ = librosa.beat.beat_track(y=y, sr=sr)
+    bpm = round(float(np.atleast_1d(tempo_raw)[0]), 2)
 
-    # chroma_cens is more stable across dynamics/timbre than chroma_cqt.
-    chroma = librosa.feature.chroma_cens(y=y_harm, sr=sr, hop_length=hop_length)
-
-    # Beat-synchronise: average chroma within each beat window.
-    # beat_track returns (tempo_scalar_or_array, beat_frames).
-    tempo_raw, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
-    tempo = float(np.atleast_1d(tempo_raw)[0])
-    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length).tolist()
-    # Append song end as the final boundary.
-    song_duration = float(len(y) / sr)
-    beat_times.append(song_duration)
-
-    # Classify each beat.
-    raw: list[tuple[str, float]] = []
-    for b in range(beat_chroma.shape[1]):
-        vec = beat_chroma[:, b]
-        norm = float(np.linalg.norm(vec))
-        if norm < 0.05:
-            raw.append(("N", 0.0))
-            continue
-        vec_n = vec / norm
-        best, best_sim = "N", -1.0
-        for chord_name, tmpl in templates.items():
-            sim = float(np.dot(vec_n, tmpl))
-            if sim > best_sim:
-                best_sim, best = sim, chord_name
-        raw.append((best, best_sim))
-
-    if not raw:
-        return []
-
-    # Median-filter labels over a 3-beat window to suppress single-beat noise.
-    labels = [r[0] for r in raw]
-    confs  = [r[1] for r in raw]
-    smoothed_labels: list[str] = []
-    for i in range(len(labels)):
-        window = labels[max(0, i - 1): i + 2]
-        # Pick the most common label in the window; ties keep current.
-        counts: dict[str, int] = {}
-        for lbl in window:
-            counts[lbl] = counts.get(lbl, 0) + 1
-        best_lbl = max(counts, key=lambda k: (counts[k], k == labels[i]))
-        smoothed_labels.append(best_lbl)
-
-    # Merge consecutive identical labels, tracking avg confidence.
-    min_duration = 0.5  # seconds — ignore sub-half-second blips
-    merged: list[dict] = []
-    cur_label = smoothed_labels[0]
-    cur_start = beat_times[0]
-    cur_conf_sum = confs[0]
-    cur_count = 1
-
-    for i in range(1, len(smoothed_labels)):
-        lbl = smoothed_labels[i]
-        if lbl == cur_label:
-            cur_conf_sum += confs[i]
-            cur_count += 1
-        else:
-            end_t = beat_times[i]
-            if end_t - cur_start >= min_duration and cur_label != "N":
-                merged.append({
-                    "start": round(cur_start, 3),
-                    "end": round(end_t, 3),
-                    "label": cur_label,
-                    "standard": cur_label,
-                    "confidence": round(cur_conf_sum / cur_count, 3),
-                })
-            cur_label, cur_start = lbl, beat_times[i]
-            cur_conf_sum, cur_count = confs[i], 1
-
-    # Flush last segment.
-    end_t = beat_times[len(smoothed_labels)]
-    if end_t - cur_start >= min_duration and cur_label != "N":
-        merged.append({
-            "start": round(cur_start, 3),
-            "end": round(end_t, 3),
-            "label": cur_label,
-            "standard": cur_label,
-            "confidence": round(cur_conf_sum / cur_count, 3),
-        })
-
-    return merged, round(tempo, 2)
+    return chords, bpm
 
 
 def fetch_lyrics(title: str, artist: str | None) -> dict | None:
