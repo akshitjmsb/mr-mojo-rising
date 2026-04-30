@@ -25,6 +25,11 @@ from pydantic import BaseModel
 from supabase import Client, create_client
 
 from btc.inference import predict_chords as btc_predict_chords
+from chord_reanalyze import (
+    AudioNotFound,
+    SongNotFound,
+    reanalyze_chords as reanalyze_chords_for_song,
+)
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
 
@@ -203,6 +208,32 @@ async def process_song(req: ProcessRequest):
     )
 
     return {"song_id": req.song_id, "status": "queued"}
+
+
+@app.post("/reanalyze-chords/{song_id}", dependencies=[Depends(verify_token)])
+async def reanalyze_chords_endpoint(song_id: str):
+    """Re-run BTC chord detection for one song and replace its chord rows."""
+    sb = get_supabase()
+    started = perf_counter()
+    log_event("reanalyze.start", song_id=song_id)
+    try:
+        result = await asyncio.to_thread(reanalyze_chords_for_song, sb, song_id)
+    except SongNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except AudioNotFound as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        log_event(
+            "reanalyze.failed",
+            song_id=song_id,
+            error=str(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(status_code=500, detail=f"reanalyze_failed: {exc}")
+
+    duration_ms = int((perf_counter() - started) * 1000)
+    log_event("reanalyze.done", song_id=song_id, duration_ms=duration_ms, **result)
+    return {**result, "duration_ms": duration_ms}
 
 
 @app.get("/status/{song_id}")
