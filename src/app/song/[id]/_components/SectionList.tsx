@@ -1,7 +1,5 @@
-import type { Database } from "@/lib/database.types";
+import type { Section } from "@/lib/database.types";
 import { formatTime, getSectionColor } from "./sections";
-
-type Section = Database["public"]["Tables"]["sections"]["Row"];
 
 interface Props {
   sections: Section[];

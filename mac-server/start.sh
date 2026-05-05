@@ -53,21 +53,12 @@ load_env_file() {
 load_env_file "$SCRIPT_DIR/.env"
 load_env_file "$ROOT_DIR/.env.local"
 
-# Normalize env names so worker runs against app env by default.
-if [ "${WORKER_SUPABASE_FROM_APP_ENV:-1}" = "1" ] && [ -n "${NEXT_PUBLIC_SUPABASE_URL:-}" ]; then
-  export SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL"
-fi
-
-if [ "${WORKER_SUPABASE_FROM_APP_ENV:-1}" = "1" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-  export SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_ROLE_KEY"
-fi
-
 if [ -n "${MAC_API_SECRET:-}" ]; then
   export API_SECRET="$MAC_API_SECRET"
 fi
 
 missing_vars=()
-for required_var in SUPABASE_URL SUPABASE_SERVICE_KEY; do
+for required_var in TURSO_DATABASE_URL TURSO_AUTH_TOKEN BLOB_READ_WRITE_TOKEN; do
   if [ -z "${!required_var:-}" ]; then
     missing_vars+=("$required_var")
   fi
@@ -80,7 +71,7 @@ if [ "${#missing_vars[@]}" -gt 0 ]; then
 fi
 
 echo "Starting Mr. Mojo Rising Mac server..."
-echo "Supabase URL: $SUPABASE_URL"
+echo "Turso URL: $TURSO_DATABASE_URL"
 echo "Worker concurrency: ${WORKER_CONCURRENCY:-1}"
 
 PYTHON_BIN="python3"

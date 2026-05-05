@@ -2,10 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import type { Database } from "@/lib/database.types";
-
-type Song = Database["public"]["Tables"]["songs"]["Row"];
+import type { Song } from "@/lib/database.types";
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -33,37 +30,13 @@ export default function LibraryPage() {
     };
   }, [fetchSongs]);
 
-  // Live song-list updates via Supabase Realtime — no polling.
+  // Poll the song list every 3s for live status updates.
   useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel("library-songs")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "songs" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            const next = payload.new as Song;
-            setSongs((prev) =>
-              prev.some((s) => s.id === next.id) ? prev : [next, ...prev],
-            );
-          } else if (payload.eventType === "UPDATE") {
-            const next = payload.new as Song;
-            setSongs((prev) =>
-              prev.map((s) => (s.id === next.id ? next : s)),
-            );
-          } else if (payload.eventType === "DELETE") {
-            const oldRow = payload.old as { id: string };
-            setSongs((prev) => prev.filter((s) => s.id !== oldRow.id));
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+    const interval = setInterval(() => {
+      fetchSongs();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fetchSongs]);
 
   // Reset delete confirmation when tapping outside that song row
   useEffect(() => {

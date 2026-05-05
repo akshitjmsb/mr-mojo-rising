@@ -4,9 +4,10 @@ Used by:
   - The `/api/reanalyze-chords/{song_id}` API endpoint in `main.py`.
   - The one-time backfill script in `backfill_chords.py`.
 
-The function downloads the song's original mix from the `stems` Supabase bucket,
-runs `btc.inference.predict_chords()` on it, derives BPM with librosa, replaces
-all existing chord rows for the song, and updates `songs.bpm`.
+The function pulls the song's `original_url` from the `stems` row, downloads
+the audio from Vercel Blob, runs `btc.inference.predict_chords()` on it,
+derives BPM with librosa, replaces all existing chord rows for the song, and
+updates `songs.bpm`.
 """
 
 from __future__ import annotations
@@ -16,12 +17,10 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-from supabase import Client
 
+from blob_storage import download_url
 from btc.inference import predict_chords
-
-
-STEM_BUCKET = "stems"
+from turso_db import get_client, new_id
 
 
 class SongNotFound(Exception):
@@ -32,55 +31,33 @@ class AudioNotFound(Exception):
     pass
 
 
-def _resolve_storage_path(sb: Client, song_id: str) -> str:
-    """Pick the storage object key for the song's original mix."""
-    rows = (
-        sb.storage.from_(STEM_BUCKET)
-        .list(song_id, {"limit": 100, "search": "original"})
-    )
-    if not rows:
-        raise AudioNotFound(f"No 'original.*' object under {STEM_BUCKET}/{song_id}/")
-
-    preferred = ("original.mp3", "original.wav", "original.m4a", "original.ogg")
-    names = {row["name"] for row in rows if row.get("name")}
-    for candidate in preferred:
-        if candidate in names:
-            return f"{song_id}/{candidate}"
-
-    name = rows[0]["name"]
-    return f"{song_id}/{name}"
-
-
-def _download_audio(sb: Client, song_id: str, dest_dir: Path) -> Path:
-    storage_path = _resolve_storage_path(sb, song_id)
-    suffix = Path(storage_path).suffix or ".mp3"
-    local_path = dest_dir / f"{song_id}{suffix}"
-    data = sb.storage.from_(STEM_BUCKET).download(storage_path)
-    local_path.write_bytes(data)
-    return local_path
-
-
-def reanalyze_chords(sb: Client, song_id: str) -> dict:
+def reanalyze_chords(song_id: str) -> dict:
     """Run BTC chord detection for `song_id` and replace its chord rows.
 
-    Returns: {song_id, chord_count, bpm, storage_path}.
+    Returns: {song_id, chord_count, bpm}.
 
     Raises SongNotFound / AudioNotFound for missing inputs; lets BTC/IO errors
     bubble up so callers can surface them.
     """
-    song = (
-        sb.table("songs")
-        .select("id, status")
-        .eq("id", song_id)
-        .single()
-        .execute()
-    )
-    if not song.data:
+    db = get_client()
+    song = db.query_one("SELECT id, status FROM songs WHERE id = ?", [song_id])
+    if not song:
         raise SongNotFound(f"Song {song_id} not found")
+
+    stems = db.query_one(
+        "SELECT original_url FROM stems WHERE song_id = ?",
+        [song_id],
+    )
+    if not stems or not stems.get("original_url"):
+        raise AudioNotFound(f"No original audio URL for song {song_id}")
+
+    original_url = stems["original_url"]
 
     with tempfile.TemporaryDirectory(prefix=f"reanalyze-{song_id}-") as tmp:
         tmp_dir = Path(tmp)
-        audio_path = _download_audio(sb, song_id, tmp_dir)
+        suffix = Path(original_url.split("?")[0]).suffix or ".mp3"
+        audio_path = tmp_dir / f"{song_id}{suffix}"
+        download_url(original_url, audio_path)
 
         chords = predict_chords(str(audio_path))
 
@@ -88,26 +65,30 @@ def reanalyze_chords(sb: Client, song_id: str) -> dict:
         tempo_raw, _ = librosa.beat.beat_track(y=y, sr=sr)
         bpm = round(float(np.atleast_1d(tempo_raw)[0]), 2)
 
-    sb.table("chords").delete().eq("song_id", song_id).execute()
-    if chords:
-        sb.table("chords").insert(
+    db.execute("DELETE FROM chords WHERE song_id = ?", [song_id])
+    for chord in chords or []:
+        db.execute(
+            """INSERT INTO chords
+               (id, song_id, start_time, end_time, chord_label, chord_standard, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             [
-                {
-                    "song_id": song_id,
-                    "start_time": chord["start"],
-                    "end_time": chord["end"],
-                    "chord_label": chord["label"],
-                    "chord_standard": chord["standard"],
-                    "confidence": chord["confidence"],
-                }
-                for chord in chords
-            ]
-        ).execute()
+                new_id(),
+                song_id,
+                chord["start"],
+                chord["end"],
+                chord["label"],
+                chord["standard"],
+                chord["confidence"],
+            ],
+        )
 
-    sb.table("songs").update({"bpm": bpm}).eq("id", song_id).execute()
+    db.execute(
+        "UPDATE songs SET bpm = ?, updated_at = unixepoch() WHERE id = ?",
+        [bpm, song_id],
+    )
 
     return {
         "song_id": song_id,
-        "chord_count": len(chords),
+        "chord_count": len(chords or []),
         "bpm": bpm,
     }

@@ -8,9 +8,10 @@ Run from `mac-server/`:
     ./venv/bin/python backfill_chords.py --limit 1  # one song
     ./venv/bin/python backfill_chords.py --song-id <uuid>
 
-Reads SUPABASE_URL / SUPABASE_SERVICE_KEY from the environment, same as the
-worker. The script downloads each song's original mix from the `stems` bucket,
-runs the BTC transformer, and rewrites the chords + bpm rows.
+Reads TURSO_DATABASE_URL / TURSO_AUTH_TOKEN / BLOB_READ_WRITE_TOKEN from the
+environment, same as the worker. The script downloads each song's original
+mix from Vercel Blob, runs the BTC transformer, and rewrites the chords +
+bpm rows.
 """
 
 from __future__ import annotations
@@ -20,9 +21,8 @@ import os
 import sys
 import time
 
-from supabase import create_client
-
 from chord_reanalyze import AudioNotFound, SongNotFound, reanalyze_chords
+from turso_db import get_client
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,26 +42,24 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
-    if not url or not key:
-        print("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set", file=sys.stderr)
+    if not os.environ.get("TURSO_DATABASE_URL"):
+        print("TURSO_DATABASE_URL must be set", file=sys.stderr)
+        return 2
+    if not os.environ.get("BLOB_READ_WRITE_TOKEN"):
+        print("BLOB_READ_WRITE_TOKEN must be set", file=sys.stderr)
         return 2
 
-    sb = create_client(url, key)
+    db = get_client()
 
     if args.song_id:
         songs = [{"id": args.song_id, "title": "(forced)", "status": "?"}]
     else:
-        query = (
-            sb.table("songs")
-            .select("id, title, status")
-            .eq("status", "ready")
-            .order("created_at", desc=False)
-        )
+        sql = """SELECT id, title, status FROM songs
+                 WHERE status = 'ready'
+                 ORDER BY created_at ASC"""
         if args.limit:
-            query = query.limit(args.limit)
-        songs = query.execute().data or []
+            sql += f" LIMIT {int(args.limit)}"
+        songs = db.execute(sql)
 
     if not songs:
         print("No songs to backfill.")
@@ -80,7 +78,7 @@ def main() -> int:
         print(f"[{idx}/{len(songs)}] {title}  ({song_id})")
         started = time.perf_counter()
         try:
-            result = reanalyze_chords(sb, song_id)
+            result = reanalyze_chords(song_id)
         except SongNotFound as exc:
             print(f"   SKIP — {exc}")
             skipped += 1

@@ -2,11 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import type { Database } from "@/lib/database.types";
+import type { Song } from "@/lib/database.types";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
-
-type Song = Database["public"]["Tables"]["songs"]["Row"];
 
 const QUOTES = [
   "Riders on the storm...",
@@ -105,37 +102,42 @@ function SearchPageInner() {
     })();
   }, [searchParams, resolveUrl]);
 
-  // Subscribe to the song row once we've submitted, so we can route to the
-  // player on ready (or surface failure).
+  // Poll the song's status once submitted, so we can route to the player on
+  // ready (or surface failure).
   useEffect(() => {
     if (!importingSongId) return;
-    const supabase = createClient();
-    const channel = supabase
-      .channel(`search-song-${importingSongId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "songs",
-          filter: `id=eq.${importingSongId}`,
-        },
-        (payload) => {
-          const next = payload.new as Song;
-          if (next.status === "ready") {
-            importingSongIdRef.current = null;
-            router.push(`/song/${next.id}`);
-          } else if (next.status === "failed") {
-            importingSongIdRef.current = null;
-            setSubmitError(next.last_error || "Processing failed.");
-            setSubmitting(false);
-            setImportingSongId(null);
-          }
-        },
-      )
-      .subscribe();
+    let cancelled = false;
+
+    async function check() {
+      try {
+        const res = await fetch(`/api/songs/${importingSongId}/status`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const next = (await res.json()) as Pick<
+          Song,
+          "id" | "status" | "last_error"
+        >;
+        if (cancelled) return;
+        if (next.status === "ready") {
+          importingSongIdRef.current = null;
+          router.push(`/song/${next.id}`);
+        } else if (next.status === "failed") {
+          importingSongIdRef.current = null;
+          setSubmitError(next.last_error || "Processing failed.");
+          setSubmitting(false);
+          setImportingSongId(null);
+        }
+      } catch {
+        // Network blip — will retry on next interval.
+      }
+    }
+
+    check();
+    const interval = setInterval(check, 3000);
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [importingSongId, router]);
 

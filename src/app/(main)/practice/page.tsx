@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import type { Song } from "@/lib/database.types";
 
 export default function PracticePage() {
   const router = useRouter();
@@ -10,19 +10,20 @@ export default function PracticePage() {
 
   useEffect(() => {
     async function checkLastSong() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("songs")
-        .select("id")
-        .eq("status", "ready")
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (data && data.length > 0) {
-        router.replace(`/song/${data[0].id}`);
-      } else {
-        setChecked(true);
+      try {
+        const res = await fetch("/api/songs", { cache: "no-store" });
+        const data = (await res.json()) as Song[];
+        const ready = Array.isArray(data)
+          ? data.find((song) => song.status === "ready")
+          : null;
+        if (ready) {
+          router.replace(`/song/${ready.id}`);
+          return;
+        }
+      } catch {
+        // fall through to "no songs ready" state
       }
+      setChecked(true);
     }
     checkLastSong();
   }, [router]);

@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { Database } from "@/lib/database.types";
+import type { Section } from "@/lib/database.types";
 import { formatTime, getSectionColor } from "./sections";
-
-type Section = Database["public"]["Tables"]["sections"]["Row"];
 
 interface Props {
   activeSection: Section | null;

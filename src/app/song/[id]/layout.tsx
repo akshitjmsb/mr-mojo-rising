@@ -2,7 +2,8 @@ import AppShell from "@/components/AppShell";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
 import Footer from "@/components/Footer";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { queryOne } from "@/lib/queries";
+import type { Song } from "@/lib/database.types";
 
 export default async function SongLayout({
   children,
@@ -12,12 +13,10 @@ export default async function SongLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = createAdminClient();
-  const { data: song } = await supabase
-    .from("songs")
-    .select("title, artist")
-    .eq("id", id)
-    .maybeSingle();
+  const song = await queryOne<Pick<Song, "title" | "artist">>(
+    `SELECT title, artist FROM songs WHERE id = ?`,
+    [id],
+  );
 
   return (
     <AppShell>

@@ -1,11 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Database } from "@/lib/database.types";
+import type { Chord, Lyrics } from "@/lib/database.types";
 import { findCurrentLineIndex, parseLrc } from "@/lib/lrc-parser";
-
-type Chord = Database["public"]["Tables"]["chords"]["Row"];
-type Lyrics = Database["public"]["Tables"]["lyrics"]["Row"];
 
 interface Props {
   chords: Chord[];

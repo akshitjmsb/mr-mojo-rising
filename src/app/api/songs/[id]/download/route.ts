@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { queryOne } from "@/lib/queries";
+import type { Song, Stem } from "@/lib/database.types";
 
 type StemKey = "full" | "guitar" | "vocals" | "drums" | "bass";
 
-const STEM_COLUMN: Record<StemKey, "original_url" | "guitar_url" | "vocals_url" | "drums_url" | "bass_url"> = {
+const STEM_COLUMN: Record<StemKey, keyof Stem> = {
   full: "original_url",
   guitar: "guitar_url",
   vocals: "vocals_url",
@@ -20,11 +21,13 @@ const STEM_LABEL: Record<StemKey, string> = {
 };
 
 function sanitizeFileName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "song";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "song"
+  );
 }
 
 function parseStemKey(raw: string | null): StemKey | null {
@@ -34,7 +37,7 @@ function parseStemKey(raw: string | null): StemKey | null {
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const url = new URL(request.url);
@@ -44,36 +47,40 @@ export async function GET(
     return NextResponse.json({ error: "Invalid stem type" }, { status: 400 });
   }
 
-  const supabase = createAdminClient();
-
-  const { data: song } = await supabase
-    .from("songs")
-    .select("id, title")
-    .eq("id", id)
-    .single();
-
+  const song = await queryOne<Pick<Song, "id" | "title">>(
+    `SELECT id, title FROM songs WHERE id = ?`,
+    [id],
+  );
   if (!song) {
     return NextResponse.json({ error: "Song not found" }, { status: 404 });
   }
 
-  const { data: stems } = await supabase
-    .from("stems")
-    .select("original_url, guitar_url, vocals_url, drums_url, bass_url")
-    .eq("song_id", id)
-    .single();
-
+  const stems = await queryOne<Stem>(
+    `SELECT original_url, guitar_url, vocals_url, drums_url, bass_url
+     FROM stems WHERE song_id = ?`,
+    [id],
+  );
   if (!stems) {
-    return NextResponse.json({ error: "No stems available yet" }, { status: 404 });
+    return NextResponse.json(
+      { error: "No stems available yet" },
+      { status: 404 },
+    );
   }
 
-  const sourceUrl = stems[STEM_COLUMN[stem]];
+  const sourceUrl = stems[STEM_COLUMN[stem]] as string | null | undefined;
   if (!sourceUrl) {
-    return NextResponse.json({ error: "Requested stem is not available" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Requested stem is not available" },
+      { status: 404 },
+    );
   }
 
   const upstream = await fetch(sourceUrl);
   if (!upstream.ok) {
-    return NextResponse.json({ error: "Failed to fetch stem file" }, { status: 502 });
+    return NextResponse.json(
+      { error: "Failed to fetch stem file" },
+      { status: 502 },
+    );
   }
 
   const songSlug = sanitizeFileName(song.title || "song");

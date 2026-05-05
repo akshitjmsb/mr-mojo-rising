@@ -1,9 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Database } from "@/lib/database.types";
-
-type Stem = Database["public"]["Tables"]["stems"]["Row"];
+import type { Stem } from "@/lib/database.types";
 
 export type DownloadStemKey = "full" | "guitar" | "vocals" | "drums" | "bass";
 

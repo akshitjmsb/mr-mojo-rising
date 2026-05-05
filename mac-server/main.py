@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import traceback
 import wave
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -22,13 +22,19 @@ import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from supabase import Client, create_client
 
+from blob_storage import upload_file as blob_upload_file
 from btc.inference import predict_chords as btc_predict_chords
 from chord_reanalyze import (
     AudioNotFound,
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
+)
+from turso_db import (
+    claim_next_job,
+    get_client as get_turso_client,
+    new_id,
+    requeue_stale_jobs,
 )
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
@@ -41,8 +47,6 @@ app.add_middleware(
 )
 
 # Config
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 API_SECRET = os.environ.get("API_SECRET", "dev-secret")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/tmp/mojo-stems"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,10 +100,6 @@ def log_event(event: str, **fields):
         **fields,
     }
     print(json.dumps(payload, default=str), flush=True)
-
-
-def get_supabase() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
 async def verify_token(authorization: str = Header(...)):
@@ -170,37 +170,42 @@ async def health():
 # Backward-compatible manual enqueue endpoint (not used by app primary flow).
 @app.post("/process", dependencies=[Depends(verify_token)])
 async def process_song(req: ProcessRequest):
-    sb = get_supabase()
+    db = get_turso_client()
 
-    song_result = (
-        sb.table("songs")
-        .select("id, user_id")
-        .eq("id", req.song_id)
-        .single()
-        .execute()
+    song = db.query_one(
+        "SELECT id, user_id FROM songs WHERE id = ?",
+        [req.song_id],
     )
-    song = song_result.data
     if not song:
         raise HTTPException(status_code=404, detail="Song not found")
 
-    sb.table("processing_jobs").upsert(
-        {
-            "song_id": req.song_id,
-            "user_id": song["user_id"],
-            "youtube_url": req.youtube_url,
-            "status": "queued",
-            "run_after": datetime.now(timezone.utc).isoformat(),
-            "last_error": None,
-            "error_code": None,
-            "locked_by": None,
-            "locked_at": None,
-            "heartbeat_at": None,
-        },
-        on_conflict="song_id",
-    ).execute()
+    existing = db.query_one(
+        "SELECT id FROM processing_jobs WHERE song_id = ?",
+        [req.song_id],
+    )
+    if existing:
+        db.execute(
+            """UPDATE processing_jobs
+               SET status = 'queued',
+                   run_after = unixepoch(),
+                   last_error = NULL,
+                   error_code = NULL,
+                   locked_by = NULL,
+                   locked_at = NULL,
+                   heartbeat_at = NULL,
+                   updated_at = unixepoch()
+               WHERE song_id = ?""",
+            [req.song_id],
+        )
+    else:
+        db.execute(
+            """INSERT INTO processing_jobs
+               (id, song_id, user_id, youtube_url, status)
+               VALUES (?, ?, ?, ?, 'queued')""",
+            [new_id(), req.song_id, song.get("user_id"), req.youtube_url],
+        )
 
     update_song(
-        sb,
         req.song_id,
         status="queued",
         processing_stage="queued",
@@ -213,11 +218,10 @@ async def process_song(req: ProcessRequest):
 @app.post("/api/reanalyze-chords/{song_id}", dependencies=[Depends(verify_token)])
 async def reanalyze_chords_endpoint(song_id: str):
     """Re-run BTC chord detection for one song and replace its chord rows."""
-    sb = get_supabase()
     started = perf_counter()
     log_event("reanalyze.start", song_id=song_id)
     try:
-        result = await asyncio.to_thread(reanalyze_chords_for_song, sb, song_id)
+        result = await asyncio.to_thread(reanalyze_chords_for_song, song_id)
     except SongNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except AudioNotFound as exc:
@@ -238,33 +242,28 @@ async def reanalyze_chords_endpoint(song_id: str):
 
 @app.get("/status/{song_id}")
 async def get_status(song_id: str):
-    sb = get_supabase()
-    result = (
-        sb.table("songs")
-        .select("id, status, processing_stage, last_error, updated_at")
-        .eq("id", song_id)
-        .single()
-        .execute()
+    db = get_turso_client()
+    row = db.query_one(
+        """SELECT id, status, processing_stage, last_error, updated_at
+           FROM songs WHERE id = ?""",
+        [song_id],
     )
-    if not result.data:
+    if not row:
         raise HTTPException(status_code=404, detail="Song not found")
-    return result.data
+    return row
 
 
 async def worker_loop(slot: int):
     worker_name = f"{WORKER_ID}:{slot}"
-    sb = get_supabase()
 
     while True:
         try:
-            claimed = sb.rpc("claim_next_job", {"worker_id": worker_name}).execute()
-            jobs = claimed.data or []
-            if not jobs:
+            job = await asyncio.to_thread(claim_next_job, worker_name)
+            if not job:
                 await asyncio.sleep(QUEUE_POLL_INTERVAL_SECONDS)
                 continue
 
-            job = jobs[0]
-            await process_claimed_job(sb, worker_name, job)
+            await process_claimed_job(worker_name, job)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -273,22 +272,16 @@ async def worker_loop(slot: int):
 
 
 async def stale_requeue_loop():
-    sb = get_supabase()
     interval = max(10.0, HEARTBEAT_INTERVAL_SECONDS)
 
     while True:
         try:
-            recovered = sb.rpc(
-                "requeue_stale_jobs",
-                {"timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS},
-            ).execute()
-            jobs = recovered.data or []
+            jobs = await asyncio.to_thread(requeue_stale_jobs, HEARTBEAT_TIMEOUT_SECONDS)
 
             for job in jobs:
                 song_id = job["song_id"]
                 if job["status"] == "failed":
                     update_song(
-                        sb,
                         song_id,
                         status="failed",
                         processing_stage="failed",
@@ -296,7 +289,6 @@ async def stale_requeue_loop():
                     )
                 else:
                     update_song(
-                        sb,
                         song_id,
                         status="queued",
                         processing_stage="queued",
@@ -313,18 +305,20 @@ async def stale_requeue_loop():
         await asyncio.sleep(interval)
 
 
-async def process_claimed_job(sb: Client, worker_name: str, job: dict):
+async def process_claimed_job(worker_name: str, job: dict):
+    db = get_turso_client()
     job_id = job["id"]
     song_id = job["song_id"]
     youtube_url = job["youtube_url"]
-    attempt_count = job.get("attempt_count", 1)
-    max_attempts = job.get("max_attempts", 3)
+    attempt_count = job.get("attempt_count") or 1
+    max_attempts = job.get("max_attempts") or 3
     started = datetime.now(timezone.utc)
     claim_delay_ms = None
     try:
-        created_at = datetime.fromisoformat((job.get("created_at") or "").replace("Z", "+00:00"))
-        locked_at = datetime.fromisoformat((job.get("locked_at") or "").replace("Z", "+00:00"))
-        claim_delay_ms = int((locked_at - created_at).total_seconds() * 1000)
+        created_at = job.get("created_at")
+        locked_at = job.get("locked_at")
+        if created_at and locked_at:
+            claim_delay_ms = int((int(locked_at) - int(created_at)) * 1000)
     except Exception:
         claim_delay_ms = None
 
@@ -338,26 +332,27 @@ async def process_claimed_job(sb: Client, worker_name: str, job: dict):
         claim_delay_ms=claim_delay_ms,
     )
 
-    heartbeat_task = asyncio.create_task(heartbeat_loop(sb, job_id, worker_name))
+    heartbeat_task = asyncio.create_task(heartbeat_loop(job_id, worker_name))
 
     try:
-        update_song(sb, song_id, status="processing", processing_stage="download", last_error=None)
-        await process_pipeline(sb, job_id, song_id, youtube_url)
+        update_song(song_id, status="processing", processing_stage="download", last_error=None)
+        await process_pipeline(job_id, song_id, youtube_url)
 
-        sb.table("processing_jobs").update(
-            {
-                "status": "succeeded",
-                "locked_by": None,
-                "locked_at": None,
-                "heartbeat_at": None,
-                "error_code": None,
-                "last_error": None,
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            }
-        ).eq("id", job_id).execute()
+        db.execute(
+            """UPDATE processing_jobs
+               SET status = 'succeeded',
+                   locked_by = NULL,
+                   locked_at = NULL,
+                   heartbeat_at = NULL,
+                   error_code = NULL,
+                   last_error = NULL,
+                   finished_at = unixepoch(),
+                   updated_at = unixepoch()
+               WHERE id = ?""",
+            [job_id],
+        )
 
         update_song(
-            sb,
             song_id,
             status="ready",
             processing_stage="complete",
@@ -382,44 +377,46 @@ async def process_claimed_job(sb: Client, worker_name: str, job: dict):
             max(15, (2 ** min(attempt_count, 8)) * 5),
         )
 
-        job_update: dict[str, object] = {
-            "locked_by": None,
-            "locked_at": None,
-            "heartbeat_at": None,
-            "last_error": error_text,
-            "error_code": error_code,
-        }
-
         if retryable:
-            job_update.update(
-                {
-                    "status": "retryable",
-                    "run_after": (datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)).isoformat(),
-                }
+            db.execute(
+                """UPDATE processing_jobs
+                   SET status = 'retryable',
+                       run_after = unixepoch() + ?,
+                       locked_by = NULL,
+                       locked_at = NULL,
+                       heartbeat_at = NULL,
+                       last_error = ?,
+                       error_code = ?,
+                       updated_at = unixepoch()
+                   WHERE id = ?""",
+                [backoff_seconds, error_text, error_code, job_id],
             )
             update_song(
-                sb,
                 song_id,
                 status="queued",
                 processing_stage="queued",
                 last_error=error_text,
             )
         else:
-            job_update.update(
-                {
-                    "status": "failed",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                }
+            db.execute(
+                """UPDATE processing_jobs
+                   SET status = 'failed',
+                       locked_by = NULL,
+                       locked_at = NULL,
+                       heartbeat_at = NULL,
+                       last_error = ?,
+                       error_code = ?,
+                       finished_at = unixepoch(),
+                       updated_at = unixepoch()
+                   WHERE id = ?""",
+                [error_text, error_code, job_id],
             )
             update_song(
-                sb,
                 song_id,
                 status="failed",
                 processing_stage="failed",
                 last_error=error_text,
             )
-
-        sb.table("processing_jobs").update(job_update).eq("id", job_id).execute()
 
         duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         log_event(
@@ -441,14 +438,17 @@ async def process_claimed_job(sb: Client, worker_name: str, job: dict):
         await asyncio.gather(heartbeat_task, return_exceptions=True)
 
 
-async def heartbeat_loop(sb: Client, job_id: str, worker_name: str):
+async def heartbeat_loop(job_id: str, worker_name: str):
+    db = get_turso_client()
     while True:
         try:
-            sb.table("processing_jobs").update(
-                {
-                    "heartbeat_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ).eq("id", job_id).eq("status", "running").eq("locked_by", worker_name).execute()
+            db.execute(
+                """UPDATE processing_jobs
+                   SET heartbeat_at = unixepoch(),
+                       updated_at = unixepoch()
+                   WHERE id = ? AND status = 'running' AND locked_by = ?""",
+                [job_id, worker_name],
+            )
         except Exception as exc:
             log_event("job.heartbeat_error", job_id=job_id, worker_id=worker_name, error=str(exc))
 
@@ -456,20 +456,19 @@ async def heartbeat_loop(sb: Client, job_id: str, worker_name: str):
 
 
 def update_song(
-    sb: Client,
     song_id: str,
     *,
     status: str,
     processing_stage: str,
     last_error: str | None,
 ):
-    sb.table("songs").update(
-        {
-            "status": status,
-            "processing_stage": processing_stage,
-            "last_error": last_error,
-        }
-    ).eq("id", song_id).execute()
+    db = get_turso_client()
+    db.execute(
+        """UPDATE songs
+           SET status = ?, processing_stage = ?, last_error = ?, updated_at = unixepoch()
+           WHERE id = ?""",
+        [status, processing_stage, last_error, song_id],
+    )
 
 
 async def run_cmd(cmd: list[str], label: str, song_id: str, job_id: str):
@@ -638,40 +637,23 @@ def compress_wav_to_mp3(wav_path: Path) -> Path:
     return mp3_path
 
 
-def upload_file_sync(local_path: Path, storage_path: str) -> str:
-    # Compress WAV to MP3 to stay under Supabase's storage size limit.
+def upload_file_sync(local_path: Path, blob_pathname: str) -> str:
+    """Compress WAV → MP3 and upload to Vercel Blob, returning the public URL."""
     if local_path.suffix.lower() == ".wav":
         local_path = compress_wav_to_mp3(local_path)
-        storage_path = storage_path.rsplit(".", 1)[0] + ".mp3"
+        blob_pathname = blob_pathname.rsplit(".", 1)[0] + ".mp3"
 
-    local_sb = get_supabase()
     content_type = "audio/mpeg" if local_path.suffix.lower() == ".mp3" else "audio/wav"
-    with open(local_path, "rb") as f:
-        data = f.read()
-
-    try:
-        local_sb.storage.from_("stems").upload(
-            storage_path,
-            data,
-            file_options={"content-type": content_type, "upsert": "true"},
-        )
-    except Exception:
-        local_sb.storage.from_("stems").remove([storage_path])
-        local_sb.storage.from_("stems").upload(
-            storage_path,
-            data,
-            file_options={"content-type": content_type, "upsert": "true"},
-        )
-
-    return local_sb.storage.from_("stems").get_public_url(storage_path)
+    return blob_upload_file(local_path, blob_pathname, content_type)
 
 
-async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: str):
+async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
+    db = get_turso_client()
     work_dir = OUTPUT_DIR / song_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # Stage: download
-    update_song(sb, song_id, status="processing", processing_stage="download", last_error=None)
+    update_song(song_id, status="processing", processing_stage="download", last_error=None)
     download_started = stage_start(stage="download", song_id=song_id, job_id=job_id)
     await run_cmd(
         [
@@ -721,15 +703,19 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
     title, artist = extract_title_artist(work_dir)
     stage_done(stage="download", song_id=song_id, job_id=job_id, started=download_started)
 
-    sb.table("songs").update(
-        {
-            "title": title,
-            **({"artist": artist} if artist else {}),
-        }
-    ).eq("id", song_id).execute()
+    if artist:
+        db.execute(
+            "UPDATE songs SET title = ?, artist = ?, updated_at = unixepoch() WHERE id = ?",
+            [title, artist, song_id],
+        )
+    else:
+        db.execute(
+            "UPDATE songs SET title = ?, updated_at = unixepoch() WHERE id = ?",
+            [title, song_id],
+        )
 
     # Stage: separate
-    update_song(sb, song_id, status="processing", processing_stage="separate", last_error=None)
+    update_song(song_id, status="processing", processing_stage="separate", last_error=None)
     separate_started = stage_start(stage="separate", song_id=song_id, job_id=job_id)
     demucs_out = work_dir / "separated"
     await run_demucs(audio_path=audio_path, demucs_out=demucs_out, song_id=song_id, job_id=job_id)
@@ -741,12 +727,12 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
             stems_dir = directory
             break
 
-    # Stage: upload (idempotent upserts)
-    update_song(sb, song_id, status="processing", processing_stage="upload", last_error=None)
+    # Stage: upload (idempotent — Vercel Blob `allowOverwrite` keeps the URL stable).
+    update_song(song_id, status="processing", processing_stage="upload", last_error=None)
     upload_started = stage_start(stage="upload", song_id=song_id, job_id=job_id)
 
     upload_targets: list[tuple[str, Path, str]] = [
-        ("original_url", audio_path, f"{song_id}/original.wav"),
+        ("original_url", audio_path, f"stems/{song_id}/original.wav"),
     ]
 
     if stems_dir:
@@ -759,31 +745,50 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
         for stem_name, url_key in stem_map.items():
             stem_file = stems_dir / f"{stem_name}.wav"
             if stem_file.exists():
-                upload_targets.append((url_key, stem_file, f"{song_id}/{stem_name}.wav"))
+                upload_targets.append((url_key, stem_file, f"stems/{song_id}/{stem_name}.wav"))
 
     async def upload_one(target: tuple[str, Path, str]) -> tuple[str, str]:
-        key, local_path, storage_path = target
-        url = await asyncio.to_thread(upload_file_sync, local_path, storage_path)
+        key, local_path, blob_pathname = target
+        url = await asyncio.to_thread(upload_file_sync, local_path, blob_pathname)
         return key, url
 
     uploaded_pairs = await asyncio.gather(*(upload_one(target) for target in upload_targets))
     uploaded_urls = {key: url for key, url in uploaded_pairs}
 
-    sb.table("stems").upsert(
-        {
-            "song_id": song_id,
-            "original_url": uploaded_urls.get("original_url"),
-            "guitar_url": uploaded_urls.get("guitar_url"),
-            "vocals_url": uploaded_urls.get("vocals_url"),
-            "drums_url": uploaded_urls.get("drums_url"),
-            "bass_url": uploaded_urls.get("bass_url"),
-        },
-        on_conflict="song_id",
-    ).execute()
+    existing_stems = db.query_one("SELECT id FROM stems WHERE song_id = ?", [song_id])
+    if existing_stems:
+        db.execute(
+            """UPDATE stems
+               SET original_url = ?, guitar_url = ?, vocals_url = ?, drums_url = ?, bass_url = ?
+               WHERE song_id = ?""",
+            [
+                uploaded_urls.get("original_url"),
+                uploaded_urls.get("guitar_url"),
+                uploaded_urls.get("vocals_url"),
+                uploaded_urls.get("drums_url"),
+                uploaded_urls.get("bass_url"),
+                song_id,
+            ],
+        )
+    else:
+        db.execute(
+            """INSERT INTO stems
+               (id, song_id, original_url, guitar_url, vocals_url, drums_url, bass_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [
+                new_id(),
+                song_id,
+                uploaded_urls.get("original_url"),
+                uploaded_urls.get("guitar_url"),
+                uploaded_urls.get("vocals_url"),
+                uploaded_urls.get("drums_url"),
+                uploaded_urls.get("bass_url"),
+            ],
+        )
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
 
     # Stage: analyze (sections + chords) and lyrics in parallel.
-    update_song(sb, song_id, status="processing", processing_stage="analyze", last_error=None)
+    update_song(song_id, status="processing", processing_stage="analyze", last_error=None)
     analyze_started = stage_start(stage="analyze", song_id=song_id, job_id=job_id)
     lyrics_started = stage_start(stage="lyrics", song_id=song_id, job_id=job_id)
     lyrics_task = asyncio.create_task(asyncio.to_thread(fetch_lyrics, title, artist))
@@ -794,40 +799,43 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
             duration = wav_file.getnframes() / wav_file.getframerate()
 
         sections = await asyncio.to_thread(detect_sections, str(audio_path), duration)
-        sb.table("sections").delete().eq("song_id", song_id).execute()
-        if sections:
-            sb.table("sections").insert(
+        db.execute("DELETE FROM sections WHERE song_id = ?", [song_id])
+        for section in sections or []:
+            db.execute(
+                """INSERT INTO sections (id, song_id, label, start_time, end_time)
+                   VALUES (?, ?, ?, ?, ?)""",
                 [
-                    {
-                        "song_id": song_id,
-                        "label": section["label"],
-                        "start_time": section["start"],
-                        "end_time": section["end"],
-                    }
-                    for section in sections
-                ]
-            ).execute()
+                    new_id(),
+                    song_id,
+                    section["label"],
+                    section["start"],
+                    section["end"],
+                ],
+            )
 
         try:
             chords, bpm = await asyncio.to_thread(detect_chords, str(audio_path))
-            # Store BPM on the song record.
-            sb.table("songs").update({"bpm": bpm}).eq("id", song_id).execute()
+            db.execute(
+                "UPDATE songs SET bpm = ?, updated_at = unixepoch() WHERE id = ?",
+                [bpm, song_id],
+            )
             log_event("pipeline.bpm_detected", song_id=song_id, job_id=job_id, bpm=bpm)
-            sb.table("chords").delete().eq("song_id", song_id).execute()
-            if chords:
-                sb.table("chords").insert(
+            db.execute("DELETE FROM chords WHERE song_id = ?", [song_id])
+            for chord in chords or []:
+                db.execute(
+                    """INSERT INTO chords
+                       (id, song_id, start_time, end_time, chord_label, chord_standard, confidence)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     [
-                        {
-                            "song_id": song_id,
-                            "start_time": chord["start"],
-                            "end_time": chord["end"],
-                            "chord_label": chord["label"],
-                            "chord_standard": chord["standard"],
-                            "confidence": chord["confidence"],
-                        }
-                        for chord in chords
-                    ]
-                ).execute()
+                        new_id(),
+                        song_id,
+                        chord["start"],
+                        chord["end"],
+                        chord["label"],
+                        chord["standard"],
+                        chord["confidence"],
+                    ],
+                )
         except Exception as exc:
             error_text = f"chord_detection_failed: {exc}"
             log_event(
@@ -837,28 +845,48 @@ async def process_pipeline(sb: Client, job_id: str, song_id: str, youtube_url: s
                 error=str(exc),
                 traceback=traceback.format_exc(),
             )
-            sb.table("processing_jobs").update({"last_error": error_text}).eq(
-                "id", job_id
-            ).execute()
+            db.execute(
+                "UPDATE processing_jobs SET last_error = ?, updated_at = unixepoch() WHERE id = ?",
+                [error_text, job_id],
+            )
         finally:
             stage_done(stage="analyze", song_id=song_id, job_id=job_id, started=analyze_started)
             analyze_stage_closed = True
 
-        update_song(sb, song_id, status="processing", processing_stage="lyrics", last_error=None)
+        update_song(song_id, status="processing", processing_stage="lyrics", last_error=None)
         try:
             lyrics = await lyrics_task
             if lyrics:
-                sb.table("lyrics").upsert(
-                    {
-                        "song_id": song_id,
-                        "synced_lrc": lyrics["synced_lrc"],
-                        "plain_text": lyrics["plain_text"],
-                        "source": lyrics["source"],
-                    },
-                    on_conflict="song_id",
-                ).execute()
+                existing_lyrics = db.query_one(
+                    "SELECT id FROM lyrics WHERE song_id = ?", [song_id]
+                )
+                if existing_lyrics:
+                    db.execute(
+                        """UPDATE lyrics
+                           SET synced_lrc = ?, plain_text = ?, source = ?
+                           WHERE song_id = ?""",
+                        [
+                            lyrics["synced_lrc"],
+                            lyrics["plain_text"],
+                            lyrics["source"],
+                            song_id,
+                        ],
+                    )
+                else:
+                    db.execute(
+                        """INSERT INTO lyrics
+                           (id, song_id, synced_lrc, plain_text, source)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        [
+                            new_id(),
+                            song_id,
+                            lyrics["synced_lrc"],
+                            lyrics["plain_text"],
+                            lyrics["source"],
+                        ],
+                    )
             else:
-                sb.table("lyrics").delete().eq("song_id", song_id).execute()
+                db.execute("DELETE FROM lyrics WHERE song_id = ?", [song_id])
         except Exception as exc:
             log_event("pipeline.lyrics_non_fatal", song_id=song_id, job_id=job_id, error=str(exc))
         finally:
@@ -882,7 +910,7 @@ def classify_error(exc: Exception) -> str:
         return "separation_error"
     if "ffmpeg" in msg:
         return "audio_conversion_error"
-    if "upload" in msg or "storage" in msg:
+    if "upload" in msg or "storage" in msg or "blob" in msg:
         return "storage_error"
     return "pipeline_error"
 
@@ -916,7 +944,6 @@ def fetch_lyrics(title: str, artist: str | None) -> dict | None:
     Each tier is tried with up to 3 query variants:
       "{title} {artist}", "{artist} {title}", "{title}"
     """
-    # Build query variants, deduplicated while preserving order.
     queries: list[str] = []
     for q in [
         f"{title} {artist}" if artist else None,
@@ -944,7 +971,6 @@ def fetch_lyrics(title: str, artist: str | None) -> dict | None:
             log_event("lyrics.provider_error", query=query, providers=providers, error=str(exc))
             return None
 
-    # Tier 1 — best synced providers.
     SYNCED_PRIORITY = ["Lrclib", "Musixmatch", "Deezer", "NetEase"]
     for q in queries:
         result = _try(q, providers=SYNCED_PRIORITY, synced_only=True)
@@ -952,25 +978,21 @@ def fetch_lyrics(title: str, artist: str | None) -> dict | None:
             log_event("lyrics.found", query=q, tier="synced_priority", enhanced=False)
             return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/synced"}
 
-    # Tier 2 — Musixmatch word-level sync.
     for q in queries:
         result = _try(q, providers=["Musixmatch"], synced_only=True, enhanced=True)
         if result:
             log_event("lyrics.found", query=q, tier="musixmatch_enhanced")
             return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/musixmatch_enhanced"}
 
-    # Tier 3 — all remaining providers synced.
     for q in queries:
         result = _try(q, synced_only=True)
         if result:
             log_event("lyrics.found", query=q, tier="synced_all")
             return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/synced_all"}
 
-    # Tier 4 — plain text fallback across all providers.
     for q in queries:
         result = _try(q, plain_only=True)
         if result:
-            # Some providers return LRC even when plain_only is requested.
             if result.strip().startswith("["):
                 log_event("lyrics.found", query=q, tier="plain_as_lrc")
                 return {"synced_lrc": result, "plain_text": None, "source": "syncedlyrics/plain_as_lrc"}
@@ -986,8 +1008,6 @@ def detect_sections(audio_path: str, duration: float) -> list[dict]:
     Detect song sections using librosa's structural segmentation (MFCC + recurrence matrix).
     Falls back to heuristic percentage-based markers if librosa analysis fails.
     """
-    _SECTION_NAMES = ["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Outro"]
-
     def heuristic_fallback() -> list[dict]:
         if duration < 60:
             return [{"label": "Full Song", "start": 0, "end": round(duration, 2)}]
@@ -1006,28 +1026,23 @@ def detect_sections(audio_path: str, duration: float) -> list[dict]:
         ]
 
     try:
-        # Load mono at reduced sample rate for speed.
         y, sr = librosa.load(audio_path, sr=11025, mono=True)
 
-        # MFCC-based feature matrix (efficient for structural segmentation).
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         mfcc = librosa.util.normalize(mfcc, axis=1)
 
-        # Build recurrence matrix and compute structural novelty.
         rec = librosa.segment.recurrence_matrix(
             mfcc, width=max(1, int(sr * 8 / 512)), mode="affinity", sym=True
         )
         novelty = librosa.segment.timelag_filter(np.diff)(rec, axis=1)
         novelty_curve = np.mean(np.abs(novelty), axis=0)
 
-        # Smooth the novelty curve to avoid micro-segmentation.
-        kernel_size = max(3, int(sr * 4 / 512) | 1)  # ~4s, must be odd
+        kernel_size = max(3, int(sr * 4 / 512) | 1)
         novelty_smooth = np.convolve(novelty_curve, np.hanning(kernel_size), mode="same")
 
-        # Pick boundary frames as local maxima above the mean.
         threshold = novelty_smooth.mean() + 0.5 * novelty_smooth.std()
         frame_times = librosa.frames_to_time(np.arange(len(novelty_smooth)), sr=sr, hop_length=512)
-        min_gap_frames = int(sr * 20 / 512)  # at least 20s between sections
+        min_gap_frames = int(sr * 20 / 512)
 
         boundaries = [0.0]
         last_peak = -min_gap_frames
@@ -1042,14 +1057,11 @@ def detect_sections(audio_path: str, duration: float) -> list[dict]:
                 last_peak = i
         boundaries.append(float(duration))
 
-        # Deduplicate and sort.
         boundaries = sorted(set(round(b, 2) for b in boundaries))
 
-        # Need at least 2 boundaries to form a section.
         if len(boundaries) < 2:
             return heuristic_fallback()
 
-        # Assign human-readable labels by position.
         n = len(boundaries) - 1
         sections = []
         for i in range(n):

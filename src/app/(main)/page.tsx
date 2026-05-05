@@ -2,10 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import type { Database } from "@/lib/database.types";
-
-type Song = Database["public"]["Tables"]["songs"]["Row"];
+import type { Song } from "@/lib/database.types";
 
 const STAGES = [
   { title: "Lighting the fire...", subtitle: "Validating & queuing your song", start: 0 },
@@ -78,50 +75,54 @@ export default function ImportPage() {
     };
   }, []);
 
-  // Subscribe to the imported song's row via Realtime — replaces 3s polling.
+  // Poll the imported song's status every 3s while importing.
   useEffect(() => {
     if (!importingSongId) return;
-    const supabase = createClient();
-    const channel = supabase
-      .channel(`song-${importingSongId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "songs",
-          filter: `id=eq.${importingSongId}`,
-        },
-        (payload) => {
-          const next = payload.new as Song;
-          if (next.status === "ready") {
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            importingSongIdRef.current = null;
-            setFinished(true);
-            setNotice("Song ready. Opening player...");
-            setTimeout(() => router.push(`/song/${next.id}`), 1500);
-          } else if (next.status === "failed") {
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            importingSongIdRef.current = null;
-            setError(
-              next.last_error ||
-                "The music's over... Processing failed. Please try again.",
-            );
-            setImporting(false);
-            setImportingSongId(null);
-          }
-        },
-      )
-      .subscribe();
+    let cancelled = false;
 
+    async function check() {
+      try {
+        const res = await fetch(`/api/songs/${importingSongId}/status`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const next = (await res.json()) as Pick<
+          Song,
+          "id" | "status" | "last_error"
+        >;
+        if (cancelled) return;
+        if (next.status === "ready") {
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          importingSongIdRef.current = null;
+          setFinished(true);
+          setNotice("Song ready. Opening player...");
+          setTimeout(() => router.push(`/song/${next.id}`), 1500);
+        } else if (next.status === "failed") {
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          importingSongIdRef.current = null;
+          setError(
+            next.last_error ||
+              "The music's over... Processing failed. Please try again.",
+          );
+          setImporting(false);
+          setImportingSongId(null);
+        }
+      } catch {
+        // Network blip — will retry on next interval.
+      }
+    }
+
+    check();
+    const interval = setInterval(check, 3000);
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [importingSongId, router]);
 

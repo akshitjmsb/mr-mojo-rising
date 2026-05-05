@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Spinner from "@/components/Spinner";
-import type { Database } from "@/lib/database.types";
+import type {
+  Chord,
+  Lyrics,
+  Section,
+  Song,
+  Stem,
+} from "@/lib/database.types";
 import StemSelector, { type StemMode } from "./_components/StemSelector";
 import type { DownloadStemKey } from "./_components/DownloadPanel";
 import Scrubber from "./_components/Scrubber";
@@ -21,12 +27,6 @@ const ChordLyricsPanel = dynamic(
   () => import("./_components/ChordLyricsPanel"),
 );
 const SectionList = dynamic(() => import("./_components/SectionList"));
-
-type Song = Database["public"]["Tables"]["songs"]["Row"];
-type Stem = Database["public"]["Tables"]["stems"]["Row"];
-type Section = Database["public"]["Tables"]["sections"]["Row"];
-type Chord = Database["public"]["Tables"]["chords"]["Row"];
-type Lyrics = Database["public"]["Tables"]["lyrics"]["Row"];
 
 const SEEK_STEP_SECONDS = 10;
 

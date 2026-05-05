@@ -1,21 +1,27 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/queries";
+
+type Status = {
+  id: string;
+  status: string;
+  processing_stage: string | null;
+  last_error: string | null;
+  updated_at: number;
+};
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const song = await queryOne<Status>(
+    `SELECT id, status, processing_stage, last_error, updated_at
+     FROM songs WHERE id = ?`,
+    [id],
+  );
 
-  const { data: song, error } = await supabase
-    .from("songs")
-    .select("id, status, processing_stage, last_error, updated_at")
-    .eq("id", id)
-    .single();
-
-  if (error || !song) {
+  if (!song) {
     return NextResponse.json({ error: "Song not found" }, { status: 404 });
   }
 

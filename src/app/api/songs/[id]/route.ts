@@ -1,106 +1,93 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { del } from "@vercel/blob";
+import { execute, queryAll, queryOne } from "@/lib/queries";
+import type {
+  Chord,
+  Lyrics,
+  Section,
+  Song,
+  Stem,
+} from "@/lib/database.types";
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
-  const supabase = createAdminClient();
-
-  // Fetch song
-  const { data: song, error: songError } = await supabase
-    .from("songs")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (songError || !song) {
+  const song = await queryOne<Song>(`SELECT * FROM songs WHERE id = ?`, [id]);
+  if (!song) {
     return NextResponse.json({ error: "Song not found" }, { status: 404 });
   }
 
-  // Fetch stems
-  const { data: stems } = await supabase
-    .from("stems")
-    .select("*")
-    .eq("song_id", id)
-    .single();
+  const stems = await queryOne<Stem>(`SELECT * FROM stems WHERE song_id = ?`, [
+    id,
+  ]);
 
-  // Fetch sections
-  const { data: sections } = await supabase
-    .from("sections")
-    .select("*")
-    .eq("song_id", id)
-    .order("start_time", { ascending: true });
+  const sections = await queryAll<Section>(
+    `SELECT * FROM sections WHERE song_id = ? ORDER BY start_time ASC`,
+    [id],
+  );
 
-  // Fetch chords
-  const { data: chords } = await supabase
-    .from("chords")
-    .select("*")
-    .eq("song_id", id)
-    .order("start_time", { ascending: true });
+  const chords = await queryAll<Chord>(
+    `SELECT * FROM chords WHERE song_id = ? ORDER BY start_time ASC`,
+    [id],
+  );
 
-  // Fetch lyrics
-  const { data: lyrics } = await supabase
-    .from("lyrics")
-    .select("*")
-    .eq("song_id", id)
-    .single();
+  const lyrics = await queryOne<Lyrics>(
+    `SELECT * FROM lyrics WHERE song_id = ?`,
+    [id],
+  );
 
   return NextResponse.json({
     song,
-    stems: stems || null,
-    sections: sections || [],
-    chords: chords || [],
-    lyrics: lyrics || null,
+    stems: stems ?? null,
+    sections,
+    chords,
+    lyrics: lyrics ?? null,
   });
 }
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const supabase = createAdminClient();
 
-  const { data: song, error: songError } = await supabase
-    .from("songs")
-    .select("id")
-    .eq("id", id)
-    .single();
-
-  if (songError || !song) {
+  const song = await queryOne<Song>(`SELECT id FROM songs WHERE id = ?`, [id]);
+  if (!song) {
     return NextResponse.json({ error: "Song not found" }, { status: 404 });
   }
 
-  // Best-effort storage cleanup for common stem paths.
-  const knownPaths = [
-    `${id}/original.wav`,
-    `${id}/other.wav`,
-    `${id}/vocals.wav`,
-    `${id}/drums.wav`,
-    `${id}/bass.wav`,
-  ];
+  const stems = await queryOne<Stem>(`SELECT * FROM stems WHERE song_id = ?`, [
+    id,
+  ]);
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      const admin = createAdminClient();
-      await admin.storage.from("stems").remove(knownPaths);
-    } catch (error) {
-      console.error("Failed to delete stem files", error);
+  if (stems && process.env.BLOB_READ_WRITE_TOKEN) {
+    const urls = [
+      stems.original_url,
+      stems.guitar_url,
+      stems.vocals_url,
+      stems.drums_url,
+      stems.bass_url,
+    ].filter((u): u is string => typeof u === "string" && u.length > 0);
+
+    if (urls.length > 0) {
+      try {
+        await del(urls, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (err) {
+        console.error("Failed to delete blob files", err);
+      }
     }
   }
 
-  const { error: deleteError } = await supabase
-    .from("songs")
-    .delete()
-    .eq("id", id);
-
-  if (deleteError) {
+  try {
+    await execute(`DELETE FROM songs WHERE id = ?`, [id]);
+  } catch (err) {
+    console.error("Failed to delete song", err);
     return NextResponse.json(
       { error: "Failed to delete song" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
