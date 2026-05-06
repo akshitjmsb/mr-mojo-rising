@@ -519,11 +519,17 @@ async def warmup_models():
     demucs_out = temp_dir / "separated"
 
     try:
+        # Demucs needs ≥5.85s of stereo audio with non-zero signal (silence
+        # trips an assertion in htdemucs's pad1d during normalization).
         with wave.open(str(warmup_audio), "w") as wav_file:
-            wav_file.setnchannels(1)
+            wav_file.setnchannels(2)
             wav_file.setsampwidth(2)
             wav_file.setframerate(44100)
-            wav_file.writeframes((np.zeros(44100, dtype=np.int16)).tobytes())
+            sr = 44100
+            duration_s = 8
+            t = np.linspace(0, duration_s, sr * duration_s, endpoint=False, dtype=np.float32)
+            tone = (3000 * np.sin(2 * np.pi * 440 * t)).astype(np.int16)
+            wav_file.writeframes(np.column_stack([tone, tone]).flatten().tobytes())
 
         await run_demucs(
             audio_path=warmup_audio,
@@ -658,6 +664,10 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     await run_cmd(
         [
             "yt-dlp",
+            "--cookies-from-browser",
+            "chrome",
+            "--remote-components",
+            "ejs:github",
             "-x",
             "--audio-format",
             "wav",
