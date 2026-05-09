@@ -1,24 +1,117 @@
 @import "tailwindcss";
 
+/*
+ * THEME LAYER
+ * ---------------------------------------------------------------------------
+ * Two themes:
+ *   - "doors"  (default) — psychedelic dive-bar, golden archway, candlelight
+ *   - "eagles"           — golden-hour California desert, peaceful easy feeling
+ *
+ * Both themes share the same token *names* so Tailwind utilities like
+ * `text-gold`, `bg-input-bg`, `font-playfair` work identically — the values
+ * underneath swap based on `[data-theme]` on <html>.
+ */
+
 @theme inline {
-  --color-bg: #050403;
-  --color-gold: #EAC05E;
-  --color-orange: #E0965C;
-  --color-terracotta: #D46A45;
-  --color-purple: #A68AB6;
-  --color-text: #F8F2E8;
-  --color-text-secondary: #E8DCC0;
-  --color-text-muted: #C0B090;
-  --color-text-dark: #A09070;
-  --color-text-darker: #D0C0A0;
-  --color-text-darkest: #8F8068;
-  --color-border: #6A5C45;
-  --color-border-dark: #4A4030;
-  --color-border-darkest: #3A2E20;
-  --color-input-bg: #1F1A16;
-  --color-inactive: #352E22;
-  --font-playfair: var(--font-playfair);
-  --font-josefin: var(--font-josefin);
+  /* Default (Doors) palette — also lives in :root for runtime overrides */
+  --color-bg: var(--c-bg);
+  --color-gold: var(--c-gold);
+  --color-orange: var(--c-orange);
+  --color-terracotta: var(--c-terracotta);
+  --color-purple: var(--c-purple);
+  --color-text: var(--c-text);
+  --color-text-secondary: var(--c-text-secondary);
+  --color-text-muted: var(--c-text-muted);
+  --color-text-dark: var(--c-text-dark);
+  --color-text-darker: var(--c-text-darker);
+  --color-text-darkest: var(--c-text-darkest);
+  --color-border: var(--c-border);
+  --color-border-dark: var(--c-border-dark);
+  --color-border-darkest: var(--c-border-darkest);
+  --color-input-bg: var(--c-input-bg);
+  --color-inactive: var(--c-inactive);
+
+  /* Font tokens resolve to the active theme's family */
+  --font-playfair: var(--f-display);
+  --font-josefin: var(--f-body);
+}
+
+/*
+ * Doors (default). Also sets section-color tokens used by SectionList.
+ */
+:root,
+[data-theme="doors"] {
+  --c-bg: #050403;
+  --c-gold: #EAC05E;
+  --c-orange: #E0965C;
+  --c-terracotta: #D46A45;
+  --c-purple: #A68AB6;
+  --c-text: #F8F2E8;
+  --c-text-secondary: #E8DCC0;
+  --c-text-muted: #C0B090;
+  --c-text-dark: #A09070;
+  --c-text-darker: #D0C0A0;
+  --c-text-darkest: #8F8068;
+  --c-border: #6A5C45;
+  --c-border-dark: #4A4030;
+  --c-border-darkest: #3A2E20;
+  --c-input-bg: #1F1A16;
+  --c-inactive: #352E22;
+
+  /* Section bar / pill colors */
+  --section-intro: #D4A844;
+  --section-verse: #C8844A;
+  --section-chorus: #B85C3A;
+  --section-bridge: #8A6A9A;
+  --section-default: #C8844A;
+
+  /* Fonts (stage 1 — Playfair / Josefin) */
+  --f-display: var(--font-playfair-doors), Georgia, serif;
+  --f-body: var(--font-josefin-doors), system-ui, sans-serif;
+
+  /* Atmospheric glow — small dive-bar bulb at top center */
+  --atmo-position: top -100px left 50%;
+  --atmo-size: 300px 300px;
+  --atmo-image: radial-gradient(circle, rgba(180, 100, 30, 0.08) 0%, transparent 70%);
+}
+
+/*
+ * Eagles — open highway, golden hour desert. Same token names, warmer values.
+ * Background still dark (twilight) so player UI / bordered surfaces still pop,
+ * but every accent leans sand / amber / faded denim.
+ */
+[data-theme="eagles"] {
+  --c-bg: #0E0A05;
+  --c-gold: #E8B86C;          /* sun-bleached amber */
+  --c-orange: #D6824A;         /* desert ochre */
+  --c-terracotta: #B85544;     /* red clay */
+  --c-purple: #7C8FA6;         /* faded denim blue (replaces psychedelic purple) */
+  --c-text: #F5E9D3;           /* warm cream */
+  --c-text-secondary: #ECDCBC;
+  --c-text-muted: #BFA982;
+  --c-text-dark: #998666;
+  --c-text-darker: #C7B591;
+  --c-text-darkest: #7A6A52;
+  --c-border: #6E5A3A;
+  --c-border-dark: #4D3F28;
+  --c-border-darkest: #2E2415;
+  --c-input-bg: #1A130C;
+  --c-inactive: #2C2418;
+
+  --section-intro: #E8B86C;     /* golden hour */
+  --section-verse: #C9A06B;     /* warm sand */
+  --section-chorus: #C0573A;    /* terracotta dusk */
+  --section-bridge: #7C8FA6;    /* faded denim */
+  --section-default: #C9A06B;
+
+  /* Fonts swap to Cormorant Garamond + Jost */
+  --f-display: var(--font-cormorant-eagles), Georgia, serif;
+  --f-body: var(--font-jost-eagles), system-ui, sans-serif;
+
+  /* Atmospheric glow — wide low sunset on the horizon */
+  --atmo-position: bottom -180px left 50%;
+  --atmo-size: 760px 360px;
+  --atmo-image: radial-gradient(ellipse at center, rgba(232, 156, 76, 0.16) 0%, rgba(216, 110, 60, 0.06) 45%, transparent 75%);
 }
 
 * {
@@ -36,7 +129,7 @@ body {
   min-height: 100vh;
 }
 
-/* Noise texture overlay */
+/* Noise texture overlay (works for both themes) */
 body::before {
   content: "";
   position: fixed;
@@ -48,19 +141,31 @@ body::before {
   mix-blend-mode: overlay;
 }
 
-/* Atmospheric glow */
+/*
+ * Atmospheric glow. Doors paints a small bulb at top-center; Eagles paints a
+ * wide sunset on the bottom horizon. Theme tokens drive position/size/image.
+ */
 body::after {
   content: "";
   position: fixed;
-  top: -100px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 300px;
-  height: 300px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(180, 100, 30, 0.08) 0%, transparent 70%);
+  inset: 0;
   pointer-events: none;
   z-index: 0;
+  background-image: var(--atmo-image);
+  background-position: var(--atmo-position);
+  background-size: var(--atmo-size);
+  background-repeat: no-repeat;
+  transition: background-image 600ms ease, background-position 600ms ease,
+    background-size 600ms ease;
+}
+
+/* Smooth color/font transitions when switching themes */
+body,
+[data-theme] [class*="text-"],
+[data-theme] [class*="bg-"],
+[data-theme] [class*="border-"] {
+  transition: color 300ms ease, background-color 300ms ease,
+    border-color 300ms ease;
 }
 
 /* Keyframe animations */
@@ -90,6 +195,12 @@ body::after {
   98% { opacity: 1; }
 }
 
+/* Eagles replaces the dive-bar flicker with a slow sun-baked breath. */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.88; }
+}
+
 .spinning {
   animation: spin 1.4s linear infinite;
 }
@@ -100,4 +211,8 @@ body::after {
 
 .flicker {
   animation: flicker 6s infinite;
+}
+
+[data-theme="eagles"] .flicker {
+  animation: breathe 7s ease-in-out infinite;
 }

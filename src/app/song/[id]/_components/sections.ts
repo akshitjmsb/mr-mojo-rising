@@ -1,17 +1,18 @@
-const SECTION_COLORS: Record<string, string> = {
-  Intro: "#D4A844",
-  "Verse I": "#C8844A",
-  "Verse II": "#C8844A",
-  "Verse III": "#C8844A",
-  Chorus: "#B85C3A",
-  Break: "#8A6A9A",
-  Bridge: "#8A6A9A",
-  Solo: "#D4A844",
-  Outro: "#D4A844",
+// Section pill colors are theme-driven via CSS variables (see globals.css).
+const SECTION_VARS: Record<string, string> = {
+  Intro: "var(--section-intro)",
+  "Verse I": "var(--section-verse)",
+  "Verse II": "var(--section-verse)",
+  "Verse III": "var(--section-verse)",
+  Chorus: "var(--section-chorus)",
+  Break: "var(--section-bridge)",
+  Bridge: "var(--section-bridge)",
+  Solo: "var(--section-intro)",
+  Outro: "var(--section-intro)",
 };
 
 export function getSectionColor(label: string): string {
-  return SECTION_COLORS[label] ?? "#C8844A";
+  return SECTION_VARS[label] ?? "var(--section-default)";
 }
 
 export function formatTime(s: number): string {

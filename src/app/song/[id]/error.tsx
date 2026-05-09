@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTheme } from "@/lib/theme/ThemeProvider";
 
 interface Props {
   error: Error & { digest?: string };
@@ -8,6 +9,8 @@ interface Props {
 }
 
 export default function SongError({ error, reset }: Props) {
+  const { content } = useTheme();
+
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -15,7 +18,7 @@ export default function SongError({ error, reset }: Props) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
       <p className="font-playfair text-[20px] italic text-gold">
-        The music&rsquo;s over.
+        {content.errors.songTitle}
       </p>
       <p className="font-josefin text-[12px] tracking-[0.06em] text-text-muted">
         {error.message || "Failed to load this song."}

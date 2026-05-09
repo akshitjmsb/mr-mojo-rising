@@ -3,41 +3,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
-
-const STAGES = [
-  { title: "Lighting the fire...", subtitle: "Validating & queuing your song", start: 0 },
-  { title: "Riding the highway...", subtitle: "Downloading audio from YouTube", start: 5 },
-  { title: "Breaking on through...", subtitle: "Separating guitar from the mix", start: 20 },
-  { title: "Mapping the strange days...", subtitle: "Detecting song sections", start: 90 },
-  { title: "Decoding the crystal ship...", subtitle: "Analyzing chord progressions", start: 130 },
-  { title: "Whispering the words...", subtitle: "Fetching synced lyrics", start: 170 },
-  { title: "The doors are open.", subtitle: "Ready to play", start: Infinity },
-];
-
-const DOORS_QUOTES = [
-  "The time to hesitate is through...",
-  "There's danger on the edge of town...",
-  "Can you give me sanctuary?",
-  "Let it roll, baby, roll...",
-  "Keep your eyes on the road, your hands upon the wheel...",
-  "The future's uncertain and the end is always near...",
-  "I found an island in your arms, a country in your eyes...",
-  "People are strange when you're a stranger...",
-  "No one here gets out alive...",
-  "We could plan a murder, or start a religion...",
-  "I am the Lizard King. I can do anything...",
-  "This is the end, beautiful friend...",
-];
-
-const STEPS = [
-  { num: "I", text: "Paste a YouTube link to any song" },
-  { num: "II", text: "We separate the guitar stem using AI" },
-  { num: "III", text: "Sections are detected automatically" },
-  { num: "IV", text: "Loop any section at any speed and practice" },
-];
+import { useTheme } from "@/lib/theme/ThemeProvider";
 
 export default function ImportPage() {
   const router = useRouter();
+  const { content } = useTheme();
+  const STAGES = content.importStages;
+  const QUOTES = content.importQuotes;
+  const STEPS = content.importSteps;
   const [url, setUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
@@ -60,11 +33,11 @@ export default function ImportPage() {
   useEffect(() => {
     if (!importing) return;
     const rotator = setInterval(
-      () => setQuoteIndex((i) => (i + 1) % DOORS_QUOTES.length),
+      () => setQuoteIndex((i) => (i + 1) % QUOTES.length),
       4000,
     );
     return () => clearInterval(rotator);
-  }, [importing]);
+  }, [importing, QUOTES.length]);
 
   useEffect(() => {
     return () => {
@@ -107,8 +80,7 @@ export default function ImportPage() {
           }
           importingSongIdRef.current = null;
           setError(
-            next.last_error ||
-              "The music's over... Processing failed. Please try again.",
+            next.last_error || content.errors.processingFallback,
           );
           setImporting(false);
           setImportingSongId(null);
@@ -124,16 +96,16 @@ export default function ImportPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [importingSongId, router]);
+  }, [importingSongId, router, content.errors.processingFallback]);
 
   // Derive current stage index from elapsed time (cap at stage 5, index 0-5; stage 6 only on ready)
   const currentStage = useMemo(() => {
-    if (finished) return 6;
+    if (finished) return STAGES.length - 1;
     for (let i = STAGES.length - 1; i >= 0; i--) {
       if (elapsedTime >= STAGES[i].start) return i;
     }
     return 0;
-  }, [elapsedTime, finished]);
+  }, [elapsedTime, finished, STAGES]);
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -225,14 +197,12 @@ export default function ImportPage() {
     <main className="flex flex-1 flex-col gap-[30px] p-6">
       <div>
         <p className="font-playfair text-[32px] font-bold italic leading-[1.25] text-text">
-          Break on through
+          {content.hero.lineOne}
           <br />
-          to the other side.
+          {content.hero.lineTwo}
         </p>
         <p className="mt-3.5 font-josefin text-[13px] font-light leading-[1.8] tracking-[0.1em] text-text-muted">
-          Paste a YouTube link. We&apos;ll isolate the guitar,
-          <br />
-          detect the sections, and let you practice at any speed.
+          {content.hero.subtitle}
         </p>
       </div>
 
@@ -318,7 +288,7 @@ export default function ImportPage() {
               key={quoteIndex}
               className="fade-up min-h-5 font-playfair text-[14px] italic text-text-muted opacity-75"
             >
-              &ldquo;{DOORS_QUOTES[quoteIndex]}&rdquo;
+              &ldquo;{QUOTES[quoteIndex]}&rdquo;
             </p>
           )}
 

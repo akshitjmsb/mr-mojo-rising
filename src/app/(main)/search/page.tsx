@@ -4,15 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
-
-const QUOTES = [
-  "Riders on the storm...",
-  "Light my fire...",
-  "Break on through...",
-  "People are strange...",
-  "Love me two times...",
-  "Touch me, babe...",
-];
+import { useTheme } from "@/lib/theme/ThemeProvider";
 
 function looksLikeUrl(s: string) {
   const t = s.trim();
@@ -23,6 +15,8 @@ function looksLikeUrl(s: string) {
 function SearchPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { content } = useTheme();
+  const QUOTES = content.searchQuotes;
 
   const [urlInput, setUrlInput] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -149,7 +143,7 @@ function SearchPageInner() {
       4000,
     );
     return () => clearInterval(id);
-  }, [submitting]);
+  }, [submitting, QUOTES.length]);
 
   async function handleUrlSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -296,12 +290,10 @@ function SearchPageInner() {
     <main className="flex flex-1 flex-col gap-7 p-6">
       <div>
         <p className="font-playfair text-[26px] font-bold italic leading-[1.25] text-text">
-          Find a song.
+          {content.searchHero.title}
         </p>
         <p className="mt-2.5 font-josefin text-[12px] font-light leading-[1.8] tracking-[0.1em] text-text-muted">
-          Search YouTube, or paste a YouTube
-          <br />
-          or Spotify link.
+          {content.searchHero.subtitle}
         </p>
       </div>
 
@@ -479,8 +471,7 @@ function SearchPageInner() {
             Tip
           </p>
           <p className="font-josefin text-[12px] leading-[1.7] tracking-[0.04em] text-text-muted">
-            Share a song from YouTube or Spotify on your iPhone and pick
-            &ldquo;Mr. Mojo Rising&rdquo; to add it here automatically.
+            {content.shareTip}
           </p>
         </div>
       )}
