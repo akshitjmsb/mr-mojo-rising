@@ -138,6 +138,60 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
         "Took it past the limit. Processing failed. Please try again.",
     },
   },
+
+  dylan: {
+    label: "Dylan",
+    hero: {
+      lineOne: "How does it feel",
+      lineTwo: "to be on your own?",
+      subtitle:
+        "Paste a YouTube link. We'll pull the guitar out of the noise, mark the verses, and let you play it at any tempo.",
+    },
+    importStages: [
+      { title: "Loading the typewriter...", subtitle: "Validating & queuing your song", start: 0 },
+      { title: "Riding Highway 61...", subtitle: "Downloading audio from YouTube", start: 5 },
+      { title: "Going electric...", subtitle: "Separating guitar from the mix", start: 20 },
+      { title: "Charting the changing times...", subtitle: "Detecting song sections", start: 90 },
+      { title: "Tangled up in chord changes...", subtitle: "Analyzing chord progressions", start: 130 },
+      { title: "Catching the lyric on the wind...", subtitle: "Fetching synced lyrics", start: 170 },
+      { title: "Knock-knock-knockin' on heaven's door.", subtitle: "Ready to play", start: Infinity },
+    ],
+    importQuotes: [
+      "How does it feel to be on your own?",
+      "The answer, my friend, is blowin' in the wind...",
+      "Come gather 'round people, wherever you roam...",
+      "The times they are a-changin'...",
+      "Once upon a time you dressed so fine...",
+      "Like a complete unknown, like a rolling stone...",
+      "When you got nothin', you got nothin' to lose...",
+      "I was so much older then; I'm younger than that now...",
+      "Tangled up in blue...",
+      "Mama, take this badge off of me...",
+      "A hard rain's a-gonna fall...",
+      "Don't think twice, it's all right...",
+    ],
+    importSteps: SHARED_STEPS,
+    searchHero: {
+      title: "Find a song.",
+      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
+    },
+    searchQuotes: [
+      "Like a rolling stone...",
+      "Blowin' in the wind...",
+      "Times they are a-changin'...",
+      "Tangled up in blue...",
+      "Subterranean homesick...",
+      "Knockin' on heaven's door...",
+    ],
+    shareTip:
+      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
+    errors: {
+      mainTitle: "Idiot wind, blowin' through us all.",
+      songTitle: "It’s all over now, baby blue.",
+      processingFallback:
+        "A hard rain fell on this one. Please try again.",
+    },
+  },
 };
 
 export function getThemeContent(theme: Theme): ThemeContent {

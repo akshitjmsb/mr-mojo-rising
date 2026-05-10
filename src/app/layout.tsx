@@ -4,6 +4,8 @@ import {
   Josefin_Sans,
   Cormorant_Garamond,
   Jost,
+  Special_Elite,
+  IBM_Plex_Sans,
 } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
@@ -34,6 +36,19 @@ const jost = Jost({
   variable: "--font-jost-eagles",
   subsets: ["latin"],
   weight: ["100", "300", "400", "500"],
+});
+
+// Dylan theme fonts — typewriter ink on yellowed paper
+const specialElite = Special_Elite({
+  variable: "--font-special-elite-dylan",
+  subsets: ["latin"],
+  weight: ["400"],
+});
+
+const ibmPlexSans = IBM_Plex_Sans({
+  variable: "--font-ibm-plex-dylan",
+  subsets: ["latin"],
+  weight: ["300", "400", "500"],
 });
 
 export const metadata: Metadata = {
@@ -72,7 +87,7 @@ export default function RootLayout({
 }>) {
   // Font CSS variables MUST live on <html> (not <body>) — the theme tokens
   // resolve at :root, so a body-scoped variable would be invisible to them.
-  const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable}`;
+  const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable} ${specialElite.variable} ${ibmPlexSans.variable}`;
 
   return (
     <html lang="en" className={fontVariables}>

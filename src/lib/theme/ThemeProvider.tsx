@@ -7,7 +7,13 @@ import {
   useEffect,
   useSyncExternalStore,
 } from "react";
-import { DEFAULT_THEME, THEME_COLORS, THEMES, type Theme } from "./types";
+import {
+  DEFAULT_THEME,
+  THEME_COLORS,
+  THEME_FAVICONS,
+  THEMES,
+  type Theme,
+} from "./types";
 import { getThemeContent, type ThemeContent } from "./content";
 
 export const THEME_STORAGE_KEY = "mojo-theme";
@@ -58,8 +64,7 @@ function syncBrowserChrome(theme: Theme) {
   }
   meta.content = THEME_COLORS[theme];
 
-  const iconHref =
-    theme === "eagles" ? "/favicon-eagles.svg" : "/favicon.svg";
+  const iconHref = THEME_FAVICONS[theme];
   const icons = document.querySelectorAll<HTMLLinkElement>(
     'link[rel="icon"][type="image/svg+xml"], link[rel="shortcut icon"]',
   );
@@ -98,7 +103,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme(readDocumentTheme() === "doors" ? "eagles" : "doors");
+    const current = readDocumentTheme();
+    const idx = THEMES.indexOf(current);
+    const next = THEMES[(idx + 1) % THEMES.length];
+    setTheme(next);
   }, [setTheme]);
 
   // After hydration the SSR snapshot ("doors") is replaced by the live DOM
@@ -138,8 +146,9 @@ export function useTheme(): ThemeContextValue {
 export const THEME_INIT_SCRIPT = `
 (function () {
   try {
+    var allowed = ${JSON.stringify(THEMES)};
     var stored = window.localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
-    var theme = (stored === "doors" || stored === "eagles") ? stored : ${JSON.stringify(DEFAULT_THEME)};
+    var theme = allowed.indexOf(stored) >= 0 ? stored : ${JSON.stringify(DEFAULT_THEME)};
     document.documentElement.setAttribute("data-theme", theme);
   } catch (e) {
     document.documentElement.setAttribute("data-theme", ${JSON.stringify(DEFAULT_THEME)});

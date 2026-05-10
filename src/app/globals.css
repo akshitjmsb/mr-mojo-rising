@@ -3,11 +3,13 @@
 /*
  * THEME LAYER
  * ---------------------------------------------------------------------------
- * Two themes:
+ * Three themes:
  *   - "doors"  (default) — psychedelic dive-bar, golden archway, candlelight
  *   - "eagles"           — golden-hour California desert, peaceful easy feeling
+ *   - "dylan"            — weathered sepia photograph, Highway 61 dust, brass
+ *                          harmonica, typewriter ink, Rolling Thunder violet
  *
- * Both themes share the same token *names* so Tailwind utilities like
+ * All themes share the same token *names* so Tailwind utilities like
  * `text-gold`, `bg-input-bg`, `font-playfair` work identically — the values
  * underneath swap based on `[data-theme]` on <html>.
  */
@@ -117,6 +119,48 @@
   --atmo-image: radial-gradient(ellipse at center, rgba(255, 220, 130, 0.55) 0%, rgba(248, 195, 110, 0.30) 35%, rgba(230, 165, 80, 0.10) 65%, transparent 88%);
 }
 
+/*
+ * Dylan — weathered sepia photograph, the Highway 61 dust, typewriter ink on
+ * yellowed paper. Mid-tone walnut background sits between Doors' pure black
+ * and Eagles' bright sky. Primary accent is harmonica brass; iron-ore rust
+ * does the warm-secondary work; Rolling Thunder violet handles the bridge
+ * sections. The mood is a stage-lit press photo from 1965 dimmed to amber.
+ */
+[data-theme="dylan"] {
+  --c-bg: #15110A;             /* deep walnut — dim oil-lamp page corner */
+  --c-gold: #D2934A;           /* harmonica brass (PRIMARY accent) */
+  --c-orange: #B36A3A;         /* tobacco rust — Hibbing iron range */
+  --c-terracotta: #9A2E1E;     /* iron-ore red (errors) */
+  --c-purple: #7E6F8A;         /* Rolling Thunder thunderhead violet */
+  --c-text: #F0E5CB;           /* yellowed paper cream — primary copy */
+  --c-text-secondary: #D8C9A6; /* aged paper */
+  --c-text-muted: #A99776;     /* dusty sand */
+  --c-text-dark: #8A7857;      /* faded typewriter ribbon */
+  --c-text-darker: #B8A580;    /* page edge (mirrors doors offset) */
+  --c-text-darkest: #6E5E42;   /* faintest legible ink */
+  --c-border: #604A2E;         /* leather strap */
+  --c-border-dark: #43321F;    /* book spine */
+  --c-border-darkest: #2C2014; /* deep shadow */
+  --c-input-bg: #221A10;       /* darker sepia pocket — cards/inputs */
+  --c-inactive: #382A1A;       /* inactive waveform bars */
+
+  --section-intro: #D2A553;     /* highway sun — sepia gold */
+  --section-verse: #B98449;     /* dust-tan road */
+  --section-chorus: #A24A2E;    /* iron rust — the protest blast */
+  --section-bridge: #7E6F8A;    /* thunderhead violet */
+  --section-default: #B98449;
+
+  /* Fonts swap to Special Elite (typewriter) + IBM Plex Sans (newsprint) */
+  --f-display: var(--font-special-elite-dylan), Courier, monospace;
+  --f-body: var(--font-ibm-plex-dylan), system-ui, sans-serif;
+
+  /* Atmospheric glow — warm sepia dust haze along the lower horizon, like
+     headlights kicking dust on Highway 61 at dusk. */
+  --atmo-position: bottom -180px left 50%;
+  --atmo-size: 900px 600px;
+  --atmo-image: radial-gradient(ellipse at center, rgba(210, 147, 74, 0.22) 0%, rgba(160, 95, 40, 0.12) 40%, rgba(120, 70, 30, 0.04) 70%, transparent 88%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -204,6 +248,15 @@ body,
   50% { opacity: 0.88; }
 }
 
+/* Dylan — uneven kerosene-lantern drift, a draft from an open hotel window. */
+@keyframes drift {
+  0%, 100% { opacity: 1; }
+  28% { opacity: 0.93; }
+  44% { opacity: 0.97; }
+  62% { opacity: 0.86; }
+  78% { opacity: 0.95; }
+}
+
 .spinning {
   animation: spin 1.4s linear infinite;
 }
@@ -218,4 +271,8 @@ body,
 
 [data-theme="eagles"] .flicker {
   animation: breathe 7s ease-in-out infinite;
+}
+
+[data-theme="dylan"] .flicker {
+  animation: drift 8s ease-in-out infinite;
 }
