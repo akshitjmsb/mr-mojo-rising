@@ -6,5 +6,5 @@ export const DEFAULT_THEME: Theme = "doors";
 
 export const THEME_COLORS: Record<Theme, string> = {
   doors: "#0A0806",
-  eagles: "#F4E8CF",
+  eagles: "#DCEDF8",
 };

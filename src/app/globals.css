@@ -76,43 +76,44 @@
 }
 
 /*
- * Eagles — bright desert afternoon, peaceful easy feeling. Polar opposite of
- * Doors: light sand-cream backgrounds, dark espresso text, faded denim blue
- * primary accent in place of gold, warm amber sunset secondary. The mood is
- * open and airy — sunlight, not candlelight.
+ * Eagles — wide open California sky, peaceful easy feeling. Polar opposite of
+ * Doors: bright sky-blue backgrounds, deep navy text, true cobalt primary
+ * accent in place of gold, with warm sunset peach as the lone warm contrast.
+ * The mood is open road, cloudless afternoon — air and altitude, not smoke
+ * and candlelight.
  */
 [data-theme="eagles"] {
-  --c-bg: #F4E8CF;             /* warm sand parchment — main canvas */
-  --c-gold: #5B7A99;           /* faded denim blue (PRIMARY accent — was gold) */
-  --c-orange: #C9854A;         /* warm amber sunset (secondary) */
-  --c-terracotta: #B8543F;     /* red clay (errors) */
-  --c-purple: #927A95;         /* dusty mauve (third accent) */
-  --c-text: #2A1F0E;           /* espresso/walnut — primary copy on cream */
-  --c-text-secondary: #3D2D18; /* dark sepia */
-  --c-text-muted: #5C4830;     /* warm umber */
-  --c-text-dark: #826340;      /* medium tan */
-  --c-text-darker: #4F3D24;    /* darker tan (mirrors doors offset) */
-  --c-text-darkest: #A48B5C;   /* faintest legible copy on cream */
-  --c-border: #A88E5E;         /* strong warm border */
-  --c-border-dark: #C8B383;    /* mid divider */
-  --c-border-darkest: #DDC99A; /* faint divider on cream */
-  --c-input-bg: #EAD8B0;       /* warm sand pocket — cards/inputs */
-  --c-inactive: #D5C292;       /* inactive waveform bars */
+  --c-bg: #DCEDF8;             /* clear high-desert sky — main canvas */
+  --c-gold: #1F6FB2;           /* true cobalt sky blue (PRIMARY accent — was gold) */
+  --c-orange: #E89858;         /* warm sunset peach (lone warm — secondary) */
+  --c-terracotta: #C84838;     /* clay red (errors) */
+  --c-purple: #7A8DC0;         /* periwinkle dusk (third accent) */
+  --c-text: #0E2540;           /* deep ocean navy — primary copy on sky */
+  --c-text-secondary: #18365A; /* navy ink */
+  --c-text-muted: #3F5A7E;     /* slate blue */
+  --c-text-dark: #5E78A0;      /* hazy distance */
+  --c-text-darker: #28466F;    /* deeper navy (mirrors doors offset) */
+  --c-text-darkest: #84A0BE;   /* faintest legible copy on sky */
+  --c-border: #5E8DB3;         /* strong sky border */
+  --c-border-dark: #9DBED8;    /* mid divider */
+  --c-border-darkest: #C0D8EA; /* faint divider on sky */
+  --c-input-bg: #C6DEEE;       /* deeper sky pocket — cards/inputs */
+  --c-inactive: #B0CCE0;       /* inactive waveform bars */
 
-  --section-intro: #C9854A;     /* sunset amber */
-  --section-verse: #A87038;     /* deep ochre */
-  --section-chorus: #A84028;    /* bold terracotta */
-  --section-bridge: #5B7A99;    /* faded denim */
-  --section-default: #A87038;
+  --section-intro: #5BA8DB;     /* bright morning sky */
+  --section-verse: #2D7BB8;     /* deep noon sky */
+  --section-chorus: #E89858;    /* warm sunset (the one warm pop) */
+  --section-bridge: #7A8DC0;    /* periwinkle dusk */
+  --section-default: #2D7BB8;
 
   /* Fonts swap to Cormorant Garamond + Jost */
   --f-display: var(--font-cormorant-eagles), Georgia, serif;
   --f-body: var(--font-jost-eagles), system-ui, sans-serif;
 
-  /* Atmospheric glow — bright high desert sun, wide warm bloom from above */
+  /* Atmospheric glow — soft cloudless sky haze blooming from above */
   --atmo-position: top -340px left 50%;
-  --atmo-size: 1100px 820px;
-  --atmo-image: radial-gradient(ellipse at center, rgba(255, 220, 150, 0.55) 0%, rgba(255, 198, 128, 0.28) 35%, rgba(255, 180, 110, 0.10) 65%, transparent 85%);
+  --atmo-size: 1200px 900px;
+  --atmo-image: radial-gradient(ellipse at center, rgba(160, 215, 245, 0.65) 0%, rgba(130, 195, 235, 0.30) 40%, rgba(100, 175, 220, 0.10) 70%, transparent 88%);
 }
 
 * {
