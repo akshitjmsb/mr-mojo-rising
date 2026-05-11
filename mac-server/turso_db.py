@@ -178,6 +178,59 @@ def now_unix() -> int:
 # ----- Queue helpers (replace the Postgres RPC functions) -----
 
 
+def ensure_worker_status_table() -> None:
+    client = get_client()
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS worker_status (
+           worker_id TEXT PRIMARY KEY,
+           status TEXT NOT NULL DEFAULT 'idle'
+             CHECK (status IN ('starting', 'idle', 'running', 'stopped')),
+           current_job_id TEXT,
+           current_song_id TEXT,
+           started_at INTEGER NOT NULL DEFAULT (unixepoch()),
+           heartbeat_at INTEGER NOT NULL DEFAULT (unixepoch()),
+           updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS worker_status_heartbeat_idx
+           ON worker_status (heartbeat_at)"""
+    )
+
+
+def update_worker_status(
+    worker_id: str,
+    status: str,
+    *,
+    current_job_id: str | None = None,
+    current_song_id: str | None = None,
+) -> None:
+    client = get_client()
+    client.execute(
+        """INSERT INTO worker_status
+             (worker_id, status, current_job_id, current_song_id)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(worker_id) DO UPDATE SET
+             status = excluded.status,
+             current_job_id = excluded.current_job_id,
+             current_song_id = excluded.current_song_id,
+             heartbeat_at = unixepoch(),
+             updated_at = unixepoch()""",
+        [worker_id, status, current_job_id, current_song_id],
+    )
+
+
+def touch_worker_status(worker_id: str) -> None:
+    client = get_client()
+    client.execute(
+        """UPDATE worker_status
+           SET heartbeat_at = unixepoch(),
+               updated_at = unixepoch()
+           WHERE worker_id = ?""",
+        [worker_id],
+    )
+
+
 def claim_next_job(worker_id: str) -> Optional[dict]:
     """Atomically claim the next ready job; returns the row or None."""
     client = get_client()

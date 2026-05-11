@@ -22,6 +22,15 @@ export default function ImportPage() {
   const importingSongIdRef = useRef<string | null>(null);
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
 
+  type ImportStatus = Pick<Song, "id" | "status" | "last_error" | "processing_stage"> & {
+    job_status?: string | null;
+    attempt_count?: number | null;
+    max_attempts?: number | null;
+    queue_position?: number | null;
+    run_after?: number | null;
+    worker_online_count?: number;
+  };
+
   // Timer: tick every second while importing
   useEffect(() => {
     if (!importing) return;
@@ -59,10 +68,7 @@ export default function ImportPage() {
           cache: "no-store",
         });
         if (!res.ok) return;
-        const next = (await res.json()) as Pick<
-          Song,
-          "id" | "status" | "last_error"
-        >;
+        const next = (await res.json()) as ImportStatus;
         if (cancelled) return;
         if (next.status === "ready") {
           if (timeoutRef.current) {
@@ -84,6 +90,22 @@ export default function ImportPage() {
           );
           setImporting(false);
           setImportingSongId(null);
+        } else if (next.job_status === "queued" || next.job_status === "retryable") {
+          const position = next.queue_position ?? 1;
+          const workerOnline = (next.worker_online_count ?? 0) > 0;
+          const retryText =
+            next.job_status === "retryable" && next.attempt_count && next.max_attempts
+              ? ` Retry ${next.attempt_count + 1} of ${next.max_attempts} is scheduled.`
+              : "";
+          setNotice(
+            !workerOnline
+              ? "Queued, but the Mac worker looks offline. Start Mr. Mojo Rising on the Mac to process it."
+              : position > 1
+              ? `Queued behind ${position - 1} song${position === 2 ? "" : "s"}.${retryText}`
+              : `Queued for processing.${retryText}`,
+          );
+        } else if (next.status === "processing") {
+          setNotice("");
         }
       } catch {
         // Network blip — will retry on next interval.
@@ -152,15 +174,12 @@ export default function ImportPage() {
       importingSongIdRef.current = songId;
       setImportingSongId(songId);
 
-      // Safety timeout: detach the subscription after 5 minutes if the worker
-      // never reports terminal status (e.g. mac-server is down).
+      // Safety notice: keep polling, but tell the user when the job is taking
+      // longer than usual so a healthy slow import still opens automatically.
       timeoutRef.current = setTimeout(() => {
         if (importingSongIdRef.current === songId) {
-          importingSongIdRef.current = null;
-          setImporting(false);
-          setImportingSongId(null);
           setNotice(
-            "Still processing in the background. Check Library in a minute.",
+            "Still processing. This can take several minutes for longer songs.",
           );
         }
         timeoutRef.current = null;

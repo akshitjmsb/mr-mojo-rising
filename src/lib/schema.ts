@@ -71,6 +71,17 @@ export const SCHEMA_STATEMENTS: string[] = [
     finished_at INTEGER
   )`,
 
+  `CREATE TABLE IF NOT EXISTS worker_status (
+    worker_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle'
+      CHECK (status IN ('starting', 'idle', 'running', 'stopped')),
+    current_job_id TEXT,
+    current_song_id TEXT,
+    started_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    heartbeat_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+
   `CREATE INDEX IF NOT EXISTS songs_status_created_idx
     ON songs (status, created_at DESC)`,
 
@@ -86,4 +97,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS processing_jobs_heartbeat_idx
     ON processing_jobs (heartbeat_at)
     WHERE status = 'running'`,
+
+  `CREATE INDEX IF NOT EXISTS worker_status_heartbeat_idx
+    ON worker_status (heartbeat_at)`,
 ];

@@ -90,7 +90,7 @@ export default function RootLayout({
   const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable} ${specialElite.variable} ${ibmPlexSans.variable}`;
 
   return (
-    <html lang="en" className={fontVariables}>
+    <html lang="en" className={fontVariables} suppressHydrationWarning>
       <head>
         {/*
          * Stamp the persisted theme onto <html data-theme="..."> before first

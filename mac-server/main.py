@@ -32,9 +32,12 @@ from chord_reanalyze import (
 )
 from turso_db import (
     claim_next_job,
+    ensure_worker_status_table,
     get_client as get_turso_client,
     new_id,
     requeue_stale_jobs,
+    touch_worker_status,
+    update_worker_status,
 )
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
@@ -58,6 +61,7 @@ QUEUE_POLL_INTERVAL_SECONDS = float(os.environ.get("QUEUE_POLL_INTERVAL_SECONDS"
 HEARTBEAT_INTERVAL_SECONDS = float(os.environ.get("JOB_HEARTBEAT_INTERVAL_SECONDS", "15"))
 HEARTBEAT_TIMEOUT_SECONDS = int(os.environ.get("JOB_HEARTBEAT_TIMEOUT_SECONDS", "300"))
 MAX_BACKOFF_SECONDS = int(os.environ.get("JOB_MAX_BACKOFF_SECONDS", "300"))
+JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "1800"))
 DEMUCS_PYTHON = os.environ.get("DEMUCS_PYTHON", VENV_PYTHON if Path(VENV_PYTHON).exists() else "python3.11")
 DEMUCS_DEVICE = os.environ.get(
     "DEMUCS_DEVICE",
@@ -65,6 +69,13 @@ DEMUCS_DEVICE = os.environ.get(
 )
 DEMUCS_JOBS = max(1, int(os.environ.get("DEMUCS_JOBS", "4")))
 DEMUCS_SEGMENT = os.environ.get("DEMUCS_SEGMENT")
+DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("YTDLP_DOWNLOAD_TIMEOUT_SECONDS", "300"))
+FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("FFMPEG_TIMEOUT_SECONDS", "180"))
+DEMUCS_TIMEOUT_SECONDS = int(os.environ.get("DEMUCS_TIMEOUT_SECONDS", "900"))
+UPLOAD_TIMEOUT_SECONDS = int(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "600"))
+ANALYZE_TIMEOUT_SECONDS = int(os.environ.get("ANALYZE_TIMEOUT_SECONDS", "420"))
+LYRICS_TIMEOUT_SECONDS = int(os.environ.get("LYRICS_TIMEOUT_SECONDS", "120"))
+YTDLP_COOKIES_FROM_BROWSER = os.environ.get("YTDLP_COOKIES_FROM_BROWSER", "").strip()
 WORKER_WARMUP_ENABLED = os.environ.get("WORKER_WARMUP_ENABLED", "true").strip().lower() in {
     "1",
     "true",
@@ -74,6 +85,7 @@ WORKER_WARMUP_ENABLED = os.environ.get("WORKER_WARMUP_ENABLED", "true").strip().
 
 WORKER_TASKS: list[asyncio.Task] = []
 REQUEUE_TASK: asyncio.Task | None = None
+WORKER_STATUS_TASK: asyncio.Task | None = None
 
 
 def stage_start(*, stage: str, song_id: str, job_id: str) -> float:
@@ -117,7 +129,7 @@ class ProcessRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_workers():
-    global REQUEUE_TASK
+    global REQUEUE_TASK, WORKER_STATUS_TASK
 
     log_event(
         "worker.startup",
@@ -125,12 +137,23 @@ async def startup_workers():
         concurrency=WORKER_CONCURRENCY,
         poll_interval_seconds=QUEUE_POLL_INTERVAL_SECONDS,
         heartbeat_timeout_seconds=HEARTBEAT_TIMEOUT_SECONDS,
+        job_timeout_seconds=JOB_TIMEOUT_SECONDS,
         demucs_python=DEMUCS_PYTHON,
         demucs_device=DEMUCS_DEVICE,
         demucs_jobs=DEMUCS_JOBS,
         demucs_segment=DEMUCS_SEGMENT,
+        download_timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
+        ffmpeg_timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
+        demucs_timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
+        upload_timeout_seconds=UPLOAD_TIMEOUT_SECONDS,
+        analyze_timeout_seconds=ANALYZE_TIMEOUT_SECONDS,
+        lyrics_timeout_seconds=LYRICS_TIMEOUT_SECONDS,
+        ytdlp_cookies_from_browser=YTDLP_COOKIES_FROM_BROWSER or None,
         warmup_enabled=WORKER_WARMUP_ENABLED,
     )
+
+    await asyncio.to_thread(ensure_worker_status_table)
+    await asyncio.to_thread(update_worker_status, WORKER_ID, "starting")
 
     if WORKER_WARMUP_ENABLED:
         await warmup_models()
@@ -140,6 +163,8 @@ async def startup_workers():
         WORKER_TASKS.append(task)
 
     REQUEUE_TASK = asyncio.create_task(stale_requeue_loop())
+    WORKER_STATUS_TASK = asyncio.create_task(worker_status_loop())
+    await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
 
 
 @app.on_event("shutdown")
@@ -153,6 +178,15 @@ async def shutdown_workers():
     if REQUEUE_TASK:
         REQUEUE_TASK.cancel()
         await asyncio.gather(REQUEUE_TASK, return_exceptions=True)
+
+    if WORKER_STATUS_TASK:
+        WORKER_STATUS_TASK.cancel()
+        await asyncio.gather(WORKER_STATUS_TASK, return_exceptions=True)
+
+    try:
+        await asyncio.to_thread(update_worker_status, WORKER_ID, "stopped")
+    except Exception as exc:
+        log_event("worker.status_update_error", worker_id=WORKER_ID, error=str(exc))
 
 
 @app.get("/health")
@@ -305,6 +339,18 @@ async def stale_requeue_loop():
         await asyncio.sleep(interval)
 
 
+async def worker_status_loop():
+    while True:
+        try:
+            await asyncio.to_thread(touch_worker_status, WORKER_ID)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_event("worker.status_update_error", worker_id=WORKER_ID, error=str(exc))
+
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+
+
 async def process_claimed_job(worker_name: str, job: dict):
     db = get_turso_client()
     job_id = job["id"]
@@ -333,10 +379,20 @@ async def process_claimed_job(worker_name: str, job: dict):
     )
 
     heartbeat_task = asyncio.create_task(heartbeat_loop(job_id, worker_name))
+    await asyncio.to_thread(
+        update_worker_status,
+        WORKER_ID,
+        "running",
+        current_job_id=job_id,
+        current_song_id=song_id,
+    )
 
     try:
         update_song(song_id, status="processing", processing_stage="download", last_error=None)
-        await process_pipeline(job_id, song_id, youtube_url)
+        await asyncio.wait_for(
+            process_pipeline(job_id, song_id, youtube_url),
+            timeout=JOB_TIMEOUT_SECONDS,
+        )
 
         db.execute(
             """UPDATE processing_jobs
@@ -436,6 +492,7 @@ async def process_claimed_job(worker_name: str, job: dict):
     finally:
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
 
 
 async def heartbeat_loop(job_id: str, worker_name: str):
@@ -471,7 +528,13 @@ def update_song(
     )
 
 
-async def run_cmd(cmd: list[str], label: str, song_id: str, job_id: str):
+async def run_cmd(
+    cmd: list[str],
+    label: str,
+    song_id: str,
+    job_id: str,
+    timeout_seconds: int | None = None,
+):
     log_event("pipeline.command_start", job_id=job_id, song_id=song_id, label=label, cmd=" ".join(cmd))
     started = datetime.now(timezone.utc)
 
@@ -480,7 +543,32 @@ async def run_cmd(cmd: list[str], label: str, song_id: str, job_id: str):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        if timeout_seconds:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout_seconds,
+            )
+        else:
+            stdout, stderr = await proc.communicate()
+    except asyncio.TimeoutError:
+        proc.kill()
+        stdout, stderr = await proc.communicate()
+        duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        log_event(
+            "pipeline.command_timeout",
+            job_id=job_id,
+            song_id=song_id,
+            label=label,
+            duration_ms=duration_ms,
+            timeout_seconds=timeout_seconds,
+            stderr=stderr.decode(errors="ignore")[:1000],
+        )
+        raise RuntimeError(f"{label} timed out after {timeout_seconds}s")
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.communicate()
+        raise
 
     duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
 
@@ -506,6 +594,27 @@ async def run_cmd(cmd: list[str], label: str, song_id: str, job_id: str):
     )
 
     return stdout, stderr
+
+
+async def run_stage_with_timeout(
+    awaitable,
+    *,
+    timeout_seconds: int,
+    label: str,
+    song_id: str,
+    job_id: str,
+):
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        log_event(
+            "pipeline.stage_timeout",
+            job_id=job_id,
+            song_id=song_id,
+            label=label,
+            timeout_seconds=timeout_seconds,
+        )
+        raise RuntimeError(f"{label} timed out after {timeout_seconds}s")
 
 
 async def warmup_models():
@@ -613,7 +722,13 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
     preferred_device = DEMUCS_DEVICE
     cmd = base_cmd + ["-d", preferred_device, str(audio_path)]
     try:
-        await run_cmd(cmd, f"demucs ({preferred_device})", song_id, job_id)
+        await run_cmd(
+            cmd,
+            f"demucs ({preferred_device})",
+            song_id,
+            job_id,
+            timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
+        )
         return
     except Exception as exc:
         if preferred_device == "cpu":
@@ -628,7 +743,13 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
         )
 
     fallback_cmd = base_cmd + ["-d", "cpu", str(audio_path)]
-    await run_cmd(fallback_cmd, "demucs (cpu fallback)", song_id, job_id)
+    await run_cmd(
+        fallback_cmd,
+        "demucs (cpu fallback)",
+        song_id,
+        job_id,
+        timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
+    )
 
 
 def compress_wav_to_mp3(wav_path: Path) -> Path:
@@ -639,6 +760,7 @@ def compress_wav_to_mp3(wav_path: Path) -> Path:
         ["ffmpeg", "-y", "-i", str(wav_path), "-q:a", "2", str(mp3_path)],
         check=True,
         capture_output=True,
+        timeout=FFMPEG_TIMEOUT_SECONDS,
     )
     return mp3_path
 
@@ -661,27 +783,30 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     # Stage: download
     update_song(song_id, status="processing", processing_stage="download", last_error=None)
     download_started = stage_start(stage="download", song_id=song_id, job_id=job_id)
+    download_cmd = [
+        "yt-dlp",
+        "--remote-components",
+        "ejs:github",
+        "-x",
+        "--audio-format",
+        "wav",
+        "--audio-quality",
+        "0",
+        "--write-info-json",
+        "-o",
+        str(work_dir / "original.%(ext)s"),
+        "--no-playlist",
+        youtube_url,
+    ]
+    if YTDLP_COOKIES_FROM_BROWSER:
+        download_cmd[1:1] = ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
+
     await run_cmd(
-        [
-            "yt-dlp",
-            "--cookies-from-browser",
-            "chrome",
-            "--remote-components",
-            "ejs:github",
-            "-x",
-            "--audio-format",
-            "wav",
-            "--audio-quality",
-            "0",
-            "--write-info-json",
-            "-o",
-            str(work_dir / "original.%(ext)s"),
-            "--no-playlist",
-            youtube_url,
-        ],
+        download_cmd,
         "yt-dlp download",
         song_id,
         job_id,
+        timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
     )
 
     audio_path = work_dir / "original.wav"
@@ -704,6 +829,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "ffmpeg convert",
                     song_id,
                     job_id,
+                    timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
                 )
                 break
 
@@ -762,7 +888,13 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         url = await asyncio.to_thread(upload_file_sync, local_path, blob_pathname)
         return key, url
 
-    uploaded_pairs = await asyncio.gather(*(upload_one(target) for target in upload_targets))
+    uploaded_pairs = await run_stage_with_timeout(
+        asyncio.gather(*(upload_one(target) for target in upload_targets)),
+        timeout_seconds=UPLOAD_TIMEOUT_SECONDS,
+        label="upload",
+        song_id=song_id,
+        job_id=job_id,
+    )
     uploaded_urls = {key: url for key, url in uploaded_pairs}
 
     existing_stems = db.query_one("SELECT id FROM stems WHERE song_id = ?", [song_id])
@@ -808,7 +940,13 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         with wave.open(str(audio_path), "r") as wav_file:
             duration = wav_file.getnframes() / wav_file.getframerate()
 
-        sections = await asyncio.to_thread(detect_sections, str(audio_path), duration)
+        sections = await run_stage_with_timeout(
+            asyncio.to_thread(detect_sections, str(audio_path), duration),
+            timeout_seconds=ANALYZE_TIMEOUT_SECONDS,
+            label="section detection",
+            song_id=song_id,
+            job_id=job_id,
+        )
         db.execute("DELETE FROM sections WHERE song_id = ?", [song_id])
         for section in sections or []:
             db.execute(
@@ -824,7 +962,13 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             )
 
         try:
-            chords, bpm = await asyncio.to_thread(detect_chords, str(audio_path))
+            chords, bpm = await run_stage_with_timeout(
+                asyncio.to_thread(detect_chords, str(audio_path)),
+                timeout_seconds=ANALYZE_TIMEOUT_SECONDS,
+                label="chord detection",
+                song_id=song_id,
+                job_id=job_id,
+            )
             db.execute(
                 "UPDATE songs SET bpm = ?, updated_at = unixepoch() WHERE id = ?",
                 [bpm, song_id],
@@ -865,7 +1009,13 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
 
         update_song(song_id, status="processing", processing_stage="lyrics", last_error=None)
         try:
-            lyrics = await lyrics_task
+            lyrics = await run_stage_with_timeout(
+                lyrics_task,
+                timeout_seconds=LYRICS_TIMEOUT_SECONDS,
+                label="lyrics",
+                song_id=song_id,
+                job_id=job_id,
+            )
             if lyrics:
                 existing_lyrics = db.query_one(
                     "SELECT id FROM lyrics WHERE song_id = ?", [song_id]
@@ -914,6 +1064,8 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
 
 def classify_error(exc: Exception) -> str:
     msg = str(exc).lower()
+    if "timed out" in msg or isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
     if "yt-dlp" in msg:
         return "download_error"
     if "demucs" in msg:

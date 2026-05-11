@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     ".vercel/**",
+    ".claude/**",
     "mac-server/venv/**",
     "mac-server/__pycache__/**",
   ]),

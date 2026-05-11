@@ -157,7 +157,7 @@ if [ ! -x "$PROJECT_DIR/mac-server/start.sh" ]; then
   exit 1
 fi
 
-for required_var in "NEXT_PUBLIC_SUPABASE_URL" "NEXT_PUBLIC_SUPABASE_ANON_KEY" "SUPABASE_SERVICE_ROLE_KEY" "VOICE_PASSPHRASE" "VOICE_LOGIN_EMAIL" "VOICE_LOGIN_PASSWORD" "VOICE_COOKIE_SECRET"; do
+for required_var in "TURSO_DATABASE_URL" "TURSO_AUTH_TOKEN" "BLOB_READ_WRITE_TOKEN"; do
   if ! grep -qE "^${required_var}=" "$PROJECT_DIR/.env.local" && ! grep -qE "^export ${required_var}=" "$PROJECT_DIR/.env.local"; then
     notify "Mr Mojo Rising" "Missing required env var: $required_var in .env.local"
     exit 1

@@ -84,3 +84,13 @@ export type ProcessingJob = {
   started_at: number | null;
   finished_at: number | null;
 };
+
+export type WorkerStatus = {
+  worker_id: string;
+  status: "starting" | "idle" | "running" | "stopped";
+  current_job_id: string | null;
+  current_song_id: string | null;
+  started_at: number;
+  heartbeat_at: number;
+  updated_at: number;
+};

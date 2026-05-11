@@ -83,8 +83,14 @@ if [ -z "${DEMUCS_PYTHON:-}" ] && [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
   export DEMUCS_PYTHON="$SCRIPT_DIR/venv/bin/python"
 fi
 
+RUNNER=()
+if command -v caffeinate >/dev/null 2>&1 && [ "${DISABLE_CAFFEINATE:-0}" != "1" ]; then
+  RUNNER=(caffeinate -dimsu)
+  echo "Sleep prevention: caffeinate enabled while the worker is running."
+fi
+
 if [ "${DEV_RELOAD:-0}" = "1" ]; then
-  exec "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  exec "${RUNNER[@]}" "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 else
-  exec "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000
+  exec "${RUNNER[@]}" "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000
 fi

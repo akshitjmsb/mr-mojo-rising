@@ -34,10 +34,21 @@ function SearchPageInner() {
   const [submitError, setSubmitError] = useState("");
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
   const [importingTitle, setImportingTitle] = useState("");
+  const [importStatusText, setImportStatusText] = useState(
+    "Hang tight — the player will open when it's ready.",
+  );
   const [quoteIndex, setQuoteIndex] = useState(0);
   const importingSongIdRef = useRef<string | null>(null);
 
   const handledShareUrlRef = useRef<string | null>(null);
+
+  type ImportStatus = Pick<Song, "id" | "status" | "last_error" | "processing_stage"> & {
+    job_status?: string | null;
+    attempt_count?: number | null;
+    max_attempts?: number | null;
+    queue_position?: number | null;
+    worker_online_count?: number;
+  };
 
   const resolveUrl = useCallback(async (raw: string): Promise<ResolvedLink | null> => {
     setResolveError("");
@@ -108,10 +119,7 @@ function SearchPageInner() {
           cache: "no-store",
         });
         if (!res.ok) return;
-        const next = (await res.json()) as Pick<
-          Song,
-          "id" | "status" | "last_error"
-        >;
+        const next = (await res.json()) as ImportStatus;
         if (cancelled) return;
         if (next.status === "ready") {
           importingSongIdRef.current = null;
@@ -121,6 +129,26 @@ function SearchPageInner() {
           setSubmitError(next.last_error || "Processing failed.");
           setSubmitting(false);
           setImportingSongId(null);
+        } else if (next.job_status === "queued" || next.job_status === "retryable") {
+          const position = next.queue_position ?? 1;
+          const workerOnline = (next.worker_online_count ?? 0) > 0;
+          const retryText =
+            next.job_status === "retryable" && next.attempt_count && next.max_attempts
+              ? ` Retry ${next.attempt_count + 1} of ${next.max_attempts} is scheduled.`
+              : "";
+          setImportStatusText(
+            !workerOnline
+              ? "Queued, but the Mac worker looks offline. Start Mr. Mojo Rising on the Mac to process it."
+              : position > 1
+              ? `Queued behind ${position - 1} song${position === 2 ? "" : "s"}.${retryText}`
+              : `Queued for processing.${retryText}`,
+          );
+        } else if (next.status === "processing") {
+          setImportStatusText(
+            next.processing_stage
+              ? `Processing: ${next.processing_stage}. The player will open when it's ready.`
+              : "Processing. The player will open when it's ready.",
+          );
         }
       } catch {
         // Network blip — will retry on next interval.
@@ -192,6 +220,7 @@ function SearchPageInner() {
     setSubmitError("");
     setSubmitting(true);
     setImportingTitle(title);
+    setImportStatusText("Queued for processing.");
     setQuoteIndex(0);
     try {
       const res = await fetch("/api/songs/import", {
@@ -272,7 +301,7 @@ function SearchPageInner() {
             &ldquo;{QUOTES[quoteIndex]}&rdquo;
           </p>
           <p className="font-josefin text-[10px] uppercase tracking-[0.2em] text-text-dark">
-            Hang tight — the player will open when it&apos;s ready.
+            {importStatusText}
           </p>
           <button
             type="button"
