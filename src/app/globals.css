@@ -161,6 +161,47 @@
   --atmo-image: radial-gradient(ellipse at center, rgba(210, 147, 74, 0.22) 0%, rgba(160, 95, 40, 0.12) 40%, rgba(120, 70, 30, 0.04) 70%, transparent 88%);
 }
 
+/*
+ * Ali — monsoon evening, the quiet between raindrops. Lucky Ali's acoustic
+ * Sufi warmth: a dark forest backdrop, amber chai lantern light, earthy greens
+ * of wet stone and moss, and the grey-blue overcast sky of a Mumbai evening.
+ * The mood is a rooftop after the first rains — petrichor, chai steam, a lone
+ * guitar threading through humid air.
+ */
+[data-theme="ali"] {
+  --c-bg: #080C07;             /* starless monsoon dusk — deep forest shadow */
+  --c-gold: #C8893A;           /* amber chai lantern (PRIMARY accent) */
+  --c-orange: #A8623A;         /* coconut husk brown — warm secondary */
+  --c-terracotta: #8C3820;     /* deep rust (errors) */
+  --c-purple: #6A8FA0;         /* overcast monsoon sky — grey-blue cool counterpoint */
+  --c-text: #EDE8DC;           /* monsoon mist cream — primary copy */
+  --c-text-secondary: #D4CCAE; /* aged off-white */
+  --c-text-muted: #9E9E78;     /* dusty sage */
+  --c-text-dark: #7E8060;      /* faded olive */
+  --c-text-darker: #B4B090;    /* inactive section labels — earthy mid-tone */
+  --c-text-darkest: #767658;   /* faintest legible ink */
+  --c-border: #485838;         /* mossy stone wall */
+  --c-border-dark: #364428;    /* wet wood */
+  --c-border-darkest: #263418; /* deep shadow */
+  --c-input-bg: #131810;       /* dark forest pocket */
+  --c-inactive: #1E2C16;       /* muted monsoon green — inactive waveform bars */
+
+  --section-intro: #C8893A;    /* amber lantern */
+  --section-verse: #78986A;    /* monsoon leaf green */
+  --section-chorus: #6A8FA0;   /* rain-grey sky */
+  --section-bridge: #9E6640;   /* damp earth */
+  --section-default: #78986A;
+
+  /* Fonts: Lora (warm literary serif) + DM Sans (clean modern body) */
+  --f-display: var(--font-lora-ali), Georgia, serif;
+  --f-body: var(--font-dm-sans-ali), system-ui, sans-serif;
+
+  /* Atmospheric glow — soft petrichor mist rising from the wet earth below */
+  --atmo-position: bottom -100px left 50%;
+  --atmo-size: 700px 450px;
+  --atmo-image: radial-gradient(ellipse at center, rgba(100, 140, 70, 0.16) 0%, rgba(60, 100, 50, 0.08) 50%, transparent 78%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -257,6 +298,17 @@ body,
   78% { opacity: 0.95; }
 }
 
+/* Ali — rain on glass, irregular gentle drops softening the lantern glow. */
+@keyframes patter {
+  0%, 100% { opacity: 1; }
+  12% { opacity: 0.96; }
+  28% { opacity: 0.91; }
+  43% { opacity: 0.97; }
+  59% { opacity: 0.93; }
+  74% { opacity: 0.98; }
+  88% { opacity: 0.94; }
+}
+
 .spinning {
   animation: spin 1.4s linear infinite;
 }
@@ -275,4 +327,8 @@ body,
 
 [data-theme="dylan"] .flicker {
   animation: drift 8s ease-in-out infinite;
+}
+
+[data-theme="ali"] .flicker {
+  animation: patter 9s ease-in-out infinite;
 }

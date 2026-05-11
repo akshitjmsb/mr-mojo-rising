@@ -6,6 +6,8 @@ import {
   Jost,
   Special_Elite,
   IBM_Plex_Sans,
+  Lora,
+  DM_Sans,
 } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
@@ -51,6 +53,20 @@ const ibmPlexSans = IBM_Plex_Sans({
   weight: ["300", "400", "500"],
 });
 
+// Ali theme fonts — warm monsoon evening, Sufi acoustic warmth
+const lora = Lora({
+  variable: "--font-lora-ali",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+});
+
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans-ali",
+  subsets: ["latin"],
+  weight: ["300", "400", "500"],
+});
+
 export const metadata: Metadata = {
   title: "Mr. Mojo Rising — Guitar Practice Studio",
   description:
@@ -87,7 +103,7 @@ export default function RootLayout({
 }>) {
   // Font CSS variables MUST live on <html> (not <body>) — the theme tokens
   // resolve at :root, so a body-scoped variable would be invisible to them.
-  const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable} ${specialElite.variable} ${ibmPlexSans.variable}`;
+  const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable} ${specialElite.variable} ${ibmPlexSans.variable} ${lora.variable} ${dmSans.variable}`;
 
   return (
     <html lang="en" className={fontVariables} suppressHydrationWarning>

@@ -192,6 +192,60 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
         "A hard rain fell on this one. Please try again.",
     },
   },
+
+  ali: {
+    label: "Ali",
+    hero: {
+      lineOne: "O sanam,",
+      lineTwo: "let the music find you.",
+      subtitle:
+        "Paste a YouTube link. We'll lift the guitar from the rain, trace the verses, and let you play it in your own time.",
+    },
+    importStages: [
+      { title: "Chai ka paani chadha...", subtitle: "Validating & queuing your song", start: 0 },
+      { title: "Baarish mein bheeg ke...", subtitle: "Downloading audio from YouTube", start: 5 },
+      { title: "Ek taar chheda...", subtitle: "Separating guitar from the mix", start: 20 },
+      { title: "Raahon ko dhundhte...", subtitle: "Detecting song sections", start: 90 },
+      { title: "Sur aur saaz...", subtitle: "Analyzing chord progressions", start: 130 },
+      { title: "Alfaaz bunta hoon...", subtitle: "Fetching synced lyrics", start: 170 },
+      { title: "O sanam...", subtitle: "Ready to play", start: Infinity },
+    ],
+    importQuotes: [
+      "O sanam, tere pyaar mein kya rang aaya...",
+      "Na tum jaano na hum...",
+      "Ek pal ka jeena, phir ye pal jaana...",
+      "Hairaan hoon main, hairaan hoon...",
+      "Sunoh, kuch kahna hai mujhe...",
+      "Kabhi aisa lagta hai, koi geet sunata hai...",
+      "Aa bhi ja, aa bhi ja...",
+      "Tere mere saath hai yeh duniya...",
+      "Main koi aisa geet gaaoon ke sunta reh tu...",
+      "Kya din tha woh...",
+      "Teri aankhon ke dariya mein...",
+      "Ishq ke saye mein, raat ko tanha...",
+    ],
+    importSteps: SHARED_STEPS,
+    searchHero: {
+      title: "Find a song.",
+      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
+    },
+    searchQuotes: [
+      "O sanam...",
+      "Sunoh...",
+      "Hairaan...",
+      "Na tum jaano...",
+      "Aa bhi ja...",
+      "Ek pal...",
+    ],
+    shareTip:
+      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
+    errors: {
+      mainTitle: "Baarish ne rok diya.",
+      songTitle: "Sur kho gaya raahon mein.",
+      processingFallback:
+        "Sur kho gaya baarish mein. Please try again.",
+    },
+  },
 };
 
 export function getThemeContent(theme: Theme): ThemeContent {

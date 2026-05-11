@@ -7,6 +7,7 @@ const LABELS: Record<Theme, string> = {
   doors: "Doors",
   eagles: "Eagles",
   dylan: "Dylan",
+  ali: "Ali",
 };
 
 /**
@@ -84,6 +85,22 @@ export default function ThemeToggle() {
           <line x1="12.6" y1="9" x2="12.6" y2="15" />
           <line x1="15.6" y1="9" x2="15.6" y2="15" />
           <line x1="18.6" y1="9" x2="18.6" y2="15" />
+        </svg>
+      )}
+      {theme === "ali" && (
+        <svg
+          width="10"
+          height="12"
+          viewBox="0 0 20 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          {/* Raindrop — monsoon evening, Lucky Ali's rain-soaked acoustic world */}
+          <path d="M10 2 C10 2 2 12 2 16 a8 8 0 0 0 16 0 C18 12 10 2 10 2 Z" />
         </svg>
       )}
       <span>{content.label}</span>
