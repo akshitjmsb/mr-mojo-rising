@@ -196,6 +196,24 @@ def ensure_worker_status_table() -> None:
         """CREATE INDEX IF NOT EXISTS worker_status_heartbeat_idx
            ON worker_status (heartbeat_at)"""
     )
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS worker_commands (
+           id TEXT PRIMARY KEY,
+           command TEXT NOT NULL
+             CHECK (command IN ('restart')),
+           status TEXT NOT NULL DEFAULT 'queued'
+             CHECK (status IN ('queued', 'claimed', 'done', 'failed')),
+           requested_at INTEGER NOT NULL DEFAULT (unixepoch()),
+           claimed_at INTEGER,
+           handled_at INTEGER,
+           handled_by TEXT,
+           message TEXT
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS worker_commands_status_requested_idx
+           ON worker_commands (status, requested_at)"""
+    )
 
 
 def update_worker_status(
@@ -228,6 +246,43 @@ def touch_worker_status(worker_id: str) -> None:
                updated_at = unixepoch()
            WHERE worker_id = ?""",
         [worker_id],
+    )
+
+
+def claim_worker_command(worker_id: str) -> Optional[dict]:
+    client = get_client()
+    command = client.query_one(
+        """SELECT * FROM worker_commands
+           WHERE status = 'queued'
+           ORDER BY requested_at ASC
+           LIMIT 1"""
+    )
+    if not command:
+        return None
+
+    rows = client.execute(
+        """UPDATE worker_commands
+           SET status = 'claimed',
+               claimed_at = unixepoch(),
+               handled_by = ?,
+               message = 'Claimed by worker'
+           WHERE id = ? AND status = 'queued'
+           RETURNING *""",
+        [worker_id, command["id"]],
+    )
+    return rows[0] if rows else None
+
+
+def complete_worker_command(command_id: str, worker_id: str, message: str) -> None:
+    client = get_client()
+    client.execute(
+        """UPDATE worker_commands
+           SET status = 'done',
+               handled_at = unixepoch(),
+               handled_by = ?,
+               message = ?
+           WHERE id = ?""",
+        [worker_id, message, command_id],
     )
 
 

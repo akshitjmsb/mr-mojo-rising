@@ -90,7 +90,39 @@ if command -v caffeinate >/dev/null 2>&1 && [ "${DISABLE_CAFFEINATE:-0}" != "1" 
 fi
 
 if [ "${DEV_RELOAD:-0}" = "1" ]; then
-  exec "${RUNNER[@]}" "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  SERVER_CMD=("$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload)
 else
-  exec "${RUNNER[@]}" "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000
+  SERVER_CMD=("$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port 8000)
+fi
+
+CHILD_PID=""
+
+stop_child() {
+  if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" >/dev/null 2>&1; then
+    kill -TERM "$CHILD_PID" >/dev/null 2>&1 || true
+    wait "$CHILD_PID" >/dev/null 2>&1 || true
+  fi
+}
+
+trap stop_child TERM INT
+
+if [ "${ENABLE_WORKER_SUPERVISOR:-1}" = "1" ]; then
+  while true; do
+    "${RUNNER[@]}" "${SERVER_CMD[@]}" &
+    CHILD_PID="$!"
+    set +e
+    wait "$CHILD_PID"
+    EXIT_CODE="$?"
+    set -e
+    CHILD_PID=""
+
+    if [ "$EXIT_CODE" != "75" ]; then
+      exit "$EXIT_CODE"
+    fi
+
+    echo "Worker restart requested. Relaunching..."
+    sleep 1
+  done
+else
+  exec "${RUNNER[@]}" "${SERVER_CMD[@]}"
 fi

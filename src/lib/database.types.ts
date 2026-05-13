@@ -94,3 +94,14 @@ export type WorkerStatus = {
   heartbeat_at: number;
   updated_at: number;
 };
+
+export type WorkerCommand = {
+  id: string;
+  command: "restart";
+  status: "queued" | "claimed" | "done" | "failed";
+  requested_at: number;
+  claimed_at: number | null;
+  handled_at: number | null;
+  handled_by: string | null;
+  message: string | null;
+};

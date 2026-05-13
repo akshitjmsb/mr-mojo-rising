@@ -31,7 +31,9 @@ from chord_reanalyze import (
     reanalyze_chords as reanalyze_chords_for_song,
 )
 from turso_db import (
+    claim_worker_command,
     claim_next_job,
+    complete_worker_command,
     ensure_worker_status_table,
     get_client as get_turso_client,
     new_id,
@@ -59,6 +61,7 @@ WORKER_ID = os.environ.get("WORKER_ID", f"mac-worker-{os.getpid()}")
 WORKER_CONCURRENCY = max(1, int(os.environ.get("WORKER_CONCURRENCY", "1")))
 QUEUE_POLL_INTERVAL_SECONDS = float(os.environ.get("QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
 HEARTBEAT_INTERVAL_SECONDS = float(os.environ.get("JOB_HEARTBEAT_INTERVAL_SECONDS", "15"))
+WORKER_COMMAND_INTERVAL_SECONDS = float(os.environ.get("WORKER_COMMAND_INTERVAL_SECONDS", "5"))
 HEARTBEAT_TIMEOUT_SECONDS = int(os.environ.get("JOB_HEARTBEAT_TIMEOUT_SECONDS", "300"))
 MAX_BACKOFF_SECONDS = int(os.environ.get("JOB_MAX_BACKOFF_SECONDS", "300"))
 JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "1800"))
@@ -86,6 +89,7 @@ WORKER_WARMUP_ENABLED = os.environ.get("WORKER_WARMUP_ENABLED", "true").strip().
 WORKER_TASKS: list[asyncio.Task] = []
 REQUEUE_TASK: asyncio.Task | None = None
 WORKER_STATUS_TASK: asyncio.Task | None = None
+WORKER_COMMAND_TASK: asyncio.Task | None = None
 
 
 def stage_start(*, stage: str, song_id: str, job_id: str) -> float:
@@ -129,13 +133,14 @@ class ProcessRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_workers():
-    global REQUEUE_TASK, WORKER_STATUS_TASK
+    global REQUEUE_TASK, WORKER_STATUS_TASK, WORKER_COMMAND_TASK
 
     log_event(
         "worker.startup",
         worker_id=WORKER_ID,
         concurrency=WORKER_CONCURRENCY,
         poll_interval_seconds=QUEUE_POLL_INTERVAL_SECONDS,
+        command_interval_seconds=WORKER_COMMAND_INTERVAL_SECONDS,
         heartbeat_timeout_seconds=HEARTBEAT_TIMEOUT_SECONDS,
         job_timeout_seconds=JOB_TIMEOUT_SECONDS,
         demucs_python=DEMUCS_PYTHON,
@@ -164,6 +169,7 @@ async def startup_workers():
 
     REQUEUE_TASK = asyncio.create_task(stale_requeue_loop())
     WORKER_STATUS_TASK = asyncio.create_task(worker_status_loop())
+    WORKER_COMMAND_TASK = asyncio.create_task(worker_command_loop())
     await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
 
 
@@ -182,6 +188,10 @@ async def shutdown_workers():
     if WORKER_STATUS_TASK:
         WORKER_STATUS_TASK.cancel()
         await asyncio.gather(WORKER_STATUS_TASK, return_exceptions=True)
+
+    if WORKER_COMMAND_TASK:
+        WORKER_COMMAND_TASK.cancel()
+        await asyncio.gather(WORKER_COMMAND_TASK, return_exceptions=True)
 
     try:
         await asyncio.to_thread(update_worker_status, WORKER_ID, "stopped")
@@ -349,6 +359,28 @@ async def worker_status_loop():
             log_event("worker.status_update_error", worker_id=WORKER_ID, error=str(exc))
 
         await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+
+
+async def worker_command_loop():
+    while True:
+        try:
+            command = await asyncio.to_thread(claim_worker_command, WORKER_ID)
+            if command and command.get("command") == "restart":
+                command_id = command["id"]
+                log_event("worker.command_restart", worker_id=WORKER_ID, command_id=command_id)
+                await asyncio.to_thread(
+                    complete_worker_command,
+                    command_id,
+                    WORKER_ID,
+                    "Restart acknowledged by worker",
+                )
+                os._exit(75)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_event("worker.command_error", worker_id=WORKER_ID, error=str(exc))
+
+        await asyncio.sleep(WORKER_COMMAND_INTERVAL_SECONDS)
 
 
 async def process_claimed_job(worker_name: str, job: dict):

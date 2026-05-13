@@ -4,9 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 
+type LibrarySong = Song & {
+  worker_online_count?: number;
+  latest_worker_heartbeat_at?: number | null;
+};
+
 export default function LibraryPage() {
   const router = useRouter();
-  const [songs, setSongs] = useState<Song[]>([]);
+  const [songs, setSongs] = useState<LibrarySong[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const [retryingSongId, setRetryingSongId] = useState<string | null>(null);
@@ -16,7 +21,7 @@ export default function LibraryPage() {
   const fetchSongs = useCallback(async () => {
     const res = await fetch("/api/songs");
     const data = await res.json();
-    setSongs(Array.isArray(data) ? (data as Song[]) : []);
+    setSongs(Array.isArray(data) ? (data as LibrarySong[]) : []);
   }, []);
 
   useEffect(() => {
@@ -51,7 +56,7 @@ export default function LibraryPage() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [confirmDeleteId]);
 
-  async function handleDeleteSong(song: Song) {
+  async function handleDeleteSong(song: LibrarySong) {
     if (confirmDeleteId !== song.id) {
       setConfirmDeleteId(song.id);
       return;
@@ -80,7 +85,7 @@ export default function LibraryPage() {
     }
   }
 
-  async function handleRetrySong(song: Song) {
+  async function handleRetrySong(song: LibrarySong) {
     setError("");
     setRetryingSongId(song.id);
 
@@ -125,7 +130,9 @@ export default function LibraryPage() {
       </div>
 
       <div>
-        {songs.map((song) => (
+        {songs.map((song) => {
+          const workerOnline = (song.worker_online_count ?? 0) > 0;
+          return (
           <div
             key={song.id}
             className="flex items-center border-b border-border-darkest"
@@ -196,7 +203,7 @@ export default function LibraryPage() {
                 )}
                 {song.status === "queued" && (
                   <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-text-muted">
-                    Queued
+                    {workerOnline ? "Queued" : "Mac Offline"}
                   </p>
                 )}
                 {song.status === "failed" && (
@@ -234,7 +241,8 @@ export default function LibraryPage() {
                   : "Delete"}
             </button>
           </div>
-        ))}
+          );
+        })}
 
         {!loading && songs.length === 0 && (
           <div className="px-5 py-10 text-center">
