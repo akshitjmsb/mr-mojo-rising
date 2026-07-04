@@ -36,6 +36,7 @@ yarn-error.log*
 
 # python
 mac-server/venv/
+mac-server/venv-sep/
 **/__pycache__/
 
 # vercel

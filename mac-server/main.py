@@ -7,6 +7,7 @@ and lyrics fetching.
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import traceback
@@ -64,17 +65,49 @@ HEARTBEAT_INTERVAL_SECONDS = float(os.environ.get("JOB_HEARTBEAT_INTERVAL_SECOND
 WORKER_COMMAND_INTERVAL_SECONDS = float(os.environ.get("WORKER_COMMAND_INTERVAL_SECONDS", "5"))
 HEARTBEAT_TIMEOUT_SECONDS = int(os.environ.get("JOB_HEARTBEAT_TIMEOUT_SECONDS", "300"))
 MAX_BACKOFF_SECONDS = int(os.environ.get("JOB_MAX_BACKOFF_SECONDS", "300"))
-JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "1800"))
+JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "3600"))
 DEMUCS_PYTHON = os.environ.get("DEMUCS_PYTHON", VENV_PYTHON if Path(VENV_PYTHON).exists() else "python3.11")
 DEMUCS_DEVICE = os.environ.get(
     "DEMUCS_DEVICE",
     "mps" if torch.backends.mps.is_built() and torch.backends.mps.is_available() else "cpu",
 )
 DEMUCS_JOBS = max(1, int(os.environ.get("DEMUCS_JOBS", "4")))
+# htdemucs_ft is the fine-tuned 4-model ensemble: ~4x slower than htdemucs but
+# noticeably cleaner stems (less bleed/warble on isolated vocals and guitar).
+DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs_ft")
+DEMUCS_SHIFTS = max(0, int(os.environ.get("DEMUCS_SHIFTS", "1")))
 DEMUCS_SEGMENT = os.environ.get("DEMUCS_SEGMENT")
+# Vocal refine pass: re-separates vocals with BS-Roformer (audio-separator),
+# which is markedly cleaner than Demucs for voice. Demucs still provides
+# drums/bass/guitar. Non-fatal — falls back to the Demucs vocals on failure.
+SEPARATOR_BIN = os.environ.get(
+    "SEPARATOR_BIN", str(Path(__file__).resolve().parent / "venv-sep" / "bin" / "audio-separator")
+)
+VOCAL_REFINE_ENABLED = os.environ.get("VOCAL_REFINE_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+VOCAL_REFINE_MODEL = os.environ.get("VOCAL_REFINE_MODEL", "model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+VOCAL_REFINE_TIMEOUT_SECONDS = int(os.environ.get("VOCAL_REFINE_TIMEOUT_SECONDS", "1800"))
+# Guitar refine: MelBand Roformer trained specifically on guitar, so keys/synths
+# stay out of the guitar stem (Demucs "other" lumps them all together).
+# Registered via register_custom_models.py — not part of audio-separator itself.
+GUITAR_REFINE_ENABLED = os.environ.get("GUITAR_REFINE_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+GUITAR_REFINE_MODEL = os.environ.get("GUITAR_REFINE_MODEL", "mel_band_roformer_guitar_becruily.ckpt")
+SEPARATOR_MODEL_DIR = os.environ.get(
+    "SEPARATOR_MODEL_DIR",
+    str(Path.home() / "Library" / "Application Support" / "MrMojoRising" / "separator-models"),
+)
 DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("YTDLP_DOWNLOAD_TIMEOUT_SECONDS", "300"))
 FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("FFMPEG_TIMEOUT_SECONDS", "180"))
-DEMUCS_TIMEOUT_SECONDS = int(os.environ.get("DEMUCS_TIMEOUT_SECONDS", "900"))
+DEMUCS_TIMEOUT_SECONDS = int(os.environ.get("DEMUCS_TIMEOUT_SECONDS", "2700"))
 UPLOAD_TIMEOUT_SECONDS = int(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "600"))
 ANALYZE_TIMEOUT_SECONDS = int(os.environ.get("ANALYZE_TIMEOUT_SECONDS", "420"))
 LYRICS_TIMEOUT_SECONDS = int(os.environ.get("LYRICS_TIMEOUT_SECONDS", "120"))
@@ -146,7 +179,14 @@ async def startup_workers():
         demucs_python=DEMUCS_PYTHON,
         demucs_device=DEMUCS_DEVICE,
         demucs_jobs=DEMUCS_JOBS,
+        demucs_model=DEMUCS_MODEL,
+        demucs_shifts=DEMUCS_SHIFTS,
         demucs_segment=DEMUCS_SEGMENT,
+        vocal_refine_enabled=VOCAL_REFINE_ENABLED,
+        vocal_refine_model=VOCAL_REFINE_MODEL,
+        guitar_refine_enabled=GUITAR_REFINE_ENABLED,
+        guitar_refine_model=GUITAR_REFINE_MODEL,
+        separator_bin_exists=Path(SEPARATOR_BIN).exists(),
         download_timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
         ffmpeg_timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
         demucs_timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
@@ -742,11 +782,13 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
         "-m",
         "demucs",
         "-n",
-        "htdemucs",
+        DEMUCS_MODEL,
         "-o",
         str(demucs_out),
         "-j",
         str(DEMUCS_JOBS),
+        "--shifts",
+        str(DEMUCS_SHIFTS),
     ]
     if DEMUCS_SEGMENT:
         base_cmd.extend(["--segment", DEMUCS_SEGMENT])
@@ -784,12 +826,56 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
     )
 
 
+async def refine_stem(
+    *,
+    audio_path: Path,
+    stems_dir: Path,
+    work_dir: Path,
+    song_id: str,
+    job_id: str,
+    model: str,
+    stem_label: str,
+    target_filename: str,
+):
+    """Replace one Demucs stem with a Roformer separation of the full mix.
+
+    Best-effort: any failure leaves the Demucs stem in place.
+    """
+    refine_dir = work_dir / f"refined-{stem_label.lower()}"
+    refine_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        SEPARATOR_BIN,
+        str(audio_path),
+        "-m",
+        model,
+        "--output_dir",
+        str(refine_dir),
+        "--output_format",
+        "WAV",
+        "--model_file_dir",
+        SEPARATOR_MODEL_DIR,
+    ]
+    await run_cmd(
+        cmd,
+        f"{stem_label.lower()} refine (roformer)",
+        song_id,
+        job_id,
+        timeout_seconds=VOCAL_REFINE_TIMEOUT_SECONDS,
+    )
+    outputs = sorted(refine_dir.glob(f"*({stem_label})*.wav"))
+    if not outputs:
+        raise RuntimeError(f"no {stem_label} output in {refine_dir}")
+    shutil.copyfile(outputs[0], stems_dir / target_filename)
+
+
 def compress_wav_to_mp3(wav_path: Path) -> Path:
     mp3_path = wav_path.with_suffix(".mp3")
     if mp3_path.exists():
         return mp3_path
     subprocess.run(
-        ["ffmpeg", "-y", "-i", str(wav_path), "-q:a", "2", str(mp3_path)],
+        # V0 (~245 kbps VBR) — isolated stems expose encoding artifacts far
+        # more than a full mix, so don't go below this.
+        ["ffmpeg", "-y", "-i", str(wav_path), "-q:a", "0", str(mp3_path)],
         check=True,
         capture_output=True,
         timeout=FFMPEG_TIMEOUT_SECONDS,
@@ -894,6 +980,40 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         if directory.is_dir() and (directory / "vocals.wav").exists():
             stems_dir = directory
             break
+
+    # Stage: refine (best-effort second-pass separation per stem)
+    refine_targets = []
+    if VOCAL_REFINE_ENABLED:
+        # vocals.wav feeds vocals_url
+        refine_targets.append((VOCAL_REFINE_MODEL, "Vocals", "vocals.wav"))
+    if GUITAR_REFINE_ENABLED:
+        # other.wav feeds guitar_url (Demucs "other" is the guitar stem)
+        refine_targets.append((GUITAR_REFINE_MODEL, "Guitar", "other.wav"))
+
+    if stems_dir and refine_targets and Path(SEPARATOR_BIN).exists():
+        update_song(song_id, status="processing", processing_stage="refine", last_error=None)
+        refine_started = stage_start(stage="refine", song_id=song_id, job_id=job_id)
+        for model, stem_label, target_filename in refine_targets:
+            try:
+                await refine_stem(
+                    audio_path=audio_path,
+                    stems_dir=stems_dir,
+                    work_dir=work_dir,
+                    song_id=song_id,
+                    job_id=job_id,
+                    model=model,
+                    stem_label=stem_label,
+                    target_filename=target_filename,
+                )
+            except Exception as exc:
+                log_event(
+                    "refine.failed_fallback_to_demucs_stem",
+                    song_id=song_id,
+                    job_id=job_id,
+                    stem=stem_label,
+                    error=str(exc),
+                )
+        stage_done(stage="refine", song_id=song_id, job_id=job_id, started=refine_started)
 
     # Stage: upload (idempotent — Vercel Blob `allowOverwrite` keeps the URL stable).
     update_song(song_id, status="processing", processing_stage="upload", last_error=None)
