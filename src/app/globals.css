@@ -5,7 +5,6 @@
  * ---------------------------------------------------------------------------
  * Three themes:
  *   - "doors"  (default) — psychedelic dive-bar, golden archway, candlelight
- *   - "eagles"           — golden-hour California desert, peaceful easy feeling
  *   - "dylan"            — weathered sepia photograph, Highway 61 dust, brass
  *                          harmonica, typewriter ink, Rolling Thunder violet
  *
@@ -78,51 +77,9 @@
 }
 
 /*
- * Eagles — California desert at golden hour, "Peaceful Easy Feeling". The polar
- * opposite of Doors: warm sun-bleached cream canvas, deep coffee text, three
- * distinct accent flavors (desert gold, sunset orange, open-sky blue) instead
- * of one monolithic gold. The mood is sun-faded denim, parchment, the smell of
- * sagebrush and asphalt — bright, warm, open. Walking out of a smoky bar into
- * California sunshine.
- */
-[data-theme="eagles"] {
-  --c-bg: #F1E4C5;             /* sun-bleached cream parchment — main canvas */
-  --c-gold: #B97A1F;            /* deep desert sun gold — saturated honey, NOT Doors' pale ochre */
-  --c-orange: #D9622D;          /* canyon sunset — vivid clay orange */
-  --c-terracotta: #A23829;      /* deep clay red (errors) */
-  --c-purple: #3F7DB0;          /* OPEN SKY blue — the cool counterpoint to all the warmth */
-  --c-text: #2A1B0F;            /* deep coffee/leather — warm dark on cream */
-  --c-text-secondary: #3E2A14;  /* warm dark sepia */
-  --c-text-muted: #6B4A28;      /* warm sienna */
-  --c-text-dark: #8C6B40;       /* faded leather */
-  --c-text-darker: #52371D;     /* deep tan (inactive section labels — readable on cream) */
-  --c-text-darkest: #A89370;    /* sun-faded — weakest legible on cream */
-  --c-border: #9A7530;          /* sandstone */
-  --c-border-dark: #C4A572;     /* sandy mid */
-  --c-border-darkest: #DECCA0;  /* faint sand divider */
-  --c-input-bg: #E8D9B0;        /* deeper cream pocket — sun-warmed paper */
-  --c-inactive: #D6BF8E;        /* soft tan — inactive waveform bars */
-
-  --section-intro: #E0A53D;     /* morning desert sun */
-  --section-verse: #D9622D;     /* afternoon canyon */
-  --section-chorus: #3F7DB0;    /* open sky — the blue pop */
-  --section-bridge: #9C5848;    /* dusk clay */
-  --section-default: #D9622D;
-
-  /* Fonts swap to Cormorant Garamond + Jost — softer serif, lighter sans */
-  --f-display: var(--font-cormorant-eagles), Georgia, serif;
-  --f-body: var(--font-jost-eagles), system-ui, sans-serif;
-
-  /* Atmospheric glow — warm sunshine bloom from above. Reads as SUN, not candle. */
-  --atmo-position: top -260px left 50%;
-  --atmo-size: 1100px 720px;
-  --atmo-image: radial-gradient(ellipse at center, rgba(255, 220, 130, 0.55) 0%, rgba(248, 195, 110, 0.30) 35%, rgba(230, 165, 80, 0.10) 65%, transparent 88%);
-}
-
-/*
  * Dylan — weathered sepia photograph, the Highway 61 dust, typewriter ink on
  * yellowed paper. Mid-tone walnut background sits between Doors' pure black
- * and Eagles' bright sky. Primary accent is harmonica brass; iron-ore rust
+ * and Ali's dark forest. Primary accent is harmonica brass; iron-ore rust
  * does the warm-secondary work; Rolling Thunder violet handles the bridge
  * sections. The mood is a stage-lit press photo from 1965 dimmed to amber.
  */
@@ -230,8 +187,8 @@ body::before {
 }
 
 /*
- * Atmospheric glow. Doors paints a small bulb at top-center; Eagles paints a
- * wide sunset on the bottom horizon. Theme tokens drive position/size/image.
+ * Atmospheric glow. Doors paints a small bulb at top-center; Dylan a dust haze
+ * along the lower horizon. Theme tokens drive position/size/image.
  */
 body::after {
   content: "";
@@ -283,12 +240,6 @@ body,
   98% { opacity: 1; }
 }
 
-/* Eagles replaces the dive-bar flicker with a slow sun-baked breath. */
-@keyframes breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.88; }
-}
-
 /* Dylan — uneven kerosene-lantern drift, a draft from an open hotel window. */
 @keyframes drift {
   0%, 100% { opacity: 1; }
@@ -319,10 +270,6 @@ body,
 
 .flicker {
   animation: flicker 6s infinite;
-}
-
-[data-theme="eagles"] .flicker {
-  animation: breathe 7s ease-in-out infinite;
 }
 
 [data-theme="dylan"] .flicker {

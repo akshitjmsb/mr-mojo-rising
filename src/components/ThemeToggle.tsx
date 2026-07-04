@@ -5,15 +5,14 @@ import { THEMES, type Theme } from "@/lib/theme/types";
 
 const LABELS: Record<Theme, string> = {
   doors: "Doors",
-  eagles: "Eagles",
   dylan: "Dylan",
   ali: "Ali",
 };
 
 /**
  * Theme cycler. Each theme shows its signature glyph: Doors → crescent moon
- * (after-hours dive bar); Eagles → low desert sun (golden hour); Dylan →
- * harmonica (the road, the protest, the typewriter). Tapping cycles forward.
+ * (after-hours dive bar); Dylan → harmonica (the road, the protest, the
+ * typewriter); Ali → raindrop (monsoon evening). Tapping cycles forward.
  */
 export default function ThemeToggle() {
   const { theme, toggleTheme, content } = useTheme();
@@ -42,28 +41,6 @@ export default function ThemeToggle() {
         >
           {/* Crescent moon — Doors after-hours */}
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-      )}
-      {theme === "eagles" && (
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          {/* Sun on the horizon — Eagles golden hour */}
-          <circle cx="12" cy="13" r="3.4" />
-          <path d="M12 6.5V4.5" />
-          <path d="M5.6 11.5l-1.4-1" />
-          <path d="M18.4 11.5l1.4-1" />
-          <path d="M7.5 7.8 6.2 6.5" />
-          <path d="M16.5 7.8 17.8 6.5" />
-          <path d="M3 18h18" />
         </svg>
       )}
       {theme === "dylan" && (

@@ -85,60 +85,6 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     },
   },
 
-  eagles: {
-    label: "Eagles",
-    hero: {
-      lineOne: "Take it easy.",
-      lineTwo: "Find a peaceful, easy feeling.",
-      subtitle:
-        "Paste a YouTube link. We'll pull the guitar out of the mix, mark the road signs, and let you ride it at any speed.",
-    },
-    importStages: [
-      { title: "Saddling up...", subtitle: "Validating & queuing your song", start: 0 },
-      { title: "Already gone...", subtitle: "Downloading audio from YouTube", start: 5 },
-      { title: "Taking it to the limit...", subtitle: "Separating guitar from the mix", start: 20 },
-      { title: "Reading the road signs...", subtitle: "Detecting song sections", start: 90 },
-      { title: "Tequila sunrise harmonies...", subtitle: "Analyzing chord progressions", start: 130 },
-      { title: "Catching the desert lyric...", subtitle: "Fetching synced lyrics", start: 170 },
-      { title: "Peaceful, easy feeling.", subtitle: "Ready to play", start: Infinity },
-    ],
-    importQuotes: [
-      "I'm a-runnin' down the road tryin' to loosen my load...",
-      "Standing on a corner in Winslow, Arizona...",
-      "On a dark desert highway, cool wind in my hair...",
-      "Welcome to the Hotel California...",
-      "Such a lovely place, such a lovely face...",
-      "You can't hide your lyin' eyes...",
-      "Already gone, and I'm feelin' strong...",
-      "Take it to the limit one more time...",
-      "Desperado, why don't you come to your senses?",
-      "Witchy woman, see how high she flies...",
-      "I get a peaceful, easy feeling...",
-      "And I know you won't let me down.",
-    ],
-    importSteps: SHARED_STEPS,
-    searchHero: {
-      title: "Find a song.",
-      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
-    },
-    searchQuotes: [
-      "Take it easy...",
-      "Already gone...",
-      "Hotel California...",
-      "Tequila sunrise...",
-      "Lyin' eyes...",
-      "Desperado...",
-    ],
-    shareTip:
-      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
-    errors: {
-      mainTitle: "Something’s runnin’ down the road.",
-      songTitle: "And the highway runs out.",
-      processingFallback:
-        "Took it past the limit. Processing failed. Please try again.",
-    },
-  },
-
   dylan: {
     label: "Dylan",
     hero: {

@@ -90,7 +90,7 @@
           opacity="0.4"
           transform="translate(1.2, 1.4)"/>
 
-    <!-- Outer border for depth, matching Doors/Eagles favicon style -->
+    <!-- Outer border for depth, matching Doors favicon style -->
     <rect width="100" height="100" fill="none" stroke="#3A2A18" stroke-width="1.2" opacity="0.5"/>
   </g>
 </svg>

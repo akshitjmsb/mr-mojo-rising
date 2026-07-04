@@ -2,8 +2,6 @@ import type { Metadata, Viewport } from "next";
 import {
   Playfair_Display,
   Josefin_Sans,
-  Cormorant_Garamond,
-  Jost,
   Special_Elite,
   IBM_Plex_Sans,
   Lora,
@@ -24,20 +22,6 @@ const josefin = Josefin_Sans({
   variable: "--font-josefin-doors",
   subsets: ["latin"],
   weight: ["100", "300", "400"],
-});
-
-// Eagles theme fonts — golden-hour California desert
-const cormorant = Cormorant_Garamond({
-  variable: "--font-cormorant-eagles",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  style: ["normal", "italic"],
-});
-
-const jost = Jost({
-  variable: "--font-jost-eagles",
-  subsets: ["latin"],
-  weight: ["100", "300", "400", "500"],
 });
 
 // Dylan theme fonts — typewriter ink on yellowed paper
@@ -103,7 +87,7 @@ export default function RootLayout({
 }>) {
   // Font CSS variables MUST live on <html> (not <body>) — the theme tokens
   // resolve at :root, so a body-scoped variable would be invisible to them.
-  const fontVariables = `${playfair.variable} ${josefin.variable} ${cormorant.variable} ${jost.variable} ${specialElite.variable} ${ibmPlexSans.variable} ${lora.variable} ${dmSans.variable}`;
+  const fontVariables = `${playfair.variable} ${josefin.variable} ${specialElite.variable} ${ibmPlexSans.variable} ${lora.variable} ${dmSans.variable}`;
 
   return (
     <html lang="en" className={fontVariables} suppressHydrationWarning>
