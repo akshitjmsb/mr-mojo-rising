@@ -1,94 +1,54 @@
 # Mr. Mojo Rising
+> *"Mr. Mojo Risin'" — The Doors, L.A. Woman, 1971.*
 
-AI-powered guitar practice studio:
-- import from YouTube
-- isolate stems
-- detect sections/chords/lyrics
-- practice loops at variable speed
+An AI-powered guitar practice studio I built for myself. Drop in any song, get back isolated stems, chords, lyrics, and loopable sections — all on your phone while you play.
 
-## Production Shape
+---
 
-The phone/PWA runs from Vercel. Heavy audio processing runs on this Mac.
+## The Problem
 
-1. Vercel serves the Next.js app and API routes.
-2. Imports create rows in the shared Turso `processing_jobs` queue.
-3. `mac-server/start.sh` runs the local worker that claims queued jobs.
-4. Processed stems are uploaded to Vercel Blob.
-5. The phone polls Turso through Vercel until the song is ready.
+Learning a song from YouTube means: scrubbing, rewinding, missing chord changes, losing the section you needed. I wanted a tool that actually understands the song — and lets me practice it the way I think about it, not the way a video player works.
 
-If the phone says the Mac worker is offline, start the local worker:
+## What It Does
 
-```bash
-./mac-server/start.sh
+1. **Import** — Paste a YouTube URL. The song gets queued for processing.
+2. **Stem Isolation** — Demucs separates guitar, vocals, drums, and bass.
+3. **Analysis** — Sections detected (intro, verse, chorus), chords identified, lyrics extracted.
+4. **Practice** — Loop any section at variable speed on the phone PWA. Slow it down for a tricky riff, isolate the guitar track, repeat the chorus.
+
+---
+
+## How It Works
+
+The phone runs light — Next.js PWA on Vercel. The heavy lifting (stem separation, chord detection) runs on a local Mac worker.
+
+```
+Phone / PWA (Vercel)
+  └── Import → writes job to Turso queue
+  └── Polls Turso until song is ready
+
+Mac Worker (local)
+  └── Claims job from Turso
+  └── yt-dlp → downloads audio
+  └── Demucs → stem separation
+  └── ffmpeg → segment processing
+  └── Uploads processed stems to Vercel Blob
 ```
 
-For the Dock launcher:
+---
 
-```bash
-npm run dock:start
-```
+## Stack
 
-## Required Environment
+| Layer | Technology |
+|-------|-----------|
+| App / PWA | Next.js · TypeScript · Tailwind CSS |
+| Job Queue | Turso (libSQL) |
+| Audio Processing | Demucs · ffmpeg · yt-dlp |
+| Storage | Vercel Blob |
+| Deployment | Vercel · Mac local worker |
 
-Set these in Vercel production and in local `.env.local` for the Mac worker:
+---
 
-```bash
-TURSO_DATABASE_URL=libsql://your-database.turso.io
-TURSO_AUTH_TOKEN=...
-BLOB_READ_WRITE_TOKEN=...
-```
+*Personal tool. Private repository.*
 
-Optional:
-
-```bash
-YOUTUBE_API_KEY=...                 # search and Spotify-to-YouTube matching
-WORKER_CONCURRENCY=1
-YTDLP_DOWNLOAD_TIMEOUT_SECONDS=300
-FFMPEG_TIMEOUT_SECONDS=180
-DEMUCS_TIMEOUT_SECONDS=900
-UPLOAD_TIMEOUT_SECONDS=600
-ANALYZE_TIMEOUT_SECONDS=420
-LYRICS_TIMEOUT_SECONDS=120
-JOB_TIMEOUT_SECONDS=1800
-```
-
-Do not set `YTDLP_COOKIES_FROM_BROWSER` unless you explicitly want the worker
-to read browser cookies. On macOS that can trigger a Keychain prompt.
-
-## Run Locally
-
-```bash
-npm install
-npm run db:migrate
-npm run dev
-./mac-server/start.sh
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-## Mac Dock Launcher
-
-Install the Dock app:
-
-```bash
-npm run dock:install
-```
-
-Then launch with:
-
-```bash
-npm run dock:start
-```
-
-Logs are written to:
-- `~/Library/Logs/MrMojoRising-launch.log`
-- `.mmr-logs/web.log`
-- `.mmr-logs/server.log`
-- `.mmr-logs/npm-install.log`
-
-Control commands:
-
-```bash
-npm run dock:stop
-npm run dock:restart
-```
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
