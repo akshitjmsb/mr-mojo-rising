@@ -1,19 +1,22 @@
 """Tiny Vercel Blob client for the Python worker.
 
-Uploads files via the Vercel Blob HTTP API (same protocol as the
-`@vercel/blob` Node SDK) using only `requests`. We use the `put` endpoint
-with `addRandomSuffix=false` and `allowOverwrite=true` so re-uploading the
-same logical pathname produces a stable URL.
+Mirrors the wire format of the @vercel/blob v0.27 Node SDK:
+- PUT https://blob.vercel-storage.com/?pathname=<urlencoded>
+- x-api-version: 9
+- bearer token in Authorization
+- per-call options as x-* headers (content-type, add-random-suffix, …)
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 
 BLOB_API_BASE = "https://blob.vercel-storage.com"
+BLOB_API_VERSION = "9"
 
 
 def get_token() -> str:
@@ -29,15 +32,14 @@ def upload_file(local_path: Path, blob_pathname: str, content_type: str) -> str:
     Returns the public URL.
     """
     token = get_token()
-    url = f"{BLOB_API_BASE}/{blob_pathname.lstrip('/')}"
+    pathname = blob_pathname.lstrip("/")
+    url = f"{BLOB_API_BASE}/?{urlencode({'pathname': pathname})}"
     headers = {
         "authorization": f"Bearer {token}",
+        "x-api-version": BLOB_API_VERSION,
         "x-content-type": content_type,
-        # Skip the random suffix so the same pathname always resolves to the
-        # same canonical URL across uploads.
+        # Stable URLs: same pathname → same canonical URL across uploads.
         "x-add-random-suffix": "0",
-        "x-allow-overwrite": "1",
-        "x-api-version": "11",
     }
     with open(local_path, "rb") as f:
         resp = requests.put(url, data=f, headers=headers, timeout=300)
@@ -54,8 +56,8 @@ def delete_url(blob_url: str) -> None:
     token = get_token()
     headers = {
         "authorization": f"Bearer {token}",
+        "x-api-version": BLOB_API_VERSION,
         "content-type": "application/json",
-        "x-api-version": "11",
     }
     resp = requests.post(
         f"{BLOB_API_BASE}/delete",
