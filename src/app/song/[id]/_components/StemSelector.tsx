@@ -1,8 +1,9 @@
-export type StemMode = "guitar" | "vocals" | "full";
+export type StemMode = "guitar" | "bass" | "vocals" | "full";
 
 const MODES: Array<{ key: StemMode; label: string }> = [
-  { key: "guitar", label: "Guitar Stem" },
-  { key: "vocals", label: "Vocal Stem" },
+  { key: "guitar", label: "Guitar" },
+  { key: "bass", label: "Bass" },
+  { key: "vocals", label: "Vocals" },
   { key: "full", label: "Full Mix" },
 ];
 

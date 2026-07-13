@@ -42,6 +42,17 @@ export const SCHEMA_STATEMENTS: string[] = [
     confidence REAL
   )`,
 
+  `CREATE TABLE IF NOT EXISTS tab_notes (
+    id TEXT PRIMARY KEY,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    start_time REAL NOT NULL,
+    duration REAL NOT NULL,
+    midi_pitch INTEGER NOT NULL,
+    string_num INTEGER NOT NULL CHECK (string_num BETWEEN 1 AND 6),
+    fret INTEGER NOT NULL CHECK (fret BETWEEN 0 AND 24),
+    confidence REAL
+  )`,
+
   `CREATE TABLE IF NOT EXISTS lyrics (
     id TEXT PRIMARY KEY,
     song_id TEXT NOT NULL UNIQUE REFERENCES songs(id) ON DELETE CASCADE,
@@ -103,6 +114,9 @@ export const SCHEMA_STATEMENTS: string[] = [
 
   `CREATE INDEX IF NOT EXISTS chords_song_start_idx
     ON chords (song_id, start_time)`,
+
+  `CREATE INDEX IF NOT EXISTS tab_notes_song_start_idx
+    ON tab_notes (song_id, start_time)`,
 
   `CREATE INDEX IF NOT EXISTS processing_jobs_status_run_after_idx
     ON processing_jobs (status, run_after, created_at)`,

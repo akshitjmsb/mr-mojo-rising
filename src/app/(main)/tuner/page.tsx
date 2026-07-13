@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { usePitchDetection } from "./_hooks/usePitchDetection";
 import {
   TUNINGS,
-  centsBetween,
+  centsToTargetFolded,
   closestString,
   type Tuning,
 } from "./_lib/tunings";
@@ -25,7 +25,7 @@ export default function TunerPage() {
       const s = tuning.strings[pinned];
       return {
         string: s,
-        cents: centsBetween(reading.frequency, s.frequency),
+        cents: centsToTargetFolded(reading.frequency, s.frequency),
         index: pinned,
       };
     }

@@ -48,16 +48,18 @@ export default function TuningGauge({ cents, inTune }: Props) {
     };
   }, []);
 
-  // Tick marks every 10 cents from -50 to +50.
+  // Tick marks every 10 cents from -50 to +50. Coordinates are rounded so
+  // server and client serialize identically (raw trig floats differ in the
+  // last digit between Node and the browser → hydration mismatch).
   const ticks = [];
   for (let c = -50; c <= 50; c += 10) {
     const angle = (c / GAUGE_RANGE) * 60;
     const rad = ((angle - 90) * Math.PI) / 180;
     const inner = c % 25 === 0 ? 70 : 76;
-    const x1 = 100 + inner * Math.cos(rad);
-    const y1 = 95 + inner * Math.sin(rad);
-    const x2 = 100 + 84 * Math.cos(rad);
-    const y2 = 95 + 84 * Math.sin(rad);
+    const x1 = Number((100 + inner * Math.cos(rad)).toFixed(2));
+    const y1 = Number((95 + inner * Math.sin(rad)).toFixed(2));
+    const x2 = Number((100 + 84 * Math.cos(rad)).toFixed(2));
+    const y2 = Number((95 + 84 * Math.sin(rad)).toFixed(2));
     ticks.push(
       <line
         key={c}

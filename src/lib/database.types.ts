@@ -50,6 +50,19 @@ export type Chord = {
   confidence: number | null;
 };
 
+// One transcribed note on the guitar stem, mapped to a fretboard position.
+// string_num follows tab convention: 1 = high E … 6 = low E.
+export type TabNote = {
+  id: string;
+  song_id: string;
+  start_time: number;
+  duration: number;
+  midi_pitch: number;
+  string_num: number;
+  fret: number;
+  confidence: number | null;
+};
+
 export type Lyrics = {
   id: string;
   song_id: string;

@@ -109,6 +109,20 @@ export function centsBetween(frequency: number, target: number) {
   return 1200 * Math.log2(frequency / target);
 }
 
+/**
+ * Cents from `frequency` to `target`, folded to the nearest octave. Use when
+ * the target string is fixed (pinned) so a harmonic still reads as a small
+ * offset from that string rather than ±1200¢.
+ */
+export function centsToTargetFolded(frequency: number, target: number) {
+  const base = centsBetween(frequency, target);
+  let cents = base;
+  for (const folded of [base - 1200, base + 1200]) {
+    if (Math.abs(folded) < Math.abs(cents)) cents = folded;
+  }
+  return cents;
+}
+
 export interface MatchResult {
   string: GuitarString;
   cents: number;
@@ -116,8 +130,9 @@ export interface MatchResult {
 }
 
 /**
- * Closest string in the tuning to `frequency`, picked by absolute cent distance
- * across ±1 octave so a low note still maps to its own string.
+ * Closest string in the tuning to `frequency`, picked by absolute cent
+ * distance folded across ±1 octave — so a harmonic (or an octave-erred
+ * detector frame) still maps to its own string with the right cent offset.
  */
 export function closestString(
   frequency: number,
@@ -127,7 +142,11 @@ export function closestString(
   let best: MatchResult | null = null;
   for (let i = 0; i < tuning.strings.length; i++) {
     const s = tuning.strings[i];
-    const cents = centsBetween(frequency, s.frequency);
+    const base = centsBetween(frequency, s.frequency);
+    let cents = base;
+    for (const folded of [base - 1200, base + 1200]) {
+      if (Math.abs(folded) < Math.abs(cents)) cents = folded;
+    }
     if (best === null || Math.abs(cents) < Math.abs(best.cents)) {
       best = { string: s, cents, index: i };
     }

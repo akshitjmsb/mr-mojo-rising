@@ -7,6 +7,7 @@ import type {
   Section,
   Song,
   Stem,
+  TabNote,
 } from "@/lib/database.types";
 
 export async function GET(
@@ -39,12 +40,24 @@ export async function GET(
     [id],
   );
 
+  // Tolerate a DB that predates the tab_notes migration.
+  let tabNotes: TabNote[] = [];
+  try {
+    tabNotes = await queryAll<TabNote>(
+      `SELECT * FROM tab_notes WHERE song_id = ? ORDER BY start_time ASC`,
+      [id],
+    );
+  } catch {
+    tabNotes = [];
+  }
+
   return NextResponse.json({
     song,
     stems: stems ?? null,
     sections,
     chords,
     lyrics: lyrics ?? null,
+    tab_notes: tabNotes,
   });
 }
 

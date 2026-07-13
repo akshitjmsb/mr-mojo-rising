@@ -10,6 +10,7 @@ import type {
   Section,
   Song,
   Stem,
+  TabNote,
 } from "@/lib/database.types";
 import StemSelector, { type StemMode } from "./_components/StemSelector";
 import type { DownloadStemKey } from "./_components/DownloadPanel";
@@ -26,6 +27,7 @@ const DownloadPanel = dynamic(() => import("./_components/DownloadPanel"));
 const ChordLyricsPanel = dynamic(
   () => import("./_components/ChordLyricsPanel"),
 );
+const TabPanel = dynamic(() => import("./_components/TabPanel"));
 const SectionList = dynamic(() => import("./_components/SectionList"));
 
 const SEEK_STEP_SECONDS = 10;
@@ -38,6 +40,7 @@ export default function SongPlayerPage() {
   const [sections, setSections] = useState<Section[]>([]);
   const [chords, setChords] = useState<Chord[]>([]);
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
+  const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<StemMode>("guitar");
@@ -66,6 +69,7 @@ export default function SongPlayerPage() {
         setSections(data.sections || []);
         setChords(data.chords || []);
         setLyrics(data.lyrics || null);
+        setTabNotes(data.tab_notes || []);
         if (data.sections?.length > 0) setActiveSection(data.sections[0]);
       } finally {
         if (!cancelled) setLoading(false);
@@ -79,23 +83,46 @@ export default function SongPlayerPage() {
   const audioUrl =
     stemMode === "guitar"
       ? stems?.guitar_url
-      : stemMode === "vocals"
-        ? stems?.vocals_url
-        : stems?.original_url;
+      : stemMode === "bass"
+        ? stems?.bass_url
+        : stemMode === "vocals"
+          ? stems?.vocals_url
+          : stems?.original_url;
+
+  // Carries position + play state across stem switches so changing stems
+  // doesn't restart the song.
+  const resumeRef = useRef<{ time: number; playing: boolean }>({
+    time: 0,
+    playing: false,
+  });
 
   // Wire up the audio element when the source changes.
   useEffect(() => {
     if (!audioUrl) return;
     const audio = new Audio(audioUrl);
     audio.playbackRate = speed;
+    // Slowing down must not drop the pitch — this is a practice tool.
+    audio.preservesPitch = true;
     audioRef.current = audio;
 
-    const onLoaded = () => setDuration(audio.duration);
+    const resume = resumeRef.current;
+    const onLoaded = () => {
+      setDuration(audio.duration);
+      if (resume.time > 0 && resume.time < audio.duration) {
+        audio.currentTime = resume.time;
+        setCurrentTime(resume.time);
+      }
+      if (resume.playing) {
+        audio.play().catch(() => setIsPlaying(false));
+        setIsPlaying(true);
+      }
+    };
     const onEnded = () => setIsPlaying(false);
     audio.addEventListener("loadedmetadata", onLoaded);
     audio.addEventListener("ended", onEnded);
 
     return () => {
+      resumeRef.current = { time: audio.currentTime, playing: !audio.paused };
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("ended", onEnded);
       audio.pause();
@@ -281,6 +308,7 @@ export default function SongPlayerPage() {
         seekStepSeconds={SEEK_STEP_SECONDS}
       />
       <SpeedPresets value={speed} onChange={setSpeed} />
+      <TabPanel notes={tabNotes} currentTime={currentTime} seekTo={seekTo} />
       <ChordLyricsPanel
         chords={chords}
         lyrics={lyrics}

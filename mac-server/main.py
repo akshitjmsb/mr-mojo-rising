@@ -31,6 +31,11 @@ from chord_reanalyze import (
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
 )
+from tab_transcribe import (
+    TAB_TIMEOUT_SECONDS,
+    transcribe_guitar_stem,
+    write_tab_notes,
+)
 from turso_db import (
     claim_worker_command,
     claim_next_job,
@@ -105,6 +110,15 @@ SEPARATOR_MODEL_DIR = os.environ.get(
     "SEPARATOR_MODEL_DIR",
     str(Path.home() / "Library" / "Application Support" / "MrMojoRising" / "separator-models"),
 )
+# Tab transcription: basic-pitch on the guitar stem → tab_notes rows.
+# Non-fatal — a song without tabs still completes. Thresholds and the CLI
+# path live in tab_transcribe.py (BASIC_PITCH_BIN, TAB_* env vars).
+TAB_TRANSCRIBE_ENABLED = os.environ.get("TAB_TRANSCRIBE_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("YTDLP_DOWNLOAD_TIMEOUT_SECONDS", "300"))
 FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("FFMPEG_TIMEOUT_SECONDS", "180"))
 DEMUCS_TIMEOUT_SECONDS = int(os.environ.get("DEMUCS_TIMEOUT_SECONDS", "2700"))
@@ -1080,6 +1094,38 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             ],
         )
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
+
+    # Stage: transcribe (guitar stem → tab notes). Non-fatal — the song is
+    # still fully usable without tabs.
+    guitar_stem_path = stems_dir / "other.wav" if stems_dir else None
+    if TAB_TRANSCRIBE_ENABLED and guitar_stem_path and guitar_stem_path.exists():
+        update_song(song_id, status="processing", processing_stage="transcribe", last_error=None)
+        transcribe_started = stage_start(stage="transcribe", song_id=song_id, job_id=job_id)
+        try:
+            tab_notes = await run_stage_with_timeout(
+                asyncio.to_thread(transcribe_guitar_stem, str(guitar_stem_path)),
+                timeout_seconds=TAB_TIMEOUT_SECONDS,
+                label="tab transcription",
+                song_id=song_id,
+                job_id=job_id,
+            )
+            await asyncio.to_thread(write_tab_notes, db, song_id, tab_notes or [])
+            log_event(
+                "pipeline.tabs_detected",
+                song_id=song_id,
+                job_id=job_id,
+                note_count=len(tab_notes or []),
+            )
+        except Exception as exc:
+            log_event(
+                "pipeline.tabs_failed",
+                song_id=song_id,
+                job_id=job_id,
+                error=str(exc),
+                traceback=traceback.format_exc(),
+            )
+        finally:
+            stage_done(stage="transcribe", song_id=song_id, job_id=job_id, started=transcribe_started)
 
     # Stage: analyze (sections + chords) and lyrics in parallel.
     update_song(song_id, status="processing", processing_stage="analyze", last_error=None)

@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     ".vercel/**",
     ".claude/**",
     "mac-server/venv/**",
+    "mac-server/venv-sep/**",
     "mac-server/__pycache__/**",
   ]),
 ]);
