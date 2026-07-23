@@ -1,12 +1,14 @@
-fastapi>=0.115.0
-uvicorn>=0.30.0
-yt-dlp>=2024.0.0
-demucs>=4.0.0
-torch>=2.0.0
-torchcodec>=0.10.0
-requests>=2.31.0
-python-multipart>=0.0.9
-syncedlyrics>=0.10.0
-librosa>=0.10.0
-numpy>=1.24.0
-pyyaml>=6.0
+# DEPRECATED — do not `pip install -r requirements.txt`.
+#
+# The worker uses two isolated Python 3.11 venvs with EXACT pinned versions.
+# Install from the frozen snapshots instead (see mac-server/MIGRATION.md):
+#
+#   venv      (worker: FastAPI, torch/Demucs, librosa, BTC)
+#     ./venv/bin/pip install -r requirements-worker.txt
+#
+#   venv-sep  (audio-separator Roformer + basic-pitch tabs)
+#     ./venv-sep/bin/pip install -r requirements-separator.txt
+#
+# Regenerate after an intentional upgrade:
+#   ./venv/bin/python     -m pip freeze > requirements-worker.txt
+#   ./venv-sep/bin/python -m pip freeze > requirements-separator.txt
