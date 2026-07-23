@@ -6,6 +6,28 @@ Demucs/Roformer separation, chords, tabs, lyrics) and its Cloudflare tunnel.
 
 Do these in order. Budget ~30–60 min, most of it building the two venvs.
 
+## Running this with Claude Code
+
+You can let Claude Code drive most of this. On the Mac Mini: install Homebrew,
+`brew install git`, clone the repo, then run `claude` inside the repo and say:
+
+> Follow mac-server/MIGRATION.md to set up this worker. The secret files are
+> already copied in.
+
+Two things Claude **cannot** do for you — they're manual on purpose:
+
+1. **The secret files** — `.env.local` (repo root) and `mac-server/.env` are
+   gitignored, so they aren't in the clone. Copy them from the old Mac
+   (AirDrop/scp) **before** pointing Claude at this guide, or it'll stop at the
+   env-var check in step 6. **Never commit these or paste their values into any
+   tracked file** — the tokens grant write access to the production database and
+   blob storage, and git history is permanent.
+2. **The Cloudflare tunnel credentials** (step 7) — also copied by hand, or a
+   fresh tunnel created interactively.
+
+Everything else — system deps, building the venvs, registering models, the
+smoke test, the LaunchAgent — Claude can run directly.
+
 ## 0. Prerequisites
 
 - **Apple Silicon Mac** (M-series). Demucs runs on the MPS backend — Intel is
