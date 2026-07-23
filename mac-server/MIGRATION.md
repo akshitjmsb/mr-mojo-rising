@@ -2,7 +2,11 @@
 
 Step-by-step guide to move the Python worker to a new Apple Silicon Mac. The
 web app on Vercel and the Turso database don't move — only the worker (yt-dlp,
-Demucs/Roformer separation, chords, tabs, lyrics) and its Cloudflare tunnel.
+Demucs/Roformer separation, chords, tabs, lyrics).
+
+**The worker is pull-based:** it polls the Turso database for jobs and pushes
+results to Turso + Vercel Blob. The web app never calls the Mac directly, so
+**no inbound tunnel is required** for the pipeline to work (step 7 is optional).
 
 Do these in order. Budget ~30–60 min, most of it building the two venvs.
 
@@ -22,8 +26,9 @@ Two things Claude **cannot** do for you — they're manual on purpose:
    env-var check in step 6. **Never commit these or paste their values into any
    tracked file** — the tokens grant write access to the production database and
    blob storage, and git history is permanent.
-2. **The Cloudflare tunnel credentials** (step 7) — also copied by hand, or a
-   fresh tunnel created interactively.
+2. **The Cloudflare tunnel** (step 7) is **optional and usually unnecessary** —
+   the pipeline runs entirely through Turso. Skip it unless you specifically
+   want direct HTTP access to the FastAPI server.
 
 Everything else — system deps, building the venvs, registering models, the
 smoke test, the LaunchAgent — Claude can run directly.
@@ -49,7 +54,9 @@ brew install python@3.11 ffmpeg cloudflared
 - `python@3.11` — both venvs must be Python **3.11** (the torch/Demucs and
   audio-separator stacks are pinned to it).
 - `ffmpeg` — WAV→MP3 encoding for stem uploads.
-- `cloudflared` — the tunnel that exposes the worker to Vercel.
+- `cloudflared` — **optional**, only for the tunnel in step 7. The pipeline
+  doesn't need it; skip if you're not exposing the FastAPI server. Drop it from
+  the `brew install` line above if you don't want it.
 - `rsync` and `curl` ship with macOS.
 
 ## 2. Clone the repo
@@ -149,47 +156,27 @@ curl -s http://localhost:8000/docs | head    # FastAPI Swagger HTML
 Watch the log for the queue poller starting and (if warmup is on) models
 loading. `Ctrl-C` to stop when it looks healthy.
 
-## 7. Re-provision the Cloudflare tunnel
+## 7. Cloudflare tunnel — OPTIONAL, not required
 
-The Vercel app reaches the worker at `MAC_API_URL`. To avoid changing that env
-var on Vercel, **reuse the same tunnel + hostname**. See
-[`TUNNEL_SETUP.md`](TUNNEL_SETUP.md) for the original setup.
+**Skip this section unless you have a specific reason to expose the FastAPI
+server over the internet.** The import pipeline does not use it: the worker
+polls Turso for jobs and pushes results to Turso + Vercel Blob, and the web app
+reads worker status/commands from Turso too. Nothing on Vercel calls the Mac
+directly — there is no `MAC_API_URL` in the worker's env, and there was no
+running tunnel or stored credentials on the previous Mac. `:8000` is
+effectively local-only (health check / Swagger `/docs`).
 
-**Option A — reuse the existing tunnel (recommended):** copy the credentials
-from the old Mac so DNS and `MAC_API_URL` stay valid:
+The vestigial [`TUNNEL_SETUP.md`](TUNNEL_SETUP.md) and
+[`cloudflare-tunnel/config.yml`](cloudflare-tunnel/config.yml) remain for
+reference. If you ever *do* want direct HTTP access, create a fresh tunnel:
 
-```bash
-# On the OLD Mac:  ~/.cloudflared/  holds  cert.pem  and  <TUNNEL_ID>.json
-# Copy both to the NEW Mac:
-mkdir -p ~/.cloudflared
-# scp/AirDrop cert.pem and <TUNNEL_ID>.json into ~/.cloudflared/
-```
-
-Then edit [`cloudflare-tunnel/config.yml`](cloudflare-tunnel/config.yml):
-- `tunnel:` → your `<TUNNEL_ID>`
-- `credentials-file:` → `/Users/<your-username>/.cloudflared/<TUNNEL_ID>.json`
-- `hostname:` → your real `mojo-api.<yourdomain>` (must match Vercel's
-  `MAC_API_URL`)
-
-**Option B — new tunnel:** if you can't copy credentials, create a fresh one
-and re-point DNS (this changes nothing on Vercel if you keep the same
-hostname):
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create mojo-mac
 cloudflared tunnel route dns mojo-mac mojo-api.<yourdomain>
-```
-Then fill in `config.yml` as above.
-
-Run the tunnel (with the worker up on `:8000`):
-```bash
+# fill in <TUNNEL_ID>, credentials-file path and hostname in config.yml, then:
 cloudflared tunnel --config cloudflare-tunnel/config.yml run mojo-mac
 curl https://mojo-api.<yourdomain>/docs    # should return Swagger HTML
-```
-
-Keep it running in the background as a login service:
-```bash
-sudo cloudflared service install
 ```
 
 ## 8. Install the worker LaunchAgent
@@ -219,16 +206,17 @@ Re-run the installer after any code change to sync the runtime copy.
 ## 9. End-to-end verification
 
 1. **Worker up:** `curl -s http://localhost:8000/docs | head` returns HTML.
-2. **Tunnel up:** `curl -s https://mojo-api.<yourdomain>/docs | head` returns
-   the same from the public URL.
-3. **Full pipeline:** open the app, import a short YouTube song, and watch it
-   go `queued → downloading → separating → … → ready`. Confirm the worker log
-   shows it claiming the job and the finished song plays with a guitar stem,
-   chords, tabs and lyrics.
-4. **Auto-start:** reboot (or `launchctl kickstart -k gui/$(id -u)/com.mrmojorising.worker`)
+2. **Full pipeline (the real test):** open the app, import a short YouTube song,
+   and watch it go `queued → downloading → separating → … → ready`. Confirm the
+   worker log shows it claiming the job and the finished song plays with a
+   guitar stem, chords, tabs and lyrics. This exercises the whole Turso ⇄ Blob
+   loop end to end — no tunnel involved.
+3. **Auto-start:** reboot (or `launchctl kickstart -k gui/$(id -u)/com.mrmojorising.worker`)
    and confirm the worker comes back on its own.
 
-Once verified, you can decommission the old Mac's LaunchAgent and tunnel.
+Once verified, **decommission the old Mac** so two workers don't both claim
+jobs from the queue: `bash scripts/uninstall-worker-launch-agent.sh` on the old
+machine (and stop any tunnel if you were running one).
 
 ## Troubleshooting
 
@@ -246,11 +234,15 @@ Once verified, you can decommission the old Mac's LaunchAgent and tunnel.
 - **Tabs never appear** — `venv-sep` must have `basic-pitch` (it's in
   `requirements-separator.txt`); check `BASIC_PITCH_BIN` points at
   `./venv-sep/bin/basic-pitch`. Non-fatal.
-- **Vercel can't reach the worker** — the tunnel isn't running, `config.yml`
-  hostname doesn't match Vercel's `MAC_API_URL`, or the tunnel credentials JSON
-  wasn't copied. `curl` the public `/docs` to isolate.
-- **`cloudflared` won't start** — stale `~/.cloudflared/<TUNNEL_ID>.json`;
-  copy the real one from the old Mac or create a new tunnel (step 7, Option B).
+- **Imports stay `queued`, never picked up** — the worker isn't running or
+  can't reach Turso. Check `launchctl print gui/$(id -u)/com.mrmojorising.worker`
+  and the logs; confirm `TURSO_*` values are correct. (This is a Turso
+  connectivity issue, *not* a tunnel issue — the tunnel plays no part here.)
+- **Jobs get claimed twice / worker status flaps** — two workers are polling
+  the same queue. Make sure the old Mac's LaunchAgent is uninstalled after you
+  cut over.
+- **`cloudflared` won't start** (only if you opted into the tunnel) — create a
+  fresh tunnel per step 7; there were no stored credentials to reuse.
 - **LaunchAgent runs old code** — the runtime is an rsync'd copy; re-run
   `scripts/install-worker-launch-agent.sh` to sync after edits.
 - **pip resolver conflicts** — never install both stacks into one venv; `venv`
