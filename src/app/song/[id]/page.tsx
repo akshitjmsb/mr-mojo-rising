@@ -17,6 +17,8 @@ import type { DownloadStemKey } from "./_components/DownloadPanel";
 import Scrubber from "./_components/Scrubber";
 import TransportControls from "./_components/TransportControls";
 import SpeedPresets from "./_components/SpeedPresets";
+import PhraseTrainer from "./_components/PhraseTrainer";
+import { useCountIn } from "./_hooks/useCountIn";
 import { useMetronome } from "./_hooks/useMetronome";
 
 // Heavy or interaction-on-demand panels — split out of the initial bundle.
@@ -31,6 +33,15 @@ const TabPanel = dynamic(() => import("./_components/TabPanel"));
 const SectionList = dynamic(() => import("./_components/SectionList"));
 
 const SEEK_STEP_SECONDS = 10;
+const TRAINER_PREFS_KEY = "mr-mojo:phrase-trainer:v1";
+const REPETITIONS_PER_STEP = 3;
+const SPEED_STEP = 0.05;
+const MAX_TRAINER_SPEED = 1;
+
+type PracticeRange = {
+  start: number;
+  end: number;
+};
 
 export default function SongPlayerPage() {
   const { id: songId } = useParams<{ id: string }>();
@@ -51,9 +62,17 @@ export default function SongPlayerPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [metronomeOn, setMetronomeOn] = useState(false);
+  const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(null);
+  const [completedLoops, setCompletedLoops] = useState(0);
+  const [countInEnabled, setCountInEnabled] = useState(true);
+  const [autoRampEnabled, setAutoRampEnabled] = useState(true);
+  const [bestPracticeSpeed, setBestPracticeSpeed] = useState(0);
+  const [trainerPrefsLoaded, setTrainerPrefsLoaded] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
+  const completedLoopsRef = useRef(0);
+  const countInVolumeRef = useRef<number | null>(null);
 
   // Fetch the full song bundle once, then use the lightweight status endpoint
   // while processing. Refresh the large chord/tab payload only when a stage
@@ -78,6 +97,12 @@ export default function SongPlayerPage() {
         setTabNotes(data.tab_notes || []);
         if (data.sections?.length > 0) {
           setActiveSection((current) => current ?? data.sections[0]);
+          setPracticeRange((current) =>
+            current ?? {
+              start: data.sections[0].start_time,
+              end: data.sections[0].end_time,
+            },
+          );
         }
         return (data.song?.status as string | undefined) ?? null;
       } finally {
@@ -136,6 +161,67 @@ export default function SongPlayerPage() {
     };
   }, [songId]);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TRAINER_PREFS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          countInEnabled?: boolean;
+          autoRampEnabled?: boolean;
+        };
+        if (typeof parsed.countInEnabled === "boolean") {
+          setCountInEnabled(parsed.countInEnabled);
+        }
+        if (typeof parsed.autoRampEnabled === "boolean") {
+          setAutoRampEnabled(parsed.autoRampEnabled);
+        }
+      }
+
+      const savedProgress = localStorage.getItem(
+        `mr-mojo:phrase-progress:v1:${songId}`,
+      );
+      if (savedProgress) {
+        const parsed = JSON.parse(savedProgress) as {
+          bestPracticeSpeed?: number;
+        };
+        if (
+          typeof parsed.bestPracticeSpeed === "number" &&
+          Number.isFinite(parsed.bestPracticeSpeed)
+        ) {
+          setBestPracticeSpeed(parsed.bestPracticeSpeed);
+        }
+      }
+    } catch {
+      // Storage can be unavailable; the trainer still works for this session.
+    } finally {
+      setTrainerPrefsLoaded(true);
+    }
+  }, [songId]);
+
+  useEffect(() => {
+    if (!trainerPrefsLoaded) return;
+    try {
+      localStorage.setItem(
+        TRAINER_PREFS_KEY,
+        JSON.stringify({ countInEnabled, autoRampEnabled }),
+      );
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [autoRampEnabled, countInEnabled, trainerPrefsLoaded]);
+
+  useEffect(() => {
+    if (!trainerPrefsLoaded || bestPracticeSpeed <= 0) return;
+    try {
+      localStorage.setItem(
+        `mr-mojo:phrase-progress:v1:${songId}`,
+        JSON.stringify({ bestPracticeSpeed }),
+      );
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [bestPracticeSpeed, songId, trainerPrefsLoaded]);
+
   const audioUrl =
     stemMode === "guitar"
       ? stems?.guitar_url
@@ -151,6 +237,39 @@ export default function SongPlayerPage() {
     time: 0,
     playing: false,
   });
+
+  const finishCountIn = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = practiceRange?.start ?? activeSection?.start_time ?? 0;
+    if (countInVolumeRef.current !== null) {
+      audio.volume = countInVolumeRef.current;
+      countInVolumeRef.current = null;
+    }
+    void audio.play().then(
+      () => setIsPlaying(true),
+      () => setIsPlaying(false),
+    );
+  }, [activeSection, practiceRange]);
+
+  const {
+    beat: countInBeat,
+    isCountingIn,
+    start: startCountIn,
+    cancel: cancelCountIn,
+  } = useCountIn({ bpm: song?.bpm, speed, onComplete: finishCountIn });
+
+  const cancelCountInPlayback = useCallback(() => {
+    cancelCountIn();
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    if (countInVolumeRef.current !== null) {
+      audio.volume = countInVolumeRef.current;
+      countInVolumeRef.current = null;
+    }
+    setIsPlaying(false);
+  }, [cancelCountIn]);
 
   // Wire up the audio element when the source changes.
   useEffect(() => {
@@ -244,21 +363,58 @@ export default function SongPlayerPage() {
   const rewind = useCallback(() => seekBy(-SEEK_STEP_SECONDS), [seekBy]);
   const forward = useCallback(() => seekBy(SEEK_STEP_SECONDS), [seekBy]);
 
-  // Drive currentTime + section sync + section looping from a single rAF loop.
+  const loopStart =
+    practiceRange?.start ?? activeSection?.start_time ?? 0;
+  const loopEnd =
+    practiceRange?.end ?? activeSection?.end_time ?? duration;
+
+  const resetLoopProgress = useCallback(() => {
+    completedLoopsRef.current = 0;
+    setCompletedLoops(0);
+  }, []);
+
+  // Drive currentTime, section sync, phrase looping and automatic speed
+  // progression from a single animation-frame loop.
   const updateTime = useCallback(() => {
     if (!audioRef.current) return;
     const audio = audioRef.current;
     const now = audio.currentTime;
     setCurrentTime(now);
-    const section = syncActiveSectionWithTime(now);
+    syncActiveSectionWithTime(now);
 
-    if (section && isLooping && now >= section.end_time) {
-      audio.currentTime = section.start_time;
-      setCurrentTime(section.start_time);
+    if (isLooping && loopEnd > loopStart && now >= loopEnd) {
+      audio.currentTime = loopStart;
+      setCurrentTime(loopStart);
+
+      const nextLoopCount = completedLoopsRef.current + 1;
+      completedLoopsRef.current = nextLoopCount;
+      setCompletedLoops(nextLoopCount);
+      setBestPracticeSpeed((current) => Math.max(current, speed));
+
+      if (
+        autoRampEnabled &&
+        nextLoopCount % REPETITIONS_PER_STEP === 0 &&
+        speed < MAX_TRAINER_SPEED
+      ) {
+        setSpeed((current) =>
+          Math.min(
+            MAX_TRAINER_SPEED,
+            Math.round((current + SPEED_STEP) * 100) / 100,
+          ),
+        );
+      }
     }
 
     if (isPlaying) animFrameRef.current = requestAnimationFrame(updateTime);
-  }, [isPlaying, isLooping, syncActiveSectionWithTime]);
+  }, [
+    autoRampEnabled,
+    isPlaying,
+    isLooping,
+    loopEnd,
+    loopStart,
+    speed,
+    syncActiveSectionWithTime,
+  ]);
 
   useEffect(() => {
     if (isPlaying) animFrameRef.current = requestAnimationFrame(updateTime);
@@ -266,19 +422,98 @@ export default function SongPlayerPage() {
   }, [isPlaying, updateTime]);
 
   const togglePlay = useCallback(() => {
-    if (!audioRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isCountingIn) {
+      cancelCountInPlayback();
+      return;
+    }
     if (isPlaying) {
-      audioRef.current.pause();
+      audio.pause();
       setIsPlaying(false);
       setMetronomeOn(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      if (currentTime < loopStart || currentTime >= loopEnd) {
+        audio.currentTime = loopStart;
+        setCurrentTime(loopStart);
+      }
+
+      if (countInEnabled && song?.bpm) {
+        countInVolumeRef.current = audio.volume;
+        audio.volume = 0;
+        audio.currentTime = loopStart;
+        void audio.play().catch(() => {
+          cancelCountInPlayback();
+        });
+        startCountIn();
+      } else {
+        void audio.play().then(
+          () => setIsPlaying(true),
+          () => setIsPlaying(false),
+        );
+      }
     }
-  }, [isPlaying]);
+  }, [
+    cancelCountInPlayback,
+    countInEnabled,
+    currentTime,
+    isCountingIn,
+    isPlaying,
+    loopEnd,
+    loopStart,
+    song?.bpm,
+    startCountIn,
+  ]);
+
+  function snapToBeat(time: number) {
+    if (!song?.bpm) return time;
+    const beatDuration = 60 / song.bpm;
+    return Math.round(time / beatDuration) * beatDuration;
+  }
+
+  function handleSetLoopStart() {
+    const minimumPhrase = song?.bpm ? 60 / song.bpm : 0.5;
+    const start = Math.max(0, snapToBeat(currentTime));
+    if (start > loopEnd - minimumPhrase) return;
+    setPracticeRange({ start, end: loopEnd });
+    resetLoopProgress();
+  }
+
+  function handleSetLoopEnd() {
+    const minimumPhrase = song?.bpm ? 60 / song.bpm : 0.5;
+    const end = Math.min(
+      duration || Number.POSITIVE_INFINITY,
+      snapToBeat(currentTime),
+    );
+    if (end < loopStart + minimumPhrase) return;
+    setPracticeRange({ start: loopStart, end });
+    resetLoopProgress();
+  }
+
+  function handleResetPracticeRange() {
+    if (!activeSection) return;
+    setPracticeRange({
+      start: activeSection.start_time,
+      end: activeSection.end_time,
+    });
+    resetLoopProgress();
+  }
+
+  function handleSpeedChange(nextSpeed: number) {
+    setSpeed(nextSpeed);
+    resetLoopProgress();
+  }
+
+  function handleStemModeChange(nextMode: StemMode) {
+    if (isCountingIn) cancelCountInPlayback();
+    setStemMode(nextMode);
+  }
 
   function handleSelectSection(section: Section) {
+    if (isCountingIn) cancelCountInPlayback();
     setActiveSection(section);
+    setPracticeRange({ start: section.start_time, end: section.end_time });
+    resetLoopProgress();
     if (audioRef.current) {
       audioRef.current.currentTime = section.start_time;
       setCurrentTime(section.start_time);
@@ -337,7 +572,7 @@ export default function SongPlayerPage() {
           Preview playing · refining high-quality stems
         </div>
       )}
-      <StemSelector value={stemMode} onChange={setStemMode} />
+      <StemSelector value={stemMode} onChange={handleStemModeChange} />
       <DownloadPanel
         songId={songId}
         stems={stems}
@@ -361,15 +596,48 @@ export default function SongPlayerPage() {
         metronomeOn={metronomeOn}
         bpm={song.bpm}
         speed={speed}
+        countInBeat={countInBeat}
         togglePlay={togglePlay}
-        toggleLoop={() => setIsLooping((v) => !v)}
+        toggleLoop={() => {
+          setIsLooping((value) => !value);
+          resetLoopProgress();
+        }}
         toggleMetronome={() => setMetronomeOn((v) => !v)}
         rewind={rewind}
         forward={forward}
         seekStepSeconds={SEEK_STEP_SECONDS}
       />
-      <SpeedPresets value={speed} onChange={setSpeed} />
-      <TabPanel notes={tabNotes} currentTime={currentTime} seekTo={seekTo} />
+      <SpeedPresets value={speed} onChange={handleSpeedChange} />
+      {tabNotes.length > 0 && loopEnd > loopStart && (
+        <PhraseTrainer
+          loopStart={loopStart}
+          loopEnd={loopEnd}
+          bpm={song.bpm}
+          speed={speed}
+          completedLoops={completedLoops}
+          repetitionsPerStep={REPETITIONS_PER_STEP}
+          bestPracticeSpeed={bestPracticeSpeed}
+          countInEnabled={countInEnabled}
+          autoRampEnabled={autoRampEnabled}
+          onSetStart={handleSetLoopStart}
+          onSetEnd={handleSetLoopEnd}
+          onResetRange={handleResetPracticeRange}
+          onToggleCountIn={() => {
+            if (isCountingIn) cancelCountInPlayback();
+            setCountInEnabled((value) => !value);
+          }}
+          onToggleAutoRamp={() => setAutoRampEnabled((value) => !value)}
+        />
+      )}
+      <TabPanel
+        notes={tabNotes}
+        currentTime={currentTime}
+        duration={duration}
+        bpm={song.bpm}
+        loopStart={loopStart}
+        loopEnd={loopEnd}
+        seekTo={seekTo}
+      />
       <ChordLyricsPanel
         chords={chords}
         lyrics={lyrics}

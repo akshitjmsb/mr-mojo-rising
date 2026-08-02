@@ -6,6 +6,7 @@ interface Props {
   metronomeOn: boolean;
   bpm: number | null;
   speed: number;
+  countInBeat: number | null;
   togglePlay: () => void;
   toggleLoop: () => void;
   toggleMetronome: () => void;
@@ -20,6 +21,7 @@ export default function TransportControls({
   metronomeOn,
   bpm,
   speed,
+  countInBeat,
   togglePlay,
   toggleLoop,
   toggleMetronome,
@@ -103,11 +105,15 @@ export default function TransportControls({
 
       <button
         onClick={togglePlay}
-        aria-label={isPlaying ? "Pause" : "Play"}
+        aria-label={countInBeat ? "Cancel count-in" : isPlaying ? "Pause" : "Play"}
         className="relative flex h-[58px] w-[58px] cursor-pointer items-center justify-center rounded-full border-[1.5px] border-gold bg-transparent text-gold"
       >
         <div className="absolute inset-1 rounded-full bg-gold/10" />
-        {isPlaying ? (
+        {countInBeat ? (
+          <span className="relative z-10 font-playfair text-[24px] italic">
+            {countInBeat}
+          </span>
+        ) : isPlaying ? (
           <svg
             width="18"
             height="18"
