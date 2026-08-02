@@ -76,6 +76,18 @@ export async function DELETE(
     id,
   ]);
 
+  // Delete the database row first. Its cascading job deletion causes the Mac
+  // worker to release the lease and terminate any expensive subprocess.
+  try {
+    await execute(`DELETE FROM songs WHERE id = ?`, [id]);
+  } catch (err) {
+    console.error("Failed to delete song", err);
+    return NextResponse.json(
+      { error: "Failed to delete song" },
+      { status: 500 },
+    );
+  }
+
   if (stems && process.env.BLOB_READ_WRITE_TOKEN) {
     const urls = [
       stems.original_url,
@@ -92,16 +104,6 @@ export async function DELETE(
         console.error("Failed to delete blob files", err);
       }
     }
-  }
-
-  try {
-    await execute(`DELETE FROM songs WHERE id = ?`, [id]);
-  } catch (err) {
-    console.error("Failed to delete song", err);
-    return NextResponse.json(
-      { error: "Failed to delete song" },
-      { status: 500 },
-    );
   }
 
   return NextResponse.json({ success: true, id });

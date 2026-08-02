@@ -31,6 +31,7 @@ from chord_reanalyze import (
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
 )
+from pipeline_cache import PipelineCheckpoint, source_cache_dir, valid_wav
 from tab_transcribe import (
     TAB_TIMEOUT_SECONDS,
     transcribe_guitar_stem,
@@ -61,8 +62,11 @@ app.add_middleware(
 API_SECRET = os.environ.get("API_SECRET", "dev-secret")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/tmp/mojo-stems"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v2-vocal-first")
 
 VENV_PYTHON = str(Path(__file__).resolve().parent / "venv" / "bin" / "python")
+_VENV_YTDLP = Path(VENV_PYTHON).with_name("yt-dlp")
+YTDLP_BIN = os.environ.get("YTDLP_BIN", str(_VENV_YTDLP) if _VENV_YTDLP.exists() else "yt-dlp")
 WORKER_ID = os.environ.get("WORKER_ID", f"mac-worker-{os.getpid()}")
 WORKER_CONCURRENCY = max(1, int(os.environ.get("WORKER_CONCURRENCY", "1")))
 QUEUE_POLL_INTERVAL_SECONDS = float(os.environ.get("QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
@@ -110,6 +114,12 @@ SEPARATOR_MODEL_DIR = os.environ.get(
     "SEPARATOR_MODEL_DIR",
     str(Path.home() / "Library" / "Application Support" / "MrMojoRising" / "separator-models"),
 )
+SEPARATOR_USE_AUTOCAST = os.environ.get("SEPARATOR_USE_AUTOCAST", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 # Tab transcription: basic-pitch on the guitar stem → tab_notes rows.
 # Non-fatal — a song without tabs still completes. Thresholds and the CLI
 # path live in tab_transcribe.py (BASIC_PITCH_BIN, TAB_* env vars).
@@ -137,6 +147,10 @@ WORKER_TASKS: list[asyncio.Task] = []
 REQUEUE_TASK: asyncio.Task | None = None
 WORKER_STATUS_TASK: asyncio.Task | None = None
 WORKER_COMMAND_TASK: asyncio.Task | None = None
+
+
+class JobCancelled(RuntimeError):
+    """Raised when a running job is deleted or loses its queue lease."""
 
 
 def stage_start(*, stage: str, song_id: str, job_id: str) -> float:
@@ -201,6 +215,8 @@ async def startup_workers():
         guitar_refine_enabled=GUITAR_REFINE_ENABLED,
         guitar_refine_model=GUITAR_REFINE_MODEL,
         separator_bin_exists=Path(SEPARATOR_BIN).exists(),
+        separator_use_autocast=SEPARATOR_USE_AUTOCAST,
+        pipeline_version=PIPELINE_VERSION,
         download_timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
         ffmpeg_timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
         demucs_timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
@@ -465,6 +481,7 @@ async def process_claimed_job(worker_name: str, job: dict):
     )
 
     heartbeat_task = asyncio.create_task(heartbeat_loop(job_id, worker_name))
+    pipeline_task: asyncio.Task | None = None
     await asyncio.to_thread(
         update_worker_status,
         WORKER_ID,
@@ -475,10 +492,26 @@ async def process_claimed_job(worker_name: str, job: dict):
 
     try:
         update_song(song_id, status="processing", processing_stage="download", last_error=None)
-        await asyncio.wait_for(
-            process_pipeline(job_id, song_id, youtube_url),
-            timeout=JOB_TIMEOUT_SECONDS,
+        pipeline_task = asyncio.create_task(
+            asyncio.wait_for(
+                process_pipeline(job_id, song_id, youtube_url),
+                timeout=JOB_TIMEOUT_SECONDS,
+            )
         )
+        done, _pending = await asyncio.wait(
+            {pipeline_task, heartbeat_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if heartbeat_task in done:
+            pipeline_task.cancel()
+            await asyncio.gather(pipeline_task, return_exceptions=True)
+            heartbeat_error = heartbeat_task.exception()
+            if heartbeat_error:
+                raise heartbeat_error
+            raise JobCancelled(f"Job {job_id} lost its processing lease")
+
+        await pipeline_task
+        assert_job_active(db, job_id, song_id)
 
         db.execute(
             """UPDATE processing_jobs
@@ -508,6 +541,14 @@ async def process_claimed_job(worker_name: str, job: dict):
             job_id=job_id,
             song_id=song_id,
             duration_ms=duration_ms,
+        )
+    except JobCancelled as exc:
+        log_event(
+            "job.cancelled",
+            worker_id=worker_name,
+            job_id=job_id,
+            song_id=song_id,
+            reason=str(exc),
         )
     except Exception as exc:
         error_text = str(exc)
@@ -576,6 +617,9 @@ async def process_claimed_job(worker_name: str, job: dict):
             traceback=traceback.format_exc(),
         )
     finally:
+        if pipeline_task and not pipeline_task.done():
+            pipeline_task.cancel()
+            await asyncio.gather(pipeline_task, return_exceptions=True)
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
         await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
@@ -585,13 +629,18 @@ async def heartbeat_loop(job_id: str, worker_name: str):
     db = get_turso_client()
     while True:
         try:
-            db.execute(
+            rows = db.execute(
                 """UPDATE processing_jobs
                    SET heartbeat_at = unixepoch(),
                        updated_at = unixepoch()
-                   WHERE id = ? AND status = 'running' AND locked_by = ?""",
+                   WHERE id = ? AND status = 'running' AND locked_by = ?
+                   RETURNING id""",
                 [job_id, worker_name],
             )
+            if not rows:
+                raise JobCancelled(f"Job {job_id} was deleted or superseded")
+        except JobCancelled:
+            raise
         except Exception as exc:
             log_event("job.heartbeat_error", job_id=job_id, worker_id=worker_name, error=str(exc))
 
@@ -850,12 +899,38 @@ async def refine_stem(
     model: str,
     stem_label: str,
     target_filename: str,
-):
-    """Replace one Demucs stem with a Roformer separation of the full mix.
+    checkpoint: PipelineCheckpoint,
+    checkpoint_stage: str,
+    single_stem: bool = False,
+    required_labels: tuple[str, ...] = (),
+) -> Path:
+    """Replace one Demucs stem with a checkpointed Roformer separation.
 
     Best-effort: any failure leaves the Demucs stem in place.
     """
     refine_dir = work_dir / f"refined-{stem_label.lower()}"
+    cached_outputs = sorted(refine_dir.glob(f"*({stem_label})*.wav"))
+    cached_required = all(
+        any(valid_wav(path) for path in refine_dir.glob(f"*({label})*.wav"))
+        for label in required_labels
+    )
+    if (
+        checkpoint.compute_done(checkpoint_stage)
+        and cached_outputs
+        and valid_wav(cached_outputs[0])
+        and cached_required
+    ):
+        shutil.copyfile(cached_outputs[0], stems_dir / target_filename)
+        log_event(
+            "pipeline.checkpoint_reused",
+            song_id=song_id,
+            job_id=job_id,
+            stage=checkpoint_stage,
+        )
+        return cached_outputs[0]
+
+    if refine_dir.exists():
+        shutil.rmtree(refine_dir)
     refine_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         SEPARATOR_BIN,
@@ -869,6 +944,10 @@ async def refine_stem(
         "--model_file_dir",
         SEPARATOR_MODEL_DIR,
     ]
+    if SEPARATOR_USE_AUTOCAST:
+        cmd.append("--use_autocast")
+    if single_stem:
+        cmd.extend(["--single_stem", stem_label])
     await run_cmd(
         cmd,
         f"{stem_label.lower()} refine (roformer)",
@@ -877,14 +956,20 @@ async def refine_stem(
         timeout_seconds=VOCAL_REFINE_TIMEOUT_SECONDS,
     )
     outputs = sorted(refine_dir.glob(f"*({stem_label})*.wav"))
-    if not outputs:
+    if not outputs or not valid_wav(outputs[0]):
         raise RuntimeError(f"no {stem_label} output in {refine_dir}")
+    for required_label in required_labels:
+        required_outputs = sorted(refine_dir.glob(f"*({required_label})*.wav"))
+        if not required_outputs or not valid_wav(required_outputs[0]):
+            raise RuntimeError(f"no {required_label} output in {refine_dir}")
     shutil.copyfile(outputs[0], stems_dir / target_filename)
+    checkpoint.mark_compute(checkpoint_stage)
+    return outputs[0]
 
 
 def compress_wav_to_mp3(wav_path: Path) -> Path:
     mp3_path = wav_path.with_suffix(".mp3")
-    if mp3_path.exists():
+    if mp3_path.exists() and mp3_path.stat().st_mtime_ns >= wav_path.stat().st_mtime_ns:
         return mp3_path
     subprocess.run(
         # V0 (~245 kbps VBR) — isolated stems expose encoding artifacts far
@@ -907,70 +992,161 @@ def upload_file_sync(local_path: Path, blob_pathname: str) -> str:
     return blob_upload_file(local_path, blob_pathname, content_type)
 
 
-async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
-    db = get_turso_client()
-    work_dir = OUTPUT_DIR / song_id
-    work_dir.mkdir(parents=True, exist_ok=True)
+def find_demucs_stems(demucs_out: Path) -> Path | None:
+    for directory in sorted(demucs_out.rglob("*")):
+        if directory.is_dir() and all(
+            valid_wav(directory / f"{stem}.wav")
+            for stem in ("vocals", "other", "drums", "bass")
+        ):
+            return directory
+    return None
 
-    # Stage: download
-    update_song(song_id, status="processing", processing_stage="download", last_error=None)
-    download_started = stage_start(stage="download", song_id=song_id, job_id=job_id)
-    download_cmd = [
-        "yt-dlp",
-        "--remote-components",
-        "ejs:github",
-        "-x",
-        "--audio-format",
-        "wav",
-        "--audio-quality",
-        "0",
-        "--write-info-json",
-        "-o",
-        str(work_dir / "original.%(ext)s"),
-        "--no-playlist",
-        youtube_url,
-    ]
-    if YTDLP_COOKIES_FROM_BROWSER:
-        download_cmd[1:1] = ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
 
-    await run_cmd(
-        download_cmd,
-        "yt-dlp download",
-        song_id,
-        job_id,
-        timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
+def assert_job_active(db, job_id: str, song_id: str) -> None:
+    row = db.query_one(
+        """SELECT pj.id
+           FROM processing_jobs pj
+           JOIN songs s ON s.id = pj.song_id
+           WHERE pj.id = ? AND pj.song_id = ? AND pj.status = 'running'""",
+        [job_id, song_id],
+    )
+    if not row:
+        raise JobCancelled(f"Job {job_id} was deleted or superseded")
+
+
+async def upload_targets(
+    targets: list[tuple[str, Path, str]],
+    *,
+    song_id: str,
+    job_id: str,
+    label: str,
+) -> dict[str, str]:
+    async def upload_one(target: tuple[str, Path, str]) -> tuple[str, str]:
+        key, local_path, blob_pathname = target
+        url = await asyncio.to_thread(upload_file_sync, local_path, blob_pathname)
+        return key, url
+
+    uploaded_pairs = await run_stage_with_timeout(
+        asyncio.gather(*(upload_one(target) for target in targets)),
+        timeout_seconds=UPLOAD_TIMEOUT_SECONDS,
+        label=label,
+        song_id=song_id,
+        job_id=job_id,
+    )
+    return {key: url for key, url in uploaded_pairs}
+
+
+def upsert_stem_urls(db, song_id: str, urls: dict[str, str]) -> None:
+    allowed = {"original_url", "guitar_url", "vocals_url", "drums_url", "bass_url"}
+    if not urls or not set(urls).issubset(allowed):
+        raise ValueError("Invalid stem URL update")
+
+    if not db.query_one("SELECT id FROM songs WHERE id = ?", [song_id]):
+        raise JobCancelled(f"Song {song_id} was deleted during processing")
+
+    existing = db.query_one("SELECT id FROM stems WHERE song_id = ?", [song_id])
+    if existing:
+        columns = sorted(urls)
+        assignments = ", ".join(f"{column} = ?" for column in columns)
+        db.execute(
+            f"UPDATE stems SET {assignments} WHERE song_id = ?",
+            [*(urls[column] for column in columns), song_id],
+        )
+        return
+
+    db.execute(
+        """INSERT INTO stems
+           (id, song_id, original_url, guitar_url, vocals_url, drums_url, bass_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [
+            new_id(),
+            song_id,
+            urls.get("original_url"),
+            urls.get("guitar_url"),
+            urls.get("vocals_url"),
+            urls.get("drums_url"),
+            urls.get("bass_url"),
+        ],
     )
 
-    audio_path = work_dir / "original.wav"
-    if not audio_path.exists():
-        for ext in ["webm", "m4a", "mp3", "opus", "ogg"]:
-            candidate = work_dir / f"original.{ext}"
-            if candidate.exists():
-                await run_cmd(
-                    [
-                        "ffmpeg",
-                        "-i",
-                        str(candidate),
-                        "-ar",
-                        "44100",
-                        "-ac",
-                        "2",
-                        str(audio_path),
-                        "-y",
-                    ],
-                    "ffmpeg convert",
-                    song_id,
-                    job_id,
-                    timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
-                )
-                break
 
-    if not audio_path.exists():
-        raise RuntimeError("No audio file found after download")
+async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
+    db = get_turso_client()
+    work_dir = source_cache_dir(OUTPUT_DIR, youtube_url, PIPELINE_VERSION)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint = PipelineCheckpoint(work_dir, PIPELINE_VERSION)
+    audio_path = work_dir / "original.wav"
+
+    # Stage: download
+    assert_job_active(db, job_id, song_id)
+    update_song(song_id, status="processing", processing_stage="download", last_error=None)
+    download_started = stage_start(stage="download", song_id=song_id, job_id=job_id)
+    if checkpoint.compute_done("download") and valid_wav(audio_path):
+        log_event(
+            "pipeline.checkpoint_reused",
+            song_id=song_id,
+            job_id=job_id,
+            stage="download",
+        )
+    else:
+        download_cmd = [
+            YTDLP_BIN,
+            "--remote-components",
+            "ejs:github",
+            "-x",
+            "--audio-format",
+            "wav",
+            "--audio-quality",
+            "0",
+            "--write-info-json",
+            "--force-overwrites",
+            "-o",
+            str(work_dir / "original.%(ext)s"),
+            "--no-playlist",
+            youtube_url,
+        ]
+        if YTDLP_COOKIES_FROM_BROWSER:
+            download_cmd[1:1] = ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
+
+        await run_cmd(
+            download_cmd,
+            "yt-dlp download",
+            song_id,
+            job_id,
+            timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
+        )
+
+        if not valid_wav(audio_path):
+            for ext in ["webm", "m4a", "mp3", "opus", "ogg"]:
+                candidate = work_dir / f"original.{ext}"
+                if candidate.exists():
+                    await run_cmd(
+                        [
+                            "ffmpeg",
+                            "-i",
+                            str(candidate),
+                            "-ar",
+                            "44100",
+                            "-ac",
+                            "2",
+                            str(audio_path),
+                            "-y",
+                        ],
+                        "ffmpeg convert",
+                        song_id,
+                        job_id,
+                        timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
+                    )
+                    break
+
+        if not valid_wav(audio_path):
+            raise RuntimeError("No valid audio file found after download")
+        checkpoint.mark_compute("download")
 
     title, artist = extract_title_artist(work_dir)
     stage_done(stage="download", song_id=song_id, job_id=job_id, started=download_started)
 
+    assert_job_active(db, job_id, song_id)
     if artist:
         db.execute(
             "UPDATE songs SET title = ?, artist = ?, updated_at = unixepoch() WHERE id = ?",
@@ -986,28 +1162,82 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     update_song(song_id, status="processing", processing_stage="separate", last_error=None)
     separate_started = stage_start(stage="separate", song_id=song_id, job_id=job_id)
     demucs_out = work_dir / "separated"
-    await run_demucs(audio_path=audio_path, demucs_out=demucs_out, song_id=song_id, job_id=job_id)
+    stems_dir = find_demucs_stems(demucs_out)
+    if checkpoint.compute_done("separate") and stems_dir:
+        log_event(
+            "pipeline.checkpoint_reused",
+            song_id=song_id,
+            job_id=job_id,
+            stage="separate",
+        )
+    else:
+        if demucs_out.exists():
+            shutil.rmtree(demucs_out)
+        await run_demucs(
+            audio_path=audio_path,
+            demucs_out=demucs_out,
+            song_id=song_id,
+            job_id=job_id,
+        )
+        stems_dir = find_demucs_stems(demucs_out)
+        if not stems_dir:
+            raise RuntimeError("Demucs did not produce a complete set of stems")
+        checkpoint.mark_compute("separate")
     stage_done(stage="separate", song_id=song_id, job_id=job_id, started=separate_started)
 
-    stems_dir = None
-    for directory in sorted(demucs_out.rglob("*")):
-        if directory.is_dir() and (directory / "vocals.wav").exists():
-            stems_dir = directory
-            break
+    assert stems_dir is not None
+    assert_job_active(db, job_id, song_id)
 
-    # Stage: refine (best-effort second-pass separation per stem)
-    refine_targets = []
-    if VOCAL_REFINE_ENABLED:
-        # vocals.wav feeds vocals_url
-        refine_targets.append((VOCAL_REFINE_MODEL, "Vocals", "vocals.wav"))
-    if GUITAR_REFINE_ENABLED:
-        # other.wav feeds guitar_url (Demucs "other" is the guitar stem)
-        refine_targets.append((GUITAR_REFINE_MODEL, "Guitar", "other.wav"))
+    # Publish Demucs stems immediately so the player is usable while the
+    # high-quality vocal and guitar passes continue in the background.
+    update_song(song_id, status="processing", processing_stage="preview_upload", last_error=None)
+    preview_started = stage_start(stage="preview_upload", song_id=song_id, job_id=job_id)
+    preview_row = db.query_one(
+        """SELECT original_url, guitar_url, vocals_url, drums_url, bass_url
+           FROM stems WHERE song_id = ?""",
+        [song_id],
+    )
+    if checkpoint.upload_done(song_id, "preview") and preview_row and all(preview_row.values()):
+        log_event(
+            "pipeline.checkpoint_reused",
+            song_id=song_id,
+            job_id=job_id,
+            stage="preview_upload",
+        )
+    else:
+        preview_urls = await upload_targets(
+            [
+                ("original_url", audio_path, f"stems/{song_id}/original.wav"),
+                ("guitar_url", stems_dir / "other.wav", f"stems/{song_id}/preview/other.wav"),
+                ("vocals_url", stems_dir / "vocals.wav", f"stems/{song_id}/preview/vocals.wav"),
+                ("drums_url", stems_dir / "drums.wav", f"stems/{song_id}/drums.wav"),
+                ("bass_url", stems_dir / "bass.wav", f"stems/{song_id}/bass.wav"),
+            ],
+            song_id=song_id,
+            job_id=job_id,
+            label="preview upload",
+        )
+        assert_job_active(db, job_id, song_id)
+        upsert_stem_urls(db, song_id, preview_urls)
+        checkpoint.mark_upload(song_id, "preview")
+    stage_done(
+        stage="preview_upload",
+        song_id=song_id,
+        job_id=job_id,
+        started=preview_started,
+    )
 
-    if stems_dir and refine_targets and Path(SEPARATOR_BIN).exists():
+    # Stage: refine. The guitar model consumes the vocal-free instrumental
+    # created by the vocal model, preventing vocals from leaking into Guitar.
+    if (VOCAL_REFINE_ENABLED or GUITAR_REFINE_ENABLED) and Path(SEPARATOR_BIN).exists():
         update_song(song_id, status="processing", processing_stage="refine", last_error=None)
         refine_started = stage_start(stage="refine", song_id=song_id, job_id=job_id)
-        for model, stem_label, target_filename in refine_targets:
+        # When vocal refinement is enabled, Guitar must only see the
+        # vocal-free instrumental. If that prerequisite fails, retain the
+        # Demucs guitar/other preview instead of reintroducing vocal bleed by
+        # running the guitar model against the full mix.
+        guitar_input: Path | None = None if VOCAL_REFINE_ENABLED else audio_path
+        if VOCAL_REFINE_ENABLED:
             try:
                 await refine_stem(
                     audio_path=audio_path,
@@ -1015,84 +1245,93 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     work_dir=work_dir,
                     song_id=song_id,
                     job_id=job_id,
-                    model=model,
-                    stem_label=stem_label,
-                    target_filename=target_filename,
+                    model=VOCAL_REFINE_MODEL,
+                    stem_label="Vocals",
+                    target_filename="vocals.wav",
+                    checkpoint=checkpoint,
+                    checkpoint_stage="vocal_refine",
+                    required_labels=("Instrumental",),
+                )
+                instrumental_outputs = sorted(
+                    (work_dir / "refined-vocals").glob("*(Instrumental)*.wav")
+                )
+                if instrumental_outputs and valid_wav(instrumental_outputs[0]):
+                    guitar_input = instrumental_outputs[0]
+            except Exception as exc:
+                log_event(
+                    "refine.failed_fallback_to_demucs_stem",
+                    song_id=song_id,
+                    job_id=job_id,
+                    stem="Vocals",
+                    error=str(exc),
+                )
+        if GUITAR_REFINE_ENABLED and guitar_input is not None:
+            try:
+                await refine_stem(
+                    audio_path=guitar_input,
+                    stems_dir=stems_dir,
+                    work_dir=work_dir,
+                    song_id=song_id,
+                    job_id=job_id,
+                    model=GUITAR_REFINE_MODEL,
+                    stem_label="Guitar",
+                    target_filename="other.wav",
+                    checkpoint=checkpoint,
+                    checkpoint_stage="guitar_refine",
+                    single_stem=True,
                 )
             except Exception as exc:
                 log_event(
                     "refine.failed_fallback_to_demucs_stem",
                     song_id=song_id,
                     job_id=job_id,
-                    stem=stem_label,
+                    stem="Guitar",
                     error=str(exc),
                 )
+        elif GUITAR_REFINE_ENABLED:
+            log_event(
+                "refine.skipped_missing_vocal_free_input",
+                song_id=song_id,
+                job_id=job_id,
+                stem="Guitar",
+            )
         stage_done(stage="refine", song_id=song_id, job_id=job_id, started=refine_started)
 
-    # Stage: upload (idempotent — Vercel Blob `allowOverwrite` keeps the URL stable).
+    assert_job_active(db, job_id, song_id)
+
+    # Publish only the refined stems. Original, drums and bass were already
+    # uploaded once during preview publication.
     update_song(song_id, status="processing", processing_stage="upload", last_error=None)
     upload_started = stage_start(stage="upload", song_id=song_id, job_id=job_id)
-
-    upload_targets: list[tuple[str, Path, str]] = [
-        ("original_url", audio_path, f"stems/{song_id}/original.wav"),
-    ]
-
-    if stems_dir:
-        stem_map = {
-            "other": "guitar_url",
-            "vocals": "vocals_url",
-            "drums": "drums_url",
-            "bass": "bass_url",
-        }
-        for stem_name, url_key in stem_map.items():
-            stem_file = stems_dir / f"{stem_name}.wav"
-            if stem_file.exists():
-                upload_targets.append((url_key, stem_file, f"stems/{song_id}/{stem_name}.wav"))
-
-    async def upload_one(target: tuple[str, Path, str]) -> tuple[str, str]:
-        key, local_path, blob_pathname = target
-        url = await asyncio.to_thread(upload_file_sync, local_path, blob_pathname)
-        return key, url
-
-    uploaded_pairs = await run_stage_with_timeout(
-        asyncio.gather(*(upload_one(target) for target in upload_targets)),
-        timeout_seconds=UPLOAD_TIMEOUT_SECONDS,
-        label="upload",
-        song_id=song_id,
-        job_id=job_id,
+    final_row = db.query_one(
+        "SELECT guitar_url, vocals_url FROM stems WHERE song_id = ?",
+        [song_id],
     )
-    uploaded_urls = {key: url for key, url in uploaded_pairs}
-
-    existing_stems = db.query_one("SELECT id FROM stems WHERE song_id = ?", [song_id])
-    if existing_stems:
-        db.execute(
-            """UPDATE stems
-               SET original_url = ?, guitar_url = ?, vocals_url = ?, drums_url = ?, bass_url = ?
-               WHERE song_id = ?""",
-            [
-                uploaded_urls.get("original_url"),
-                uploaded_urls.get("guitar_url"),
-                uploaded_urls.get("vocals_url"),
-                uploaded_urls.get("drums_url"),
-                uploaded_urls.get("bass_url"),
-                song_id,
-            ],
+    if (
+        checkpoint.upload_done(song_id, "final")
+        and final_row
+        and all(final_row.values())
+        and all("/preview/" not in str(value) for value in final_row.values())
+    ):
+        log_event(
+            "pipeline.checkpoint_reused",
+            song_id=song_id,
+            job_id=job_id,
+            stage="upload",
         )
     else:
-        db.execute(
-            """INSERT INTO stems
-               (id, song_id, original_url, guitar_url, vocals_url, drums_url, bass_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        final_urls = await upload_targets(
             [
-                new_id(),
-                song_id,
-                uploaded_urls.get("original_url"),
-                uploaded_urls.get("guitar_url"),
-                uploaded_urls.get("vocals_url"),
-                uploaded_urls.get("drums_url"),
-                uploaded_urls.get("bass_url"),
+                ("guitar_url", stems_dir / "other.wav", f"stems/{song_id}/other.wav"),
+                ("vocals_url", stems_dir / "vocals.wav", f"stems/{song_id}/vocals.wav"),
             ],
+            song_id=song_id,
+            job_id=job_id,
+            label="final stem upload",
         )
+        assert_job_active(db, job_id, song_id)
+        upsert_stem_urls(db, song_id, final_urls)
+        checkpoint.mark_upload(song_id, "final")
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
 
     # Stage: transcribe (guitar stem → tab notes). Non-fatal — the song is

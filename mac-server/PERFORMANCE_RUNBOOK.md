@@ -17,6 +17,8 @@ DEMUCS_PYTHON=./venv/bin/python
 DEMUCS_DEVICE=mps
 DEMUCS_JOBS=4
 WORKER_WARMUP_ENABLED=true
+PIPELINE_VERSION=hq-v2-vocal-first
+SEPARATOR_USE_AUTOCAST=false
 # Optional memory guard (only if needed):
 # DEMUCS_SEGMENT=10
 ```
@@ -55,6 +57,15 @@ The report includes:
 - total runtime
 - per-stage durations (if `pipeline.stage_done` logs are available)
 - p50/p95 summary.
+
+The worker caches expensive download, Demucs, vocal-refine and guitar-refine
+artifacts by canonical YouTube URL plus `PIPELINE_VERSION`. Automatic retries
+resume from the last valid checkpoint; repeated imports reuse the same compute
+artifacts and only create song-specific database/blob records.
+
+Keep `SEPARATOR_USE_AUTOCAST=false` for the quality baseline. Test `true` only
+as an A/B benchmark and retain it only if listening checks and stem metrics are
+equivalent across the representative URL set.
 
 ## macOS Runtime Hardening
 - Keep laptop plugged in during benchmark/production runs.

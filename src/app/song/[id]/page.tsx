@@ -55,28 +55,84 @@ export default function SongPlayerPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  // Fetch the full song bundle in one round trip.
+  // Fetch the full song bundle once, then use the lightweight status endpoint
+  // while processing. Refresh the large chord/tab payload only when a stage
+  // transition can have changed the playable stems.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastStage: string | null = null;
+
+    async function fetchBundle() {
       try {
-        const res = await fetch(`/api/songs/${songId}`);
-        if (!res.ok || cancelled) return;
+        const res = await fetch(`/api/songs/${songId}`, { cache: "no-store" });
+        if (!res.ok || cancelled) return null;
         const data = await res.json();
-        if (cancelled) return;
+        if (cancelled) return null;
+        lastStage = data.song?.processing_stage ?? null;
         setSong(data.song);
         setStems(data.stems);
         setSections(data.sections || []);
         setChords(data.chords || []);
         setLyrics(data.lyrics || null);
         setTabNotes(data.tab_notes || []);
-        if (data.sections?.length > 0) setActiveSection(data.sections[0]);
+        if (data.sections?.length > 0) {
+          setActiveSection((current) => current ?? data.sections[0]);
+        }
+        return (data.song?.status as string | undefined) ?? null;
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    }
+
+    async function pollStatus() {
+      let keepPolling = true;
+      try {
+        const res = await fetch(`/api/songs/${songId}/status`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const status = await res.json();
+        if (cancelled) return;
+
+        const stageChanged = status.processing_stage !== lastStage;
+        setSong((current) =>
+          current
+            ? {
+                ...current,
+                status: status.status,
+                processing_stage: status.processing_stage,
+                last_error: status.last_error,
+                updated_at: status.updated_at,
+              }
+            : current,
+        );
+
+        lastStage = status.processing_stage;
+        if (stageChanged || status.status === "ready") {
+          await fetchBundle();
+        }
+
+        if (status.status === "ready" || status.status === "failed") {
+          keepPolling = false;
+        }
+      } finally {
+        if (!cancelled && keepPolling) timer = setTimeout(pollStatus, 3000);
+      }
+    }
+
+    void (async () => {
+      const initialStatus = await fetchBundle();
+      if (
+        !cancelled &&
+        (initialStatus === "queued" || initialStatus === "processing")
+      ) {
+        timer = setTimeout(pollStatus, 3000);
       }
     })();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [songId]);
 
@@ -276,6 +332,11 @@ export default function SongPlayerPage() {
 
   return (
     <main className="flex-1 overflow-hidden">
+      {song.status !== "ready" && (
+        <div className="border-b border-border-darkest px-5 py-2 font-josefin text-[9px] uppercase tracking-[0.14em] text-orange">
+          Preview playing · refining high-quality stems
+        </div>
+      )}
       <StemSelector value={stemMode} onChange={setStemMode} />
       <DownloadPanel
         songId={songId}

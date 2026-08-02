@@ -17,6 +17,7 @@ type Status = {
   queue_position: number | null;
   worker_online_count: number;
   latest_worker_heartbeat_at: number | null;
+  preview_ready: number;
 };
 
 export async function GET(
@@ -32,6 +33,15 @@ export async function GET(
        s.processing_stage,
        s.last_error,
        s.updated_at,
+       EXISTS(
+         SELECT 1 FROM stems st
+         WHERE st.song_id = s.id
+           AND st.original_url IS NOT NULL
+           AND st.guitar_url IS NOT NULL
+           AND st.vocals_url IS NOT NULL
+           AND st.drums_url IS NOT NULL
+           AND st.bass_url IS NOT NULL
+       ) AS preview_ready,
        pj.status AS job_status,
        pj.attempt_count,
        pj.max_attempts,

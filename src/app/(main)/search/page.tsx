@@ -48,6 +48,7 @@ function SearchPageInner() {
     max_attempts?: number | null;
     queue_position?: number | null;
     worker_online_count?: number;
+    preview_ready?: number;
   };
 
   const resolveUrl = useCallback(async (raw: string): Promise<ResolvedLink | null> => {
@@ -122,6 +123,9 @@ function SearchPageInner() {
         const next = (await res.json()) as ImportStatus;
         if (cancelled) return;
         if (next.status === "ready") {
+          importingSongIdRef.current = null;
+          router.push(`/song/${next.id}`);
+        } else if (next.status === "processing" && next.preview_ready) {
           importingSongIdRef.current = null;
           router.push(`/song/${next.id}`);
         } else if (next.status === "failed") {

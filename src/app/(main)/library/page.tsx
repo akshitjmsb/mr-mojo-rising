@@ -7,6 +7,7 @@ import type { Song } from "@/lib/database.types";
 type LibrarySong = Song & {
   worker_online_count?: number;
   latest_worker_heartbeat_at?: number | null;
+  preview_ready?: number;
 };
 
 export default function LibraryPage() {
@@ -19,9 +20,13 @@ export default function LibraryPage() {
   const [error, setError] = useState("");
 
   const fetchSongs = useCallback(async () => {
-    const res = await fetch("/api/songs");
-    const data = await res.json();
-    setSongs(Array.isArray(data) ? (data as LibrarySong[]) : []);
+    try {
+      const res = await fetch("/api/songs");
+      const data = await res.json();
+      setSongs(Array.isArray(data) ? (data as LibrarySong[]) : []);
+    } catch {
+      setError("Failed to refresh library");
+    }
   }, []);
 
   useEffect(() => {
@@ -35,13 +40,28 @@ export default function LibraryPage() {
     };
   }, [fetchSongs]);
 
-  // Poll the song list every 3s for live status updates.
+  const hasActiveSongs = songs.some(
+    (song) => song.status === "queued" || song.status === "processing",
+  );
+
+  // Poll only while work is active, and schedule the next request after the
+  // current one finishes so slow network calls never overlap.
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchSongs();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [fetchSongs]);
+    if (!hasActiveSongs) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll() {
+      await fetchSongs();
+      if (!cancelled) timer = setTimeout(poll, 3000);
+    }
+
+    timer = setTimeout(poll, 3000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchSongs, hasActiveSongs]);
 
   // Reset delete confirmation when tapping outside that song row
   useEffect(() => {
@@ -90,13 +110,8 @@ export default function LibraryPage() {
     setRetryingSongId(song.id);
 
     try {
-      // Delete the failed row so retry doesn't leave a duplicate behind.
-      await fetch(`/api/songs/${song.id}`, { method: "DELETE" });
-
-      const res = await fetch("/api/songs/import", {
+      const res = await fetch(`/api/songs/${song.id}/retry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ youtube_url: song.youtube_url }),
       });
 
       if (!res.ok) {
@@ -132,6 +147,7 @@ export default function LibraryPage() {
       <div>
         {songs.map((song) => {
           const workerOnline = (song.worker_online_count ?? 0) > 0;
+          const playable = song.status === "ready" || Boolean(song.preview_ready);
           return (
           <div
             key={song.id}
@@ -139,12 +155,12 @@ export default function LibraryPage() {
           >
             <button
               onClick={() => {
-                if (song.status === "ready") {
+                if (playable) {
                   router.push(`/song/${song.id}`);
                 }
               }}
               className={`flex w-full items-center gap-3.5 border-none bg-transparent py-4 pl-5 pr-3 text-left transition-colors duration-200 ${
-                song.status === "ready"
+                playable
                   ? "cursor-pointer hover:bg-gold/5"
                   : "cursor-default"
               }`}
@@ -198,7 +214,7 @@ export default function LibraryPage() {
               <div className="shrink-0 text-right">
                 {song.status === "processing" && (
                   <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                    Processing
+                    {song.preview_ready ? "Preview Ready" : "Processing"}
                   </p>
                 )}
                 {song.status === "queued" && (

@@ -8,10 +8,20 @@ export async function GET() {
       Song & {
         worker_online_count: number;
         latest_worker_heartbeat_at: number | null;
+        preview_ready: number;
       }
     >(
       `SELECT
          s.*,
+         EXISTS(
+           SELECT 1 FROM stems st
+           WHERE st.song_id = s.id
+             AND st.original_url IS NOT NULL
+             AND st.guitar_url IS NOT NULL
+             AND st.vocals_url IS NOT NULL
+             AND st.drums_url IS NOT NULL
+             AND st.bass_url IS NOT NULL
+         ) AS preview_ready,
          (
            SELECT COUNT(*)
            FROM worker_status ws

@@ -29,6 +29,7 @@ export default function ImportPage() {
     queue_position?: number | null;
     run_after?: number | null;
     worker_online_count?: number;
+    preview_ready?: number;
   };
 
   // Timer: tick every second while importing
@@ -79,6 +80,14 @@ export default function ImportPage() {
           setFinished(true);
           setNotice("Song ready. Opening player...");
           setTimeout(() => router.push(`/song/${next.id}`), 1500);
+        } else if (next.status === "processing" && next.preview_ready) {
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          importingSongIdRef.current = null;
+          setNotice("Preview ready. High-quality stems will update in the player.");
+          router.push(`/song/${next.id}`);
         } else if (next.status === "failed") {
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
