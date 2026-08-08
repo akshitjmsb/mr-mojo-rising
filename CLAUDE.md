@@ -54,7 +54,8 @@ owner's machine and reaches the same Turso database directly.
    ffmpeg, concurrent upload to Vercel Blob) → **transcribe** (basic-pitch on
    the guitar stem → string/fret Viterbi mapping → `tab_notes`; non-fatal) →
    **analyze** (librosa sections, BTC chords + BPM; chords non-fatal) +
-   **lyrics** (syncedlyrics, non-fatal, runs in parallel).
+   **lyrics** (duration-matched LRCLIB first, syncedlyrics fallback; non-fatal,
+   runs in parallel).
 3. Throughout, the worker updates `songs.status` / `songs.processing_stage`
    and heartbeats the job row. Failures retry with backoff (max 3 attempts).
 4. Browser polls `GET /api/songs/[id]/status` while processing; when
@@ -102,6 +103,7 @@ src/
     turso.ts                # getTursoClient (libSQL)
     queries.ts              # SQL helpers + job claim/requeue logic
     schema.ts               # SCHEMA_STATEMENTS — idempotent CREATE TABLEs
+    guitar.ts               # tunings, chord transposition, tab positioning
     migrate.ts              # npm run db:migrate applies schema.ts
     database.types.ts       # hand-maintained row types mirroring schema.ts
     lrc-parser.ts           # parseLrc, findCurrentLineIndex
@@ -110,6 +112,7 @@ src/
 mac-server/                 # Python worker; two venvs (see below)
   main.py                   # FastAPI app + queue worker + pipeline
   tab_transcribe.py         # basic-pitch → fret-position mapping → tab_notes
+  lyrics_fetch.py           # duration-matched LRCLIB selection
   turso_db.py               # hand-rolled HTTP libSQL client
   blob_storage.py           # Vercel Blob client (upload/download)
   btc/                      # vendored BTC chord recognition model
@@ -148,6 +151,9 @@ layout.
   events. Tap targets ≥ 32px.
 - The player drives `currentTime` from a single rAF loop; panels receive it
   as a prop. Keep per-frame work in panels O(visible), not O(song).
+- Concert pitch and guitar fingering are separate concerns. Per-song tuning
+  lives in `song_practice_profiles`; chord shapes and physical tab positions
+  must respect it.
 
 ### Database access
 

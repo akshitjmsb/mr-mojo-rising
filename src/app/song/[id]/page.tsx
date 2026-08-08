@@ -7,6 +7,7 @@ import Spinner from "@/components/Spinner";
 import type {
   Chord,
   Lyrics,
+  PracticeProfile,
   Section,
   Song,
   Stem,
@@ -18,8 +19,13 @@ import Scrubber from "./_components/Scrubber";
 import TransportControls from "./_components/TransportControls";
 import SpeedPresets from "./_components/SpeedPresets";
 import PhraseTrainer from "./_components/PhraseTrainer";
+import PlayingSetup from "./_components/PlayingSetup";
 import { useCountIn } from "./_hooks/useCountIn";
 import { useMetronome } from "./_hooks/useMetronome";
+import {
+  getPracticeTuning,
+  type PracticeTuningId,
+} from "@/lib/guitar";
 
 // Heavy or interaction-on-demand panels — split out of the initial bundle.
 const Waveform = dynamic(() => import("./_components/Waveform"), {
@@ -43,6 +49,20 @@ type PracticeRange = {
   end: number;
 };
 
+function defaultPracticeProfile(songId: string): PracticeProfile {
+  const tuning = getPracticeTuning("standard");
+  return {
+    song_id: songId,
+    tuning_id: tuning.id,
+    tuning_name: tuning.name,
+    tuning_offset: tuning.offset,
+    chord_shape_shift: tuning.chordShapeShift,
+    tab_confidence_threshold: 0.6,
+    source: "default",
+    updated_at: 0,
+  };
+}
+
 export default function SongPlayerPage() {
   const { id: songId } = useParams<{ id: string }>();
 
@@ -52,6 +72,12 @@ export default function SongPlayerPage() {
   const [chords, setChords] = useState<Chord[]>([]);
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
+  const [practiceProfile, setPracticeProfile] = useState<PracticeProfile>(() =>
+    defaultPracticeProfile(songId),
+  );
+  const [profileSaveState, setProfileSaveState] = useState<
+    "idle" | "saving" | "error"
+  >("idle");
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<StemMode>("guitar");
@@ -95,6 +121,9 @@ export default function SongPlayerPage() {
         setChords(data.chords || []);
         setLyrics(data.lyrics || null);
         setTabNotes(data.tab_notes || []);
+        setPracticeProfile(
+          data.practice_profile || defaultPracticeProfile(songId),
+        );
         if (data.sections?.length > 0) {
           setActiveSection((current) => current ?? data.sections[0]);
           setPracticeRange((current) =>
@@ -509,6 +538,34 @@ export default function SongPlayerPage() {
     setStemMode(nextMode);
   }
 
+  async function handleTuningChange(tuningId: PracticeTuningId) {
+    if (tuningId === practiceProfile.tuning_id) return;
+    const previous = practiceProfile;
+    const tuning = getPracticeTuning(tuningId);
+    setPracticeProfile({
+      ...previous,
+      tuning_id: tuning.id,
+      tuning_name: tuning.name,
+      tuning_offset: tuning.offset,
+      chord_shape_shift: tuning.chordShapeShift,
+      source: "manual",
+    });
+    setProfileSaveState("saving");
+    try {
+      const response = await fetch(`/api/songs/${songId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tuning_id: tuningId }),
+      });
+      if (!response.ok) throw new Error("Failed to save tuning");
+      setPracticeProfile((await response.json()) as PracticeProfile);
+      setProfileSaveState("idle");
+    } catch {
+      setPracticeProfile(previous);
+      setProfileSaveState("error");
+    }
+  }
+
   function handleSelectSection(section: Section) {
     if (isCountingIn) cancelCountInPlayback();
     setActiveSection(section);
@@ -608,6 +665,25 @@ export default function SongPlayerPage() {
         seekStepSeconds={SEEK_STEP_SECONDS}
       />
       <SpeedPresets value={speed} onChange={handleSpeedChange} />
+      <PlayingSetup
+        profile={practiceProfile}
+        chords={chords}
+        currentTime={currentTime}
+        saving={profileSaveState === "saving"}
+        saveError={profileSaveState === "error"}
+        onTuningChange={handleTuningChange}
+      />
+      <ChordLyricsPanel
+        chords={chords}
+        lyrics={lyrics}
+        currentTime={currentTime}
+        chordShapeShift={practiceProfile.chord_shape_shift}
+      />
+      <SectionList
+        sections={sections}
+        activeSection={activeSection}
+        onSelect={handleSelectSection}
+      />
       {tabNotes.length > 0 && loopEnd > loopStart && (
         <PhraseTrainer
           loopStart={loopStart}
@@ -636,17 +712,10 @@ export default function SongPlayerPage() {
         bpm={song.bpm}
         loopStart={loopStart}
         loopEnd={loopEnd}
+        tuningId={practiceProfile.tuning_id}
+        tuningOffset={practiceProfile.tuning_offset}
+        confidenceThreshold={practiceProfile.tab_confidence_threshold}
         seekTo={seekTo}
-      />
-      <ChordLyricsPanel
-        chords={chords}
-        lyrics={lyrics}
-        currentTime={currentTime}
-      />
-      <SectionList
-        sections={sections}
-        activeSection={activeSection}
-        onSelect={handleSelectSection}
       />
     </main>
   );

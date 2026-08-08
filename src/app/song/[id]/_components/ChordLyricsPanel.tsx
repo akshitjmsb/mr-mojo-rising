@@ -2,15 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Chord, Lyrics } from "@/lib/database.types";
+import { transposeChord } from "@/lib/guitar";
 import { findCurrentLineIndex, parseLrc } from "@/lib/lrc-parser";
 
 interface Props {
   chords: Chord[];
   lyrics: Lyrics | null;
   currentTime: number;
+  chordShapeShift: number;
 }
 
-export default function ChordLyricsPanel({ chords, lyrics, currentTime }: Props) {
+export default function ChordLyricsPanel({
+  chords,
+  lyrics,
+  currentTime,
+  chordShapeShift,
+}: Props) {
   const [open, setOpen] = useState(true);
   const [offset, setOffset] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -38,23 +45,32 @@ export default function ChordLyricsPanel({ chords, lyrics, currentTime }: Props)
     if (adjustedLines.length === 0 || chords.length === 0)
       return new Map<number, string[]>();
     const map = new Map<number, string[]>();
+    let chordIndex = 0;
     for (let i = 0; i < adjustedLines.length; i++) {
       const lineStart = adjustedLines[i].time;
       const lineEnd =
         i + 1 < adjustedLines.length ? adjustedLines[i + 1].time : Infinity;
       const lineChords: string[] = [];
       let prev = "";
-      for (const c of chords) {
+      while (
+        chordIndex < chords.length &&
+        chords[chordIndex].start_time < lineStart
+      ) {
+        chordIndex++;
+      }
+      for (let index = chordIndex; index < chords.length; index++) {
+        const c = chords[index];
         if (c.start_time >= lineEnd) break;
-        if (c.start_time >= lineStart && c.chord_label !== prev) {
-          lineChords.push(c.chord_label);
-          prev = c.chord_label;
+        const shape = transposeChord(c.chord_standard, chordShapeShift);
+        if (shape !== prev) {
+          lineChords.push(shape);
+          prev = shape;
         }
       }
       if (lineChords.length > 0) map.set(i, lineChords);
     }
     return map;
-  }, [adjustedLines, chords]);
+  }, [adjustedLines, chordShapeShift, chords]);
 
   useEffect(() => {
     if (currentIndex < 0 || !containerRef.current) return;
@@ -83,7 +99,7 @@ export default function ChordLyricsPanel({ chords, lyrics, currentTime }: Props)
               : "border-border bg-transparent text-text-dark"
           }`}
         >
-          Chords &amp; Lyrics
+          Chord Shapes &amp; Lyrics
         </button>
 
         {open && lrcLines.length > 0 && (

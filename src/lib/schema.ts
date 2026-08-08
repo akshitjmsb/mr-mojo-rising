@@ -61,6 +61,21 @@ export const SCHEMA_STATEMENTS: string[] = [
     source TEXT NOT NULL
   )`,
 
+  `CREATE TABLE IF NOT EXISTS song_practice_profiles (
+    song_id TEXT PRIMARY KEY REFERENCES songs(id) ON DELETE CASCADE,
+    tuning_id TEXT NOT NULL DEFAULT 'standard',
+    tuning_name TEXT NOT NULL DEFAULT 'Standard',
+    tuning_offset INTEGER NOT NULL DEFAULT 0
+      CHECK (tuning_offset BETWEEN -12 AND 12),
+    chord_shape_shift INTEGER NOT NULL DEFAULT 0
+      CHECK (chord_shape_shift BETWEEN -12 AND 12),
+    tab_confidence_threshold REAL NOT NULL DEFAULT 0.6
+      CHECK (tab_confidence_threshold BETWEEN 0 AND 1),
+    source TEXT NOT NULL DEFAULT 'default'
+      CHECK (source IN ('default', 'curated', 'manual')),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+
   `CREATE TABLE IF NOT EXISTS processing_jobs (
     id TEXT PRIMARY KEY,
     song_id TEXT NOT NULL UNIQUE REFERENCES songs(id) ON DELETE CASCADE,

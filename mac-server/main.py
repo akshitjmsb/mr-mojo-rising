@@ -31,6 +31,7 @@ from chord_reanalyze import (
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
 )
+from lyrics_fetch import fetch_duration_matched_lyrics
 from pipeline_cache import PipelineCheckpoint, source_cache_dir, valid_wav
 from tab_transcribe import (
     TAB_TIMEOUT_SECONDS,
@@ -1370,12 +1371,14 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     update_song(song_id, status="processing", processing_stage="analyze", last_error=None)
     analyze_started = stage_start(stage="analyze", song_id=song_id, job_id=job_id)
     lyrics_started = stage_start(stage="lyrics", song_id=song_id, job_id=job_id)
-    lyrics_task = asyncio.create_task(asyncio.to_thread(fetch_lyrics, title, artist))
+    with wave.open(str(audio_path), "r") as wav_file:
+        duration = wav_file.getnframes() / wav_file.getframerate()
+    lyrics_task = asyncio.create_task(
+        asyncio.to_thread(fetch_lyrics, title, artist, duration)
+    )
     analyze_stage_closed = False
     lyrics_stage_closed = False
     try:
-        with wave.open(str(audio_path), "r") as wav_file:
-            duration = wav_file.getnframes() / wav_file.getframerate()
 
         sections = await run_stage_with_timeout(
             asyncio.to_thread(detect_sections, str(audio_path), duration),
@@ -1530,19 +1533,44 @@ def detect_chords(audio_path: str) -> tuple[list[dict], float]:
     return chords, bpm
 
 
-def fetch_lyrics(title: str, artist: str | None) -> dict | None:
+def fetch_lyrics(
+    title: str,
+    artist: str | None,
+    duration: float | None = None,
+) -> dict | None:
     """
     Fetch lyrics using a multi-source, multi-query fallback chain.
 
     Strategy (stops at first hit):
-      1. Synced LRC — Lrclib, Musixmatch, Deezer, NetEase  (best accuracy)
-      2. Word-level sync — Musixmatch enhanced=True         (finest granularity)
-      3. Synced LRC — all remaining providers               (Genius, Megalobiz)
-      4. Plain text  — all providers                        (last resort)
+      1. LRCLIB synced LRC matched to the downloaded audio duration
+      2. Synced LRC — Lrclib, Musixmatch, Deezer, NetEase
+      3. Word-level sync — Musixmatch enhanced=True
+      4. Synced LRC — all remaining providers
+      5. Plain text — all providers
 
     Each tier is tried with up to 3 query variants:
       "{title} {artist}", "{artist} {title}", "{title}"
     """
+    if duration and duration > 0:
+        try:
+            matched = fetch_duration_matched_lyrics(title, artist, duration)
+            if matched:
+                log_event(
+                    "lyrics.found",
+                    query=f"{title} {artist or ''}".strip(),
+                    tier="lrclib_duration_matched",
+                    duration=round(duration, 2),
+                    source=matched["source"],
+                )
+                return matched
+        except Exception as exc:
+            log_event(
+                "lyrics.provider_error",
+                query=f"{title} {artist or ''}".strip(),
+                providers=["LrclibDurationMatched"],
+                error=str(exc),
+            )
+
     queries: list[str] = []
     for q in [
         f"{title} {artist}" if artist else None,

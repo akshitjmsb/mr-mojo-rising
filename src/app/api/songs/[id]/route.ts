@@ -4,11 +4,27 @@ import { execute, queryAll, queryOne } from "@/lib/queries";
 import type {
   Chord,
   Lyrics,
+  PracticeProfile,
   Section,
   Song,
   Stem,
   TabNote,
 } from "@/lib/database.types";
+import { getPracticeTuning, PRACTICE_TUNINGS } from "@/lib/guitar";
+
+function defaultPracticeProfile(songId: string): PracticeProfile {
+  const tuning = getPracticeTuning("standard");
+  return {
+    song_id: songId,
+    tuning_id: tuning.id,
+    tuning_name: tuning.name,
+    tuning_offset: tuning.offset,
+    chord_shape_shift: tuning.chordShapeShift,
+    tab_confidence_threshold: 0.6,
+    source: "default",
+    updated_at: 0,
+  };
+}
 
 export async function GET(
   _request: Request,
@@ -40,6 +56,11 @@ export async function GET(
     [id],
   );
 
+  const practiceProfile = await queryOne<PracticeProfile>(
+    `SELECT * FROM song_practice_profiles WHERE song_id = ?`,
+    [id],
+  );
+
   // Tolerate a DB that predates the tab_notes migration.
   let tabNotes: TabNote[] = [];
   try {
@@ -58,7 +79,56 @@ export async function GET(
     chords,
     lyrics: lyrics ?? null,
     tab_notes: tabNotes,
+    practice_profile: practiceProfile ?? defaultPracticeProfile(id),
   });
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const song = await queryOne<Song>(`SELECT id FROM songs WHERE id = ?`, [id]);
+  if (!song) {
+    return NextResponse.json({ error: "Song not found" }, { status: 404 });
+  }
+
+  let tuningId: string | undefined;
+  try {
+    const body = (await request.json()) as { tuning_id?: string };
+    tuningId = body.tuning_id;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const tuning = PRACTICE_TUNINGS.find((option) => option.id === tuningId);
+  if (!tuning) {
+    return NextResponse.json(
+      { error: "Unsupported guitar tuning" },
+      { status: 400 },
+    );
+  }
+
+  await execute(
+    `INSERT INTO song_practice_profiles
+      (song_id, tuning_id, tuning_name, tuning_offset, chord_shape_shift,
+       tab_confidence_threshold, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, 0.6, 'manual', unixepoch())
+     ON CONFLICT(song_id) DO UPDATE SET
+       tuning_id = excluded.tuning_id,
+       tuning_name = excluded.tuning_name,
+       tuning_offset = excluded.tuning_offset,
+       chord_shape_shift = excluded.chord_shape_shift,
+       source = 'manual',
+       updated_at = unixepoch()`,
+    [id, tuning.id, tuning.name, tuning.offset, tuning.chordShapeShift],
+  );
+
+  const profile = await queryOne<PracticeProfile>(
+    `SELECT * FROM song_practice_profiles WHERE song_id = ?`,
+    [id],
+  );
+  return NextResponse.json(profile);
 }
 
 export async function DELETE(

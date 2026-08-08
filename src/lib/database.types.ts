@@ -22,6 +22,17 @@ export type Song = {
   updated_at: number;
 };
 
+export type PracticeProfile = {
+  song_id: string;
+  tuning_id: string;
+  tuning_name: string;
+  tuning_offset: number;
+  chord_shape_shift: number;
+  tab_confidence_threshold: number;
+  source: "default" | "curated" | "manual";
+  updated_at: number;
+};
+
 export type Stem = {
   id: string;
   song_id: string;

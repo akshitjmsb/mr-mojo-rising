@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TabNote } from "@/lib/database.types";
+import { getPracticeTuning, positionNotesForTuning } from "@/lib/guitar";
 
 interface Props {
   notes: TabNote[];
@@ -10,10 +11,13 @@ interface Props {
   bpm: number | null;
   loopStart: number;
   loopEnd: number;
+  tuningId: string;
+  tuningOffset: number;
+  confidenceThreshold: number;
   seekTo: (time: number) => void;
 }
 
-type TabDensity = "clean" | "full";
+type TabDensity = "guide" | "all";
 
 const LANE_HEIGHT = 22;
 const PAD_TOP = 8;
@@ -22,11 +26,7 @@ const WINDOW_BEHIND_S = 10;
 const WINDOW_AHEAD_S = 20;
 const ZOOM_LEVELS = [60, 80, 110] as const;
 const DEFAULT_ZOOM_INDEX = 1;
-const CLEAN_CONFIDENCE = 0.6;
-const TAB_PREFS_KEY = "mr-mojo:tab-view:v1";
-
-// Display order top→bottom follows tab convention: high e on top.
-const STRING_LABELS = ["e", "B", "G", "D", "A", "E"];
+const TAB_PREFS_KEY = "mr-mojo:tab-view:v2";
 
 function lowerBound(notes: TabNote[], time: number) {
   let low = 0;
@@ -47,10 +47,13 @@ export default function TabPanel({
   bpm,
   loopStart,
   loopEnd,
+  tuningId,
+  tuningOffset,
+  confidenceThreshold,
   seekTo,
 }: Props) {
   const [open, setOpen] = useState(true);
-  const [density, setDensity] = useState<TabDensity>("clean");
+  const [density, setDensity] = useState<TabDensity>("guide");
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -64,7 +67,7 @@ export default function TabPanel({
           density?: TabDensity;
           zoomIndex?: number;
         };
-        if (parsed.density === "clean" || parsed.density === "full") {
+        if (parsed.density === "guide" || parsed.density === "all") {
           setDensity(parsed.density);
         }
         if (
@@ -105,24 +108,30 @@ export default function TabPanel({
     return () => observer.disconnect();
   }, [open]);
 
+  const tuning = getPracticeTuning(tuningId);
+  const positionedNotes = useMemo(
+    () => positionNotesForTuning(notes, tuningOffset),
+    [notes, tuningOffset],
+  );
+
   const visible = useMemo(() => {
     const from = currentTime - WINDOW_BEHIND_S;
     const to = currentTime + WINDOW_AHEAD_S;
-    const start = lowerBound(notes, from);
+    const start = lowerBound(positionedNotes, from);
     const result: TabNote[] = [];
-    for (let index = start; index < notes.length; index++) {
-      const note = notes[index];
+    for (let index = start; index < positionedNotes.length; index++) {
+      const note = positionedNotes[index];
       if (note.start_time > to) break;
       if (
-        density === "full" ||
+        density === "all" ||
         note.confidence === null ||
-        note.confidence >= CLEAN_CONFIDENCE
+        note.confidence >= confidenceThreshold
       ) {
         result.push(note);
       }
     }
     return result;
-  }, [currentTime, density, notes]);
+  }, [confidenceThreshold, currentTime, density, positionedNotes]);
 
   const beatLines = useMemo(() => {
     if (!bpm || bpm <= 0) return [];
@@ -176,13 +185,13 @@ export default function TabPanel({
               : "border-border bg-transparent text-text-dark"
           }`}
         >
-          Guitar Tab
+          AI Tab Guide
         </button>
 
         {open && (
           <div className="flex items-center gap-1.5">
             <div className="flex overflow-hidden rounded-[1px] border border-border">
-              {(["clean", "full"] as const).map((option) => (
+              {(["guide", "all"] as const).map((option) => (
                 <button
                   key={option}
                   onClick={() => setDensity(option)}
@@ -236,10 +245,10 @@ export default function TabPanel({
             className="relative touch-none select-none overflow-hidden rounded-[2px] border border-border-dark"
             style={{ height }}
           >
-            {STRING_LABELS.map((label, index) => {
+            {[...tuning.strings].reverse().map((label, index) => {
               const y = PAD_TOP + index * LANE_HEIGHT + LANE_HEIGHT / 2;
               return (
-                <div key={label}>
+                <div key={`${label}-${index}`}>
                   <div
                     className="absolute left-0 right-0 border-t border-border-darkest"
                     style={{ top: y }}
@@ -291,7 +300,8 @@ export default function TabPanel({
                   currentTime <= note.start_time + note.duration;
                 const past = currentTime > note.start_time + note.duration;
                 const lowConfidence =
-                  note.confidence !== null && note.confidence < CLEAN_CONFIDENCE;
+                  note.confidence !== null &&
+                  note.confidence < confidenceThreshold;
                 const y =
                   PAD_TOP +
                   (note.string_num - 1) * LANE_HEIGHT +
@@ -337,9 +347,16 @@ export default function TabPanel({
             />
           </div>
           <div className="mt-1.5 flex items-center justify-between font-josefin text-[7px] uppercase tracking-[0.1em] text-text-darkest">
-            <span>Green A · Red B</span>
-            <span>{bpm ? "Beat grid · estimated 4/4" : "Beat grid unavailable"}</span>
+            <span>
+              {density === "guide"
+                ? `Guide ≥ ${Math.round(confidenceThreshold * 100)}% confidence`
+                : "All AI detections"}
+            </span>
+            <span>{tuning.name} · Green A · Red B</span>
           </div>
+          <p className="mt-1 text-center font-josefin text-[7px] uppercase tracking-[0.08em] text-text-darkest">
+            {bpm ? "Beat grid · estimated 4/4" : "Beat grid unavailable"} · Verify difficult phrases by ear
+          </p>
         </>
       )}
     </section>
