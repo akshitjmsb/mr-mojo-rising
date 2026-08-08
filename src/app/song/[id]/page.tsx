@@ -583,19 +583,10 @@ export default function SongPlayerPage() {
     }
   }
 
-  function handleLessonPractice(range: PracticeRange, nextSpeed: number) {
+  function playLessonRange(range: PracticeRange, nextSpeed: number) {
     if (isCountingIn) cancelCountInPlayback();
     const audio = audioRef.current;
     if (!audio) return;
-
-    const sameRange =
-      Math.abs(loopStart - range.start) < 0.05 &&
-      Math.abs(loopEnd - range.end) < 0.05;
-    if (isPlaying && sameRange) {
-      audio.pause();
-      setIsPlaying(false);
-      return;
-    }
 
     setStemMode("guitar");
     setActiveSection(findSectionForTime(range.start));
@@ -610,6 +601,18 @@ export default function SongPlayerPage() {
       () => setIsPlaying(true),
       () => setIsPlaying(false),
     );
+  }
+
+  function handleLessonPractice(range: PracticeRange, nextSpeed: number) {
+    const sameRange =
+      Math.abs(loopStart - range.start) < 0.05 &&
+      Math.abs(loopEnd - range.end) < 0.05;
+    if (isPlaying && sameRange) {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+    playLessonRange(range, nextSpeed);
   }
 
   // Keyboard shortcuts: ←/→ seek, space toggles play.
@@ -699,6 +702,8 @@ export default function SongPlayerPage() {
           tuningSaveError={profileSaveState === "error"}
           onTuningChange={handleTuningChange}
           onPractice={handleLessonPractice}
+          onReplay={playLessonRange}
+          onSeek={seekTo}
         />
       ) : (
         <>

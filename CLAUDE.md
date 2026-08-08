@@ -105,6 +105,7 @@ src/
     queries.ts              # SQL helpers + job claim/requeue logic
     schema.ts               # SCHEMA_STATEMENTS — idempotent CREATE TABLEs
     guitar.ts               # tunings, chord transposition, tab positioning
+    solo-phrases.ts         # note-driven musical phrase boundaries
     migrate.ts              # npm run db:migrate applies schema.ts
     database.types.ts       # hand-maintained row types mirroring schema.ts
     lrc-parser.ts           # parseLrc, findCurrentLineIndex

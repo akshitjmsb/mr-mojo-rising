@@ -13,6 +13,8 @@ import {
   transposeChord,
   type PracticeTuningId,
 } from "@/lib/guitar";
+import { buildMusicalPhrases, type PracticePhrase } from "@/lib/solo-phrases";
+import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "setup" | "chords" | "rhythm" | "intro" | "solo";
 
@@ -34,6 +36,8 @@ interface Props {
   tuningSaveError: boolean;
   onTuningChange: (id: PracticeTuningId) => void;
   onPractice: (range: PracticeRange, speed: number) => void;
+  onReplay: (range: PracticeRange, speed: number) => void;
+  onSeek: (time: number) => void;
 }
 
 const LESSONS: Array<{
@@ -74,11 +78,6 @@ const LESSONS: Array<{
   },
 ];
 
-const PHRASE_SECONDS: Record<"intro" | "solo", number> = {
-  intro: 4,
-  solo: 3,
-};
-
 const STRING_DESCRIPTIONS = [
   "thinnest",
   "second",
@@ -108,8 +107,6 @@ function findSection(sections: Section[], lesson: LessonId) {
 function makePracticeRange(
   lesson: LessonId,
   section: Section | null,
-  phraseIndex: number,
-  contentStart?: number,
 ): PracticeRange | null {
   if (!section || lesson === "setup") return null;
   if (lesson === "chords" || lesson === "rhythm") {
@@ -119,13 +116,7 @@ function makePracticeRange(
       end: Math.min(section.end_time, section.start_time + length),
     };
   }
-  const length = PHRASE_SECONDS[lesson];
-  const firstPhraseStart = Math.max(section.start_time, contentStart ?? section.start_time);
-  const start = firstPhraseStart + phraseIndex * length;
-  return {
-    start: Math.min(start, Math.max(section.start_time, section.end_time - length)),
-    end: Math.min(section.end_time, start + length),
-  };
+  return null;
 }
 
 function formatTime(seconds: number) {
@@ -155,9 +146,12 @@ export default function LearnMode({
   tuningSaveError,
   onTuningChange,
   onPractice,
+  onReplay,
+  onSeek,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [phraseIndex, setPhraseIndex] = useState(0);
+  const [showFullSolo, setShowFullSolo] = useState(false);
   const lesson = LESSONS[lessonIndex];
   const tuning = getPracticeTuning(profile.tuning_id);
   const section = findSection(sections, lesson.id);
@@ -165,29 +159,44 @@ export default function LearnMode({
     () => positionNotesForTuning(notes, profile.tuning_offset),
     [notes, profile.tuning_offset],
   );
-  const firstSectionNote =
-    section && (lesson.id === "intro" || lesson.id === "solo")
-      ? positionedNotes.find(
-          (note) =>
-            note.start_time >= section.start_time &&
-            note.start_time < section.end_time,
-        )
-      : null;
-  const contentStart = firstSectionNote
-    ? Math.max(section?.start_time ?? 0, firstSectionNote.start_time - 0.25)
-    : section?.start_time;
-  const range = makePracticeRange(
-    lesson.id,
-    section,
-    phraseIndex,
-    contentStart,
+  const reliableSectionNotes = useMemo(
+    () =>
+      section
+        ? positionedNotes.filter(
+            (note) =>
+              note.start_time >= section.start_time &&
+              note.start_time < section.end_time &&
+              (note.confidence === null ||
+                note.confidence >= profile.tab_confidence_threshold),
+          )
+        : [],
+    [positionedNotes, profile.tab_confidence_threshold, section],
   );
+  const phraseRanges = useMemo<PracticePhrase[]>(() => {
+    if (!section || (lesson.id !== "intro" && lesson.id !== "solo")) return [];
+    return buildMusicalPhrases(
+      reliableSectionNotes,
+      section.start_time,
+      section.end_time,
+      lesson.id === "solo"
+        ? { minimumDuration: 1.8, maximumDuration: 5.5, pauseThreshold: 0.28 }
+        : { minimumDuration: 1.5, maximumDuration: 4.5, pauseThreshold: 0.32 },
+    );
+  }, [lesson.id, reliableSectionNotes, section]);
+  const range =
+    lesson.id === "intro" || lesson.id === "solo"
+      ? (phraseRanges[Math.min(phraseIndex, phraseRanges.length - 1)] ?? null)
+      : makePracticeRange(lesson.id, section);
   const phraseNotes = useMemo(() => {
     if (!range) return [];
-    return positionedNotes.filter(
+    const source =
+      lesson.id === "intro" || lesson.id === "solo"
+        ? reliableSectionNotes
+        : positionedNotes;
+    return source.filter(
       (note) => note.start_time >= range.start && note.start_time < range.end,
     );
-  }, [positionedNotes, range]);
+  }, [lesson.id, positionedNotes, range, reliableSectionNotes]);
   const sectionChords = useMemo(() => {
     if (!section) return [];
     const unique: string[] = [];
@@ -209,17 +218,11 @@ export default function LearnMode({
     return unique;
   }, [chords, profile.chord_shape_shift, section]);
 
-  const phraseLength =
-    lesson.id === "intro" || lesson.id === "solo"
-      ? PHRASE_SECONDS[lesson.id]
+  const phraseCount = Math.max(1, phraseRanges.length);
+  const fullSoloRange: PracticePhrase | null =
+    lesson.id === "solo" && section
+      ? { start: section.start_time, end: section.end_time }
       : null;
-  const phraseCount =
-    phraseLength && section
-      ? Math.max(
-          1,
-          Math.ceil((section.end_time - (contentStart ?? section.start_time)) / phraseLength),
-        )
-      : 1;
   const activeNoteIndex = phraseNotes.findIndex(
     (note) =>
       currentTime >= note.start_time &&
@@ -241,6 +244,26 @@ export default function LearnMode({
   function selectLesson(index: number) {
     setLessonIndex(index);
     setPhraseIndex(0);
+    setShowFullSolo(false);
+  }
+
+  function selectPhrase(nextIndex: number) {
+    const clamped = Math.max(0, Math.min(phraseCount - 1, nextIndex));
+    setPhraseIndex(clamped);
+    const nextRange = phraseRanges[clamped];
+    if (isPlaying && nextRange) onReplay(nextRange, practiceSpeed);
+  }
+
+  function seekInFullSolo(time: number) {
+    const nextIndex = phraseRanges.findIndex(
+      (phrase) => time >= phrase.start && time <= phrase.end,
+    );
+    if (nextIndex >= 0) {
+      const nextRange = phraseRanges[nextIndex];
+      setPhraseIndex(nextIndex);
+      if (isPlaying) onReplay(nextRange, practiceSpeed);
+    }
+    onSeek(time);
   }
 
   function goNext() {
@@ -367,6 +390,41 @@ export default function LearnMode({
               </p>
             </div>
 
+            {lesson.id === "solo" && (
+              <div className="mt-2.5">
+                <SoloPhraseTab
+                  notes={reliableSectionNotes}
+                  range={range}
+                  strings={tuning.strings}
+                  currentTime={currentTime}
+                  onSeek={onSeek}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowFullSolo((value) => !value)}
+                  aria-expanded={showFullSolo}
+                  className="mt-2 min-h-9 w-full cursor-pointer rounded-[2px] border border-border bg-transparent px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
+                >
+                  {showFullSolo ? "Hide entire solo" : "Show entire solo"}
+                </button>
+                {showFullSolo && fullSoloRange && (
+                  <div className="mt-2.5">
+                    <p className="mb-1.5 font-josefin text-[8px] uppercase tracking-[0.13em] text-text-dark">
+                      Entire solo · swipe sideways · tap any fret to jump
+                    </p>
+                    <SoloPhraseTab
+                      notes={reliableSectionNotes}
+                      range={fullSoloRange}
+                      strings={tuning.strings}
+                      currentTime={currentTime}
+                      expanded
+                      onSeek={seekInFullSolo}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-2 space-y-2" aria-live="polite">
               {instructionNotes.map((note, index) => {
                 const next = instructionNotes[index + 1];
@@ -409,22 +467,26 @@ export default function LearnMode({
               )}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-3 gap-2">
               <button
-                onClick={() => setPhraseIndex((value) => Math.max(0, value - 1))}
+                onClick={() => selectPhrase(phraseIndex - 1)}
                 disabled={phraseIndex === 0}
                 className="min-h-9 cursor-pointer rounded-[2px] border border-border bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
               >
-                Previous phrase
+                Previous
               </button>
               <button
-                onClick={() =>
-                  setPhraseIndex((value) => Math.min(phraseCount - 1, value + 1))
-                }
+                onClick={() => onReplay(range, practiceSpeed)}
+                className="min-h-9 cursor-pointer rounded-[2px] border border-gold/60 bg-gold/[0.06] px-2 font-josefin text-[8px] uppercase tracking-[0.1em] text-gold"
+              >
+                Replay
+              </button>
+              <button
+                onClick={() => selectPhrase(phraseIndex + 1)}
                 disabled={phraseIndex >= phraseCount - 1}
                 className="min-h-9 cursor-pointer rounded-[2px] border border-border bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
               >
-                Next phrase
+                Next
               </button>
             </div>
           </div>

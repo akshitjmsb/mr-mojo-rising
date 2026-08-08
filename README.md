@@ -14,7 +14,7 @@ Learning a song from YouTube means: scrubbing, rewinding, missing chord changes,
 1. **Add Song** — Search by song or artist, or paste a YouTube/Spotify link. The song gets queued for processing.
 2. **Stem Isolation** — Demucs separates guitar, vocals, drums, and bass.
 3. **Analysis** — Sections detected (intro, verse, chorus), chords identified, lyrics extracted.
-4. **Practice** — Use tuning-aware chord shapes and tabs, set a precise A/B phrase, count in, and automatically raise the speed after three clean repetitions. Per-song playing setup is saved, while personal practice progress stays on the device.
+4. **Practice** — Follow Learn Mode from tuning through the solo, with musical phrase loops, a moving six-string tab, plain-language fingering help, and advanced A/B tools when needed. Per-song setup is saved, while personal progress stays on the device.
 
 ---
 
