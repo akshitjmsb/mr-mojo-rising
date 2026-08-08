@@ -81,8 +81,9 @@ src/
     globals.css             # Tailwind import + per-theme design tokens
     (main)/                 # route group wrapped in the 420px AppShell
       layout.tsx            # AppShell + Header + TabNav + Footer
-      page.tsx              # / — Import flow (paste URL, watch progress)
-      search/page.tsx       # /search — YouTube search-based import
+      page.tsx              # / — unified Add Song entrypoint
+      _components/AddSongPage.tsx # search/link resolution + import progress
+      search/page.tsx       # /search — legacy redirect to /
       library/page.tsx      # /library — list/delete/retry songs
       practice/page.tsx     # /practice — redirects to most recent ready song
       tuner/page.tsx        # /tuner — mic-based guitar tuner (YIN)

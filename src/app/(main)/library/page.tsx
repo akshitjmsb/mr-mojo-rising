@@ -263,7 +263,7 @@ export default function LibraryPage() {
         {!loading && songs.length === 0 && (
           <div className="px-5 py-10 text-center">
             <p className="font-josefin text-[12px] font-thin leading-[1.8] tracking-[0.1em] text-text-muted">
-              No songs yet. Import one to get started.
+              No songs yet. Add one to get started.
             </p>
           </div>
         )}

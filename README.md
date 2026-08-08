@@ -11,7 +11,7 @@ Learning a song from YouTube means: scrubbing, rewinding, missing chord changes,
 
 ## What It Does
 
-1. **Import** — Paste a YouTube URL. The song gets queued for processing.
+1. **Add Song** — Search by song or artist, or paste a YouTube/Spotify link. The song gets queued for processing.
 2. **Stem Isolation** — Demucs separates guitar, vocals, drums, and bass.
 3. **Analysis** — Sections detected (intro, verse, chorus), chords identified, lyrics extracted.
 4. **Practice** — Use tuning-aware chord shapes and tabs, set a precise A/B phrase, count in, and automatically raise the speed after three clean repetitions. Per-song playing setup is saved, while personal practice progress stays on the device.
@@ -24,7 +24,7 @@ The phone runs light — Next.js PWA on Vercel. The heavy lifting (stem separati
 
 ```
 Phone / PWA (Vercel)
-  └── Import → writes job to Turso queue
+  └── Add Song → writes job to Turso queue
   └── Polls Turso until song is ready
 
 Mac Worker (local)

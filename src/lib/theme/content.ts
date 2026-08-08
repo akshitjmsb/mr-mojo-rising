@@ -64,8 +64,8 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     ],
     importSteps: SHARED_STEPS,
     searchHero: {
-      title: "Find a song.",
-      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
+      title: "Add a song.",
+      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
     },
     searchQuotes: [
       "Riders on the storm...",
@@ -118,8 +118,8 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     ],
     importSteps: SHARED_STEPS,
     searchHero: {
-      title: "Find a song.",
-      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
+      title: "Add a song.",
+      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
     },
     searchQuotes: [
       "Like a rolling stone...",
@@ -172,8 +172,8 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     ],
     importSteps: SHARED_STEPS,
     searchHero: {
-      title: "Find a song.",
-      subtitle: "Search YouTube, or paste a YouTube or Spotify link.",
+      title: "Add a song.",
+      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
     },
     searchQuotes: [
       "O sanam...",

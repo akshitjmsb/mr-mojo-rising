@@ -4,11 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { label: "Import", href: "/" },
-  { label: "Search", href: "/search" },
+  { label: "Add Song", href: "/" },
   { label: "Library", href: "/library" },
-  { label: "Last Played", href: "/practice" },
-  { label: "Worker", href: "/worker" },
+  { label: "Learn", href: "/practice" },
   { label: "Tuner", href: "/tuner" },
 ];
 

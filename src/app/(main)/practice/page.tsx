@@ -51,7 +51,7 @@ export default function PracticePage() {
       <p className="font-josefin text-[12px] font-thin leading-[1.8] tracking-[0.1em] text-text-muted">
         No songs ready to practice yet.
         <br />
-        Import one to get started.
+        Add one to get started.
       </p>
     </div>
   );
