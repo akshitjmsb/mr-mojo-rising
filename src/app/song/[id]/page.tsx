@@ -20,6 +20,7 @@ import TransportControls from "./_components/TransportControls";
 import SpeedPresets from "./_components/SpeedPresets";
 import PhraseTrainer from "./_components/PhraseTrainer";
 import PlayingSetup from "./_components/PlayingSetup";
+import LearnMode from "./_components/LearnMode";
 import { useCountIn } from "./_hooks/useCountIn";
 import { useMetronome } from "./_hooks/useMetronome";
 import {
@@ -94,6 +95,7 @@ export default function SongPlayerPage() {
   const [autoRampEnabled, setAutoRampEnabled] = useState(true);
   const [bestPracticeSpeed, setBestPracticeSpeed] = useState(0);
   const [trainerPrefsLoaded, setTrainerPrefsLoaded] = useState(false);
+  const [playerView, setPlayerView] = useState<"learn" | "advanced">("learn");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
@@ -581,6 +583,35 @@ export default function SongPlayerPage() {
     }
   }
 
+  function handleLessonPractice(range: PracticeRange, nextSpeed: number) {
+    if (isCountingIn) cancelCountInPlayback();
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const sameRange =
+      Math.abs(loopStart - range.start) < 0.05 &&
+      Math.abs(loopEnd - range.end) < 0.05;
+    if (isPlaying && sameRange) {
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    setStemMode("guitar");
+    setActiveSection(findSectionForTime(range.start));
+    setPracticeRange(range);
+    setSpeed(nextSpeed);
+    setIsLooping(true);
+    resetLoopProgress();
+    audio.currentTime = range.start;
+    audio.playbackRate = nextSpeed;
+    setCurrentTime(range.start);
+    void audio.play().then(
+      () => setIsPlaying(true),
+      () => setIsPlaying(false),
+    );
+  }
+
   // Keyboard shortcuts: ←/→ seek, space toggles play.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -629,94 +660,138 @@ export default function SongPlayerPage() {
           Preview playing · refining high-quality stems
         </div>
       )}
-      <StemSelector value={stemMode} onChange={handleStemModeChange} />
-      <DownloadPanel
-        songId={songId}
-        stems={stems}
-        songTitle={song.title}
-        currentStem={currentDownloadStem}
-      />
-      <Waveform
-        sections={sections}
-        currentTime={currentTime}
-        duration={duration}
-      />
-      <Scrubber
-        activeSection={activeSection}
-        currentTime={currentTime}
-        duration={duration}
-        seekTo={seekTo}
-      />
-      <TransportControls
-        isPlaying={isPlaying}
-        isLooping={isLooping}
-        metronomeOn={metronomeOn}
-        bpm={song.bpm}
-        speed={speed}
-        countInBeat={countInBeat}
-        togglePlay={togglePlay}
-        toggleLoop={() => {
-          setIsLooping((value) => !value);
-          resetLoopProgress();
-        }}
-        toggleMetronome={() => setMetronomeOn((v) => !v)}
-        rewind={rewind}
-        forward={forward}
-        seekStepSeconds={SEEK_STEP_SECONDS}
-      />
-      <SpeedPresets value={speed} onChange={handleSpeedChange} />
-      <PlayingSetup
-        profile={practiceProfile}
-        chords={chords}
-        currentTime={currentTime}
-        saving={profileSaveState === "saving"}
-        saveError={profileSaveState === "error"}
-        onTuningChange={handleTuningChange}
-      />
-      <ChordLyricsPanel
-        chords={chords}
-        lyrics={lyrics}
-        currentTime={currentTime}
-        chordShapeShift={practiceProfile.chord_shape_shift}
-      />
-      <SectionList
-        sections={sections}
-        activeSection={activeSection}
-        onSelect={handleSelectSection}
-      />
-      {tabNotes.length > 0 && loopEnd > loopStart && (
-        <PhraseTrainer
+      <div className="mx-5 my-3 grid grid-cols-2 overflow-hidden rounded-[2px] border border-border-dark">
+        <button
+          onClick={() => setPlayerView("learn")}
+          aria-pressed={playerView === "learn"}
+          className={`min-h-10 cursor-pointer border-none font-josefin text-[9px] uppercase tracking-[0.14em] ${
+            playerView === "learn"
+              ? "bg-gold/10 text-gold"
+              : "bg-transparent text-text-dark"
+          }`}
+        >
+          Learn Mode
+        </button>
+        <button
+          onClick={() => setPlayerView("advanced")}
+          aria-pressed={playerView === "advanced"}
+          className={`min-h-10 cursor-pointer border-none border-l border-border-dark font-josefin text-[9px] uppercase tracking-[0.14em] ${
+            playerView === "advanced"
+              ? "bg-gold/10 text-gold"
+              : "bg-transparent text-text-dark"
+          }`}
+        >
+          Advanced Tools
+        </button>
+      </div>
+
+      {playerView === "learn" ? (
+        <LearnMode
+          sections={sections}
+          chords={chords}
+          notes={tabNotes}
+          profile={practiceProfile}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
           loopStart={loopStart}
           loopEnd={loopEnd}
-          bpm={song.bpm}
-          speed={speed}
-          completedLoops={completedLoops}
-          repetitionsPerStep={REPETITIONS_PER_STEP}
-          bestPracticeSpeed={bestPracticeSpeed}
-          countInEnabled={countInEnabled}
-          autoRampEnabled={autoRampEnabled}
-          onSetStart={handleSetLoopStart}
-          onSetEnd={handleSetLoopEnd}
-          onResetRange={handleResetPracticeRange}
-          onToggleCountIn={() => {
-            if (isCountingIn) cancelCountInPlayback();
-            setCountInEnabled((value) => !value);
-          }}
-          onToggleAutoRamp={() => setAutoRampEnabled((value) => !value)}
+          savingTuning={profileSaveState === "saving"}
+          tuningSaveError={profileSaveState === "error"}
+          onTuningChange={handleTuningChange}
+          onPractice={handleLessonPractice}
         />
+      ) : (
+        <>
+          <StemSelector value={stemMode} onChange={handleStemModeChange} />
+          <DownloadPanel
+            songId={songId}
+            stems={stems}
+            songTitle={song.title}
+            currentStem={currentDownloadStem}
+          />
+          <Waveform
+            sections={sections}
+            currentTime={currentTime}
+            duration={duration}
+          />
+          <Scrubber
+            activeSection={activeSection}
+            currentTime={currentTime}
+            duration={duration}
+            seekTo={seekTo}
+          />
+          <TransportControls
+            isPlaying={isPlaying}
+            isLooping={isLooping}
+            metronomeOn={metronomeOn}
+            bpm={song.bpm}
+            speed={speed}
+            countInBeat={countInBeat}
+            togglePlay={togglePlay}
+            toggleLoop={() => {
+              setIsLooping((value) => !value);
+              resetLoopProgress();
+            }}
+            toggleMetronome={() => setMetronomeOn((v) => !v)}
+            rewind={rewind}
+            forward={forward}
+            seekStepSeconds={SEEK_STEP_SECONDS}
+          />
+          <SpeedPresets value={speed} onChange={handleSpeedChange} />
+          <PlayingSetup
+            profile={practiceProfile}
+            chords={chords}
+            currentTime={currentTime}
+            saving={profileSaveState === "saving"}
+            saveError={profileSaveState === "error"}
+            onTuningChange={handleTuningChange}
+          />
+          <ChordLyricsPanel
+            chords={chords}
+            lyrics={lyrics}
+            currentTime={currentTime}
+            chordShapeShift={practiceProfile.chord_shape_shift}
+          />
+          <SectionList
+            sections={sections}
+            activeSection={activeSection}
+            onSelect={handleSelectSection}
+          />
+          {tabNotes.length > 0 && loopEnd > loopStart && (
+            <PhraseTrainer
+              loopStart={loopStart}
+              loopEnd={loopEnd}
+              bpm={song.bpm}
+              speed={speed}
+              completedLoops={completedLoops}
+              repetitionsPerStep={REPETITIONS_PER_STEP}
+              bestPracticeSpeed={bestPracticeSpeed}
+              countInEnabled={countInEnabled}
+              autoRampEnabled={autoRampEnabled}
+              onSetStart={handleSetLoopStart}
+              onSetEnd={handleSetLoopEnd}
+              onResetRange={handleResetPracticeRange}
+              onToggleCountIn={() => {
+                if (isCountingIn) cancelCountInPlayback();
+                setCountInEnabled((value) => !value);
+              }}
+              onToggleAutoRamp={() => setAutoRampEnabled((value) => !value)}
+            />
+          )}
+          <TabPanel
+            notes={tabNotes}
+            currentTime={currentTime}
+            duration={duration}
+            bpm={song.bpm}
+            loopStart={loopStart}
+            loopEnd={loopEnd}
+            tuningId={practiceProfile.tuning_id}
+            tuningOffset={practiceProfile.tuning_offset}
+            confidenceThreshold={practiceProfile.tab_confidence_threshold}
+            seekTo={seekTo}
+          />
+        </>
       )}
-      <TabPanel
-        notes={tabNotes}
-        currentTime={currentTime}
-        duration={duration}
-        bpm={song.bpm}
-        loopStart={loopStart}
-        loopEnd={loopEnd}
-        tuningId={practiceProfile.tuning_id}
-        tuningOffset={practiceProfile.tuning_offset}
-        confidenceThreshold={practiceProfile.tab_confidence_threshold}
-        seekTo={seekTo}
-      />
     </main>
   );
 }
