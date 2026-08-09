@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TabNote } from "./database.types";
-import { buildRhythmAttacks } from "./rhythm-attacks";
+import {
+  buildRhythmAttacks,
+  buildRhythmStrokeGrid,
+} from "./rhythm-attacks";
 
 function note(id: string, start: number): TabNote {
   return {
@@ -35,4 +38,26 @@ test("ignores attacks outside the active listening range", () => {
     11,
   );
   assert.deepEqual(attacks.map((attack) => attack.time), [10.2]);
+});
+
+test("maps real attacks to alternating down and up eighth-note motions", () => {
+  const attacks = buildRhythmAttacks(
+    [note("beat", 10), note("and", 10.25), note("two", 10.5)],
+    10,
+    14,
+  );
+  const strokes = buildRhythmStrokeGrid(attacks, 10, 14, 120);
+  assert.equal(strokes.length, 16);
+  assert.deepEqual(
+    strokes.slice(0, 4).map(({ direction, sounded }) => ({
+      direction,
+      sounded,
+    })),
+    [
+      { direction: "down", sounded: true },
+      { direction: "up", sounded: true },
+      { direction: "down", sounded: true },
+      { direction: "up", sounded: false },
+    ],
+  );
 });

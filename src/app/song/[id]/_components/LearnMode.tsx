@@ -483,6 +483,7 @@ export default function LearnMode({
               end={range.end}
               currentTime={currentTime}
               active={isCurrentRangePlaying}
+              bpm={bpm}
             />
 
             <div className="mt-3 grid grid-cols-2 gap-2">

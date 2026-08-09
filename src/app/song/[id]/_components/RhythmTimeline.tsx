@@ -2,7 +2,10 @@
 
 import { useMemo } from "react";
 import type { TabNote } from "@/lib/database.types";
-import { buildRhythmAttacks } from "@/lib/rhythm-attacks";
+import {
+  buildRhythmAttacks,
+  buildRhythmStrokeGrid,
+} from "@/lib/rhythm-attacks";
 
 interface Props {
   notes: TabNote[];
@@ -10,6 +13,7 @@ interface Props {
   end: number;
   currentTime: number;
   active: boolean;
+  bpm: number | null;
 }
 
 export default function RhythmTimeline({
@@ -18,49 +22,72 @@ export default function RhythmTimeline({
   end,
   currentTime,
   active,
+  bpm,
 }: Props) {
   const attacks = useMemo(
     () => buildRhythmAttacks(notes, start, end),
     [end, notes, start],
   );
-  const duration = Math.max(0.1, end - start);
-  const playhead = Math.max(0, Math.min(1, (currentTime - start) / duration));
-  const latestAttack = active
-    ? attacks.findLastIndex((attack) => attack.time <= currentTime)
+  const strokes = useMemo(
+    () => buildRhythmStrokeGrid(attacks, start, end, bpm),
+    [attacks, bpm, end, start],
+  );
+  const subdivisionDuration =
+    strokes.length > 1 ? strokes[1].time - strokes[0].time : end - start;
+  const activeStroke = active
+    ? Math.max(
+        0,
+        Math.min(
+          strokes.length - 1,
+          Math.floor((currentTime - start) / subdivisionDuration),
+        ),
+      )
     : -1;
+  const rows = [strokes.slice(0, 8), strokes.slice(8, 16)].filter(
+    (row) => row.length > 0,
+  );
 
   return (
     <div
-      className="relative h-28 overflow-hidden border-y border-border-dark"
-      role="img"
-      aria-label={`${attacks.length} guitar attacks in this phrase`}
+      className="border-y border-border-dark py-3"
+      aria-label="Recommended down and up motion aligned to the guitar attacks"
     >
-      <span className="absolute inset-x-0 top-1/2 h-px bg-border-dark" />
-      {attacks.map((attack, index) => {
-        const left = ((attack.time - start) / duration) * 100;
-        const highlighted =
-          index === latestAttack && currentTime - attack.time <= 0.22;
-        return (
-          <span
-            key={`${attack.time}-${index}`}
-            aria-hidden="true"
-            className={`absolute bottom-1/2 w-[3px] -translate-x-1/2 rounded-t-full transition-colors duration-75 ${
-              highlighted ? "bg-gold" : "bg-text-dark"
-            }`}
-            style={{
-              left: `${left}%`,
-              height: `${Math.round(22 + attack.strength * 52)}px`,
-            }}
-          />
-        );
-      })}
-      {active && (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-3 w-px bg-gold/70"
-          style={{ left: `${playhead * 100}%` }}
-        />
-      )}
+      <div className="space-y-3">
+        {rows.map((row, rowIndex) => (
+          <div key={rowIndex} className="grid grid-cols-8 gap-1">
+            {row.map((stroke, index) => {
+              const highlighted = stroke.index === activeStroke;
+              return (
+                <div
+                  key={stroke.index}
+                  className={`rounded-[2px] py-1.5 text-center transition-colors duration-75 ${
+                    highlighted ? "bg-gold/10" : "bg-transparent"
+                  }`}
+                >
+                  <span className="block font-josefin text-[8px] text-text-dark">
+                    {index % 2 === 0 ? index / 2 + 1 : "&"}
+                  </span>
+                  <span
+                    aria-label={`${stroke.direction}stroke${stroke.sounded ? ", play" : ", keep moving"}`}
+                    className={`mt-1 block font-playfair text-[25px] leading-none transition-transform duration-75 ${
+                      highlighted ? "scale-125" : "scale-100"
+                    } ${
+                      stroke.sounded
+                        ? "text-gold"
+                        : "text-text-darkest"
+                    }`}
+                  >
+                    {stroke.direction === "down" ? "↓" : "↑"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+        Gold · play &nbsp;&nbsp; Faint · keep moving
+      </p>
     </div>
   );
 }
