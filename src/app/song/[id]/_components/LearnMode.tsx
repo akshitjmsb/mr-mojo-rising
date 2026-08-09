@@ -292,8 +292,7 @@ export default function LearnMode({
             learningRange &&
             learningRange.start >= section.start_time &&
             learningRange.end <= section.end_time &&
-            learningRange.end - learningRange.start >= 2 &&
-            learningRange.end - learningRange.start <= 12,
+            learningRange.end - learningRange.start >= 2,
         )
       : section !== null &&
         passesLearningRangeAccuracyGate(

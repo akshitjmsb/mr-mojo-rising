@@ -58,15 +58,22 @@ test("clamps ranges to the section and preserves a learnable duration", () => {
   );
 });
 
-test("accuracy gate rejects empty or overlong selections", () => {
+test("allows a manual selection to reach the full section end", () => {
+  assert.deepEqual(
+    clampLearningRange({ start: 0, end: 52.9 }, 0, 52.9, "end"),
+    { start: 0, end: 52.9 },
+  );
+});
+
+test("accuracy gate accepts a full section and rejects empty selections", () => {
   const notes = [note("1", 5)];
   assert.equal(
     passesLearningRangeAccuracyGate({ start: 4, end: 7 }, notes, 4, 10),
     true,
   );
   assert.equal(
-    passesLearningRangeAccuracyGate({ start: 4, end: 18 }, notes, 4, 20),
-    false,
+    passesLearningRangeAccuracyGate({ start: 4, end: 20 }, notes, 4, 20),
+    true,
   );
   assert.equal(
     passesLearningRangeAccuracyGate({ start: 7, end: 9 }, notes, 4, 10),

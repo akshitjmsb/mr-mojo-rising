@@ -7,7 +7,6 @@ export type LearningRange = {
 };
 
 export const MIN_LEARNING_RANGE_SECONDS = 2;
-export const MAX_LEARNING_RANGE_SECONDS = 12;
 
 const START_LEAD_IN = 0.2;
 const END_TAIL = 0.3;
@@ -37,14 +36,6 @@ export function clampLearningRange(
       start = Math.max(sectionStart, end - minimumDuration);
     } else {
       end = Math.min(sectionEnd, start + minimumDuration);
-    }
-  }
-
-  if (end - start > MAX_LEARNING_RANGE_SECONDS) {
-    if (changedBoundary === "start") {
-      start = end - MAX_LEARNING_RANGE_SECONDS;
-    } else {
-      end = start + MAX_LEARNING_RANGE_SECONDS;
     }
   }
 
@@ -179,8 +170,7 @@ export function passesLearningRangeAccuracyGate(
   if (
     range.start < sectionStart ||
     range.end > sectionEnd ||
-    duration < Math.min(MIN_LEARNING_RANGE_SECONDS, sectionEnd - sectionStart) ||
-    duration > MAX_LEARNING_RANGE_SECONDS
+    duration < Math.min(MIN_LEARNING_RANGE_SECONDS, sectionEnd - sectionStart)
   ) {
     return false;
   }
