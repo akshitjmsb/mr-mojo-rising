@@ -13,9 +13,16 @@ import {
   transposeChord,
   type PracticeTuningId,
 } from "@/lib/guitar";
-import { buildMusicalPhrases, type PracticePhrase } from "@/lib/solo-phrases";
+import {
+  buildLearningRangeSuggestions,
+  clampLearningRange,
+  passesLearningRangeAccuracyGate,
+  snapLearningRange,
+  type LearningRange,
+} from "@/lib/learning-range";
 import InlineTuner from "./InlineTuner";
 import ChordShapeCoach from "./ChordShapeCoach";
+import LearningRangePicker from "./LearningRangePicker";
 import RhythmTimeline from "./RhythmTimeline";
 import SoloPhraseTab from "./SoloPhraseTab";
 
@@ -67,7 +74,7 @@ const LESSONS: Array<{
     id: "phrase",
     shortLabel: "Choose",
     title: "What do you want to learn?",
-    description: "Choose one part of the song. Every next step will focus only on it.",
+    description: "Choose a song part, then mark the exact guitar phrase.",
   },
   {
     id: "setup",
@@ -117,24 +124,15 @@ function isPracticeSpeed(value: number): value is PracticeSpeed {
 
 function makePracticeRange(
   lesson: LessonId,
-  section: Section | null,
-  bpm: number | null,
+  learningRange: LearningRange | null,
 ): PracticeRange | null {
   if (
-    !section ||
+    !learningRange ||
     lesson === "phrase" ||
     lesson === "setup" ||
-    lesson === "chords" ||
-    lesson === "play"
+    lesson === "chords"
   ) return null;
-  if (lesson === "rhythm") {
-    const twoBars = bpm && bpm > 0 ? (8 * 60) / bpm : 6;
-    return {
-      start: section.start_time,
-      end: Math.min(section.end_time, section.start_time + twoBars),
-    };
-  }
-  return null;
+  return learningRange;
 }
 
 function formatTime(seconds: number) {
@@ -167,7 +165,8 @@ export default function LearnMode({
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
-  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
+  const [showSectionChoices, setShowSectionChoices] = useState(true);
   const [tunerComplete, setTunerComplete] = useState(false);
   const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
   const lesson = LESSONS[lessonIndex];
@@ -194,12 +193,6 @@ export default function LearnMode({
       }),
     [sections],
   );
-  const selectedSectionPreview = section
-    ? {
-        start: section.start_time,
-        end: Math.min(section.end_time, section.start_time + 8),
-      }
-    : null;
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song phrase";
@@ -220,41 +213,46 @@ export default function LearnMode({
         : [],
     [positionedNotes, profile.tab_confidence_threshold, section],
   );
-  const phraseRanges = useMemo<PracticePhrase[]>(() => {
-    if (!section || lesson.id !== "play") return [];
-    return buildMusicalPhrases(
+  const learningRangeSuggestions = useMemo(
+    () =>
+      section
+        ? buildLearningRangeSuggestions(
+            reliableSectionNotes,
+            section.start_time,
+            section.end_time,
+            bpm,
+          )
+        : [],
+    [bpm, reliableSectionNotes, section],
+  );
+  const accuracyPassed =
+    section !== null &&
+    passesLearningRangeAccuracyGate(
+      learningRange,
       reliableSectionNotes,
       section.start_time,
       section.end_time,
-      {
-        minimumDuration: 2,
-        maximumDuration: 5.5,
-        pauseThreshold: 0.28,
-        leadIn: bpm && bpm > 0 ? Math.min(0.5, (60 / bpm) * 0.75) : 0.35,
-        tail: bpm && bpm > 0 ? Math.min(0.65, 60 / bpm) : 0.45,
-      },
     );
-  }, [bpm, lesson.id, reliableSectionNotes, section]);
-  const range = useMemo<PracticeRange | null>(
+  const selectionReady = accuracyPassed && !showSectionChoices;
+  const reliableLearningNotes = useMemo(
     () =>
-      lesson.id === "play"
-        ? (phraseRanges[Math.min(phraseIndex, phraseRanges.length - 1)] ??
-          (section
-            ? {
-                start: section.start_time,
-                end: Math.min(section.end_time, section.start_time + 5.5),
-              }
-            : null))
-        : makePracticeRange(lesson.id, section, bpm),
-    [bpm, lesson.id, phraseIndex, phraseRanges, section],
+      learningRange
+        ? reliableSectionNotes.filter(
+            (note) =>
+              note.start_time >= learningRange.start &&
+              note.start_time < learningRange.end,
+          )
+        : [],
+    [learningRange, reliableSectionNotes],
   );
+  const range = makePracticeRange(lesson.id, learningRange);
   const sectionChords = useMemo(() => {
-    if (!section) return [];
+    if (!learningRange) return [];
     const unique: string[] = [];
     for (const chord of chords) {
       if (
-        chord.start_time < section.start_time ||
-        chord.start_time >= section.end_time
+        chord.start_time < learningRange.start ||
+        chord.start_time >= learningRange.end
       ) {
         continue;
       }
@@ -267,19 +265,18 @@ export default function LearnMode({
       if (unique.length === 6) break;
     }
     return unique;
-  }, [chords, profile.chord_shape_shift, section]);
+  }, [chords, learningRange, profile.chord_shape_shift]);
 
-  const phraseCount = Math.max(1, phraseRanges.length);
   const isCurrentRangePlaying =
     range !== null &&
     isPlaying &&
     Math.abs(loopStart - range.start) < 0.05 &&
     Math.abs(loopEnd - range.end) < 0.05;
-  const isSectionPreviewPlaying =
-    selectedSectionPreview !== null &&
+  const isSelectedRangePlaying =
+    learningRange !== null &&
     isPlaying &&
-    Math.abs(loopStart - selectedSectionPreview.start) < 0.05 &&
-    Math.abs(loopEnd - selectedSectionPreview.end) < 0.05;
+    Math.abs(loopStart - learningRange.start) < 0.05 &&
+    Math.abs(loopEnd - learningRange.end) < 0.05;
   const isolatedListenActive =
     isCurrentRangePlaying &&
     currentAudioSource === "guitar" &&
@@ -309,19 +306,57 @@ export default function LearnMode({
 
   function selectLesson(index: number) {
     setLessonIndex(index);
-    setPhraseIndex(0);
   }
 
   function selectSection(nextSection: Section) {
+    const nextNotes = positionedNotes.filter(
+      (note) =>
+        note.start_time >= nextSection.start_time &&
+        note.start_time < nextSection.end_time &&
+        (note.confidence === null ||
+          note.confidence >= profile.tab_confidence_threshold),
+    );
+    const suggestions = buildLearningRangeSuggestions(
+      nextNotes,
+      nextSection.start_time,
+      nextSection.end_time,
+      bpm,
+    );
     setSelectedSectionId(nextSection.id);
-    setPhraseIndex(0);
+    setLearningRange(suggestions[0] ?? null);
+    setShowSectionChoices(false);
   }
 
-  function selectPhrase(nextIndex: number) {
-    const clamped = Math.max(0, Math.min(phraseCount - 1, nextIndex));
-    setPhraseIndex(clamped);
-    const nextRange = phraseRanges[clamped];
-    if (isPlaying && nextRange) onReplay(nextRange, practiceSpeed, "guitar");
+  function selectSuggestedRange(nextRange: LearningRange) {
+    setLearningRange(nextRange);
+    if (isPlaying) onReplay(nextRange, 1, "guitar");
+  }
+
+  function changeLearningBoundary(
+    boundary: "start" | "end",
+    value: number,
+  ) {
+    if (!section || !learningRange) return;
+    setLearningRange(
+      clampLearningRange(
+        { ...learningRange, [boundary]: value },
+        section.start_time,
+        section.end_time,
+        boundary,
+      ),
+    );
+  }
+
+  function commitLearningRange() {
+    if (!section || !learningRange) return;
+    const snapped = snapLearningRange(
+      learningRange,
+      reliableSectionNotes,
+      section.start_time,
+      section.end_time,
+    );
+    setLearningRange(snapped);
+    if (isPlaying) onReplay(snapped, 1, "guitar");
   }
 
   function goNext() {
@@ -418,7 +453,7 @@ export default function LearnMode({
           <button
             key={item.id}
             onClick={() => selectLesson(index)}
-            disabled={index > 0 && !section}
+            disabled={index > 0 && !selectionReady}
             aria-current={index === lessonIndex ? "step" : undefined}
             className={`min-h-10 cursor-pointer rounded-[2px] border px-1 font-josefin text-[7px] uppercase tracking-[0.07em] disabled:cursor-default disabled:opacity-35 ${
               index === lessonIndex
@@ -443,6 +478,9 @@ export default function LearnMode({
           >
             <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
               Learning · <span className="text-gold">{selectedSectionLabel}</span>
+              {learningRange
+                ? ` · ${formatTime(learningRange.start)}–${formatTime(learningRange.end)}`
+                : ""}
             </span>
             <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
               Change
@@ -463,46 +501,68 @@ export default function LearnMode({
 
         {lesson.id === "phrase" && (
           <div className="mt-4">
-            <div className="grid grid-cols-2 gap-2" aria-label="Song phrases">
-              {sectionOptions.map((option) => {
-                const selected = option.section.id === section?.id;
-                return (
-                  <button
-                    key={option.section.id}
-                    type="button"
-                    onClick={() => selectSection(option.section)}
-                    aria-pressed={selected}
-                    className={`min-h-16 cursor-pointer rounded-[2px] border px-3 py-2 text-left ${
-                      selected
-                        ? "border-gold bg-gold/10"
-                        : "border-border-dark bg-bg/30"
-                    }`}
-                  >
-                    <span className={`block font-playfair text-[17px] italic ${selected ? "text-gold" : "text-text"}`}>
-                      {option.label}
-                    </span>
-                    <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
-                      {formatTime(option.section.start_time)}–{formatTime(option.section.end_time)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            {showSectionChoices && (
+              <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
+                {sectionOptions.map((option) => {
+                  const selected = option.section.id === section?.id;
+                  return (
+                    <button
+                      key={option.section.id}
+                      type="button"
+                      onClick={() => selectSection(option.section)}
+                      aria-pressed={selected}
+                      className={`min-h-16 cursor-pointer rounded-[2px] border px-3 py-2 text-left ${
+                        selected
+                          ? "border-gold bg-gold/10"
+                          : "border-border-dark bg-bg/30"
+                      }`}
+                    >
+                      <span className={`block font-playfair text-[17px] italic ${selected ? "text-gold" : "text-text"}`}>
+                        {option.label}
+                      </span>
+                      <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                        {formatTime(option.section.start_time)}–{formatTime(option.section.end_time)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-            {selectedSectionPreview && (
-              <button
-                type="button"
-                onClick={() =>
-                  isSectionPreviewPlaying
-                    ? onPractice(selectedSectionPreview, 1, "guitar")
-                    : onReplay(selectedSectionPreview, 1, "guitar")
+            {!showSectionChoices && section && learningRange && (
+              <LearningRangePicker
+                section={section}
+                sectionLabel={selectedSectionLabel}
+                notes={reliableSectionNotes}
+                range={learningRange}
+                suggestions={learningRangeSuggestions}
+                accuracyPassed={accuracyPassed}
+                previewPlaying={isSelectedRangePlaying}
+                onChangeSection={() => setShowSectionChoices(true)}
+                onSelectSuggestion={selectSuggestedRange}
+                onBoundaryChange={changeLearningBoundary}
+                onBoundaryCommit={commitLearningRange}
+                onPreview={() =>
+                  isSelectedRangePlaying
+                    ? onPractice(learningRange, 1, "guitar")
+                    : onReplay(learningRange, 1, "guitar")
                 }
-                className="mt-3 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
-              >
-                {isSectionPreviewPlaying
-                  ? "Pause preview"
-                  : `Hear ${selectedSectionLabel}`}
-              </button>
+              />
+            )}
+
+            {!showSectionChoices && section && !learningRange && (
+              <div className="rounded-[2px] border border-terracotta/40 p-3">
+                <p className="font-josefin text-[9px] leading-relaxed text-text-muted">
+                  Accuracy gate failed: no reliable guitar phrase was detected in this part.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowSectionChoices(true)}
+                  className="mt-3 min-h-9 w-full cursor-pointer rounded-[2px] border border-border bg-transparent font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
+                >
+                  Choose another part
+                </button>
+              </div>
             )}
 
             {sectionOptions.length === 0 && (
@@ -564,7 +624,7 @@ export default function LearnMode({
         {lesson.id === "rhythm" && range && (
           <div className="mt-2">
             <RhythmTimeline
-              notes={reliableSectionNotes}
+              notes={reliableLearningNotes}
               start={range.start}
               end={range.end}
               currentTime={currentTime}
@@ -609,7 +669,7 @@ export default function LearnMode({
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
               <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-                Phrase {phraseIndex + 1} of {phraseCount}
+                Your selected phrase
               </p>
               <p className="font-josefin text-[9px] text-text-dark">
                 {formatTime(range.start)}–{formatTime(range.end)}
@@ -663,7 +723,7 @@ export default function LearnMode({
                 2 · Copy this tab
               </p>
               <SoloPhraseTab
-                notes={reliableSectionNotes}
+                notes={reliableLearningNotes}
                 range={range}
                 strings={tuning.strings}
                 currentTime={currentTime}
@@ -712,22 +772,6 @@ export default function LearnMode({
               </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border-dark pt-3">
-              <button
-                onClick={() => selectPhrase(phraseIndex - 1)}
-                disabled={phraseIndex === 0}
-                className="min-h-9 cursor-pointer rounded-[2px] border border-border bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
-              >
-                Previous phrase
-              </button>
-              <button
-                onClick={() => selectPhrase(phraseIndex + 1)}
-                disabled={phraseIndex >= phraseCount - 1}
-                className="min-h-9 cursor-pointer rounded-[2px] border border-border bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
-              >
-                Next phrase
-              </button>
-            </div>
           </div>
         )}
 
@@ -751,15 +795,15 @@ export default function LearnMode({
             <button
               onClick={goNext}
               disabled={
-                (lesson.id === "phrase" && !section) ||
+                (lesson.id === "phrase" && !selectionReady) ||
                 (lesson.id === "setup" && !tunerComplete)
               }
               className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
             >
-              {lesson.id === "phrase" && !section
-                ? "Choose a phrase"
+              {lesson.id === "phrase" && !selectionReady
+                ? "Pass accuracy gate"
                 : lesson.id === "phrase"
-                  ? "Learn this phrase · Next"
+                  ? `Learn ${formatTime(learningRange!.start)}–${formatTime(learningRange!.end)} · Next`
                 : lesson.id === "setup" && !tunerComplete
                   ? "Tune all strings to continue"
                   : "I’m comfortable · Next"}
