@@ -700,6 +700,7 @@ export default function SongPlayerPage() {
           sections={sections}
           chords={chords}
           notes={tabNotes}
+          bpm={song.bpm}
           profile={practiceProfile}
           currentTime={currentTime}
           isPlaying={isPlaying}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   Chord,
   PracticeProfile,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/guitar";
 import { buildMusicalPhrases, type PracticePhrase } from "@/lib/solo-phrases";
 import InlineTuner from "./InlineTuner";
+import ChordShapeCoach from "./ChordShapeCoach";
 import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "setup" | "chords" | "rhythm" | "intro" | "solo";
@@ -28,6 +29,7 @@ interface Props {
   sections: Section[];
   chords: Chord[];
   notes: TabNote[];
+  bpm: number | null;
   profile: PracticeProfile;
   currentTime: number;
   isPlaying: boolean;
@@ -91,6 +93,21 @@ const STRING_DESCRIPTIONS = [
 
 const FINGER_NAMES = ["index", "middle", "ring", "little"] as const;
 
+const PRACTICE_SPEEDS = [
+  { value: 0.5, percent: 50, purpose: "Learn" },
+  { value: 0.65, percent: 65, purpose: "Build" },
+  { value: 0.8, percent: 80, purpose: "Prepare" },
+  { value: 1, percent: 100, purpose: "Original" },
+] as const;
+
+type PracticeSpeed = (typeof PRACTICE_SPEEDS)[number]["value"];
+
+const PRACTICE_SPEED_STORAGE_KEY = "mr-mojo:learn-speed:v1";
+
+function isPracticeSpeed(value: number): value is PracticeSpeed {
+  return PRACTICE_SPEEDS.some((option) => option.value === value);
+}
+
 function findSection(sections: Section[], lesson: LessonId) {
   const patterns: Record<Exclude<LessonId, "setup">, RegExp[]> = {
     chords: [/verse/i, /chorus/i, /intro/i],
@@ -139,6 +156,7 @@ export default function LearnMode({
   sections,
   chords,
   notes,
+  bpm,
   profile,
   currentTime,
   isPlaying,
@@ -156,6 +174,7 @@ export default function LearnMode({
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [showFullSolo, setShowFullSolo] = useState(false);
   const [tunerComplete, setTunerComplete] = useState(false);
+  const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
   const lesson = LESSONS[lessonIndex];
   const tuning = getPracticeTuning(profile.tuning_id);
   const section = findSection(sections, lesson.id);
@@ -238,12 +257,26 @@ export default function LearnMode({
     .map((note) => note.fret)
     .filter((fret) => fret > 0);
   const baseFret = positiveFrets.length > 0 ? Math.min(...positiveFrets) : 1;
-  const practiceSpeed = lesson.id === "solo" ? 0.5 : lesson.id === "intro" ? 0.55 : 0.65;
+  const effectiveBpm = bpm ? Math.round(bpm * practiceSpeed) : null;
   const isCurrentRangePlaying =
     range !== null &&
     isPlaying &&
     Math.abs(loopStart - range.start) < 0.05 &&
     Math.abs(loopEnd - range.end) < 0.05;
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      try {
+        const storedSpeed = Number.parseFloat(
+          window.localStorage.getItem(PRACTICE_SPEED_STORAGE_KEY) ?? "",
+        );
+        if (isPracticeSpeed(storedSpeed)) setPracticeSpeed(storedSpeed);
+      } catch {
+        // Practice still works when private browsing blocks local storage.
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   function selectLesson(index: number) {
     setLessonIndex(index);
@@ -272,6 +305,19 @@ export default function LearnMode({
 
   function goNext() {
     if (lessonIndex < LESSONS.length - 1) selectLesson(lessonIndex + 1);
+  }
+
+  function selectPracticeSpeed(nextSpeed: PracticeSpeed) {
+    setPracticeSpeed(nextSpeed);
+    try {
+      window.localStorage.setItem(
+        PRACTICE_SPEED_STORAGE_KEY,
+        String(nextSpeed),
+      );
+    } catch {
+      // Keep the in-memory selection when storage is unavailable.
+    }
+    if (isCurrentRangePlaying && range) onReplay(range, nextSpeed);
   }
 
   return (
@@ -362,16 +408,11 @@ export default function LearnMode({
             <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
               Your first shapes
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {sectionChords.map((chord) => (
-                <span
-                  key={chord}
-                  className="min-w-12 rounded-[2px] border border-border-dark bg-bg/50 px-3 py-2 text-center font-playfair text-[18px] italic text-gold"
-                >
-                  {chord}
-                </span>
-              ))}
-            </div>
+            <ChordShapeCoach
+              chords={sectionChords}
+              tuningName={tuning.name}
+              tuningOffset={profile.tuning_offset}
+            />
             <p className="mt-3 font-josefin text-[10px] leading-relaxed text-text-muted">
               Hold each shape, pick every string, and fix any buzz. Then change between two shapes without a timer.
             </p>
@@ -506,14 +547,59 @@ export default function LearnMode({
         )}
 
         {range && (
-          <button
-            onClick={() => onPractice(range, practiceSpeed)}
-            className="mt-4 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.14em] text-gold"
-          >
-            {isCurrentRangePlaying
-              ? "Pause"
-              : `Play slow loop · ${Math.round(practiceSpeed * 100)}%`}
-          </button>
+          <div className="mt-4">
+            <fieldset>
+              <legend className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
+                Practice speed
+              </legend>
+              <div className="mt-2 grid grid-cols-4 gap-1.5">
+                {PRACTICE_SPEEDS.map((option) => {
+                  const selected = practiceSpeed === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => selectPracticeSpeed(option.value)}
+                      aria-pressed={selected}
+                      className={`min-h-12 cursor-pointer rounded-[2px] border px-1 font-josefin ${
+                        selected
+                          ? "border-gold bg-gold/10 text-gold"
+                          : "border-border-dark bg-transparent text-text-muted"
+                      }`}
+                    >
+                      <span className="block text-[10px]">
+                        {option.percent}%
+                      </span>
+                      <span className="mt-0.5 block text-[6px] uppercase tracking-[0.08em]">
+                        {option.purpose}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+
+            <p className="mt-2 text-center font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
+              {effectiveBpm
+                ? practiceSpeed === 1
+                  ? `Original tempo · ${effectiveBpm} BPM`
+                  : `${effectiveBpm} BPM · original ${Math.round(bpm!)} BPM`
+                : practiceSpeed === 1
+                  ? "Original recording speed"
+                  : `${Math.round(practiceSpeed * 100)}% of original speed`}
+            </p>
+
+            <button
+              onClick={() => onPractice(range, practiceSpeed)}
+              className="mt-2 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.14em] text-gold"
+            >
+              {isCurrentRangePlaying
+                ? `Pause loop · ${Math.round(practiceSpeed * 100)}%`
+                : practiceSpeed === 1
+                  ? "Play at original tempo"
+                  : `Play loop · ${Math.round(practiceSpeed * 100)}%`}
+            </button>
+          </div>
         )}
 
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-dark pt-3">
