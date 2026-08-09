@@ -89,7 +89,6 @@ export default function SongPlayerPage() {
   const [duration, setDuration] = useState(0);
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(null);
-  const [completedLoops, setCompletedLoops] = useState(0);
   const [countInEnabled, setCountInEnabled] = useState(true);
   const [autoRampEnabled, setAutoRampEnabled] = useState(true);
   const [bestPracticeSpeed, setBestPracticeSpeed] = useState(0);
@@ -408,7 +407,6 @@ export default function SongPlayerPage() {
 
   const resetLoopProgress = useCallback(() => {
     completedLoopsRef.current = 0;
-    setCompletedLoops(0);
   }, []);
 
   // Drive currentTime, section sync, phrase looping and automatic speed
@@ -426,7 +424,6 @@ export default function SongPlayerPage() {
 
       const nextLoopCount = completedLoopsRef.current + 1;
       completedLoopsRef.current = nextLoopCount;
-      setCompletedLoops(nextLoopCount);
       setBestPracticeSpeed((current) => Math.max(current, speed));
 
       if (
@@ -570,6 +567,9 @@ export default function SongPlayerPage() {
         ? "full"
         : requestedSource;
 
+    // Learn Mode uses explicit listening and loop speeds. Hidden auto-ramping
+    // would make the phrase change tempo without the learner asking for it.
+    setAutoRampEnabled(false);
     setActiveSection(findSectionForTime(range.start));
     setPracticeRange(range);
     setSpeed(nextSpeed);
@@ -705,28 +705,17 @@ export default function SongPlayerPage() {
           profile={practiceProfile}
           currentTime={currentTime}
           isPlaying={isPlaying}
+          currentSpeed={speed}
           currentAudioSource={stemMode}
           loopStart={loopStart}
           loopEnd={loopEnd}
           savingTuning={profileSaveState === "saving"}
           tuningSaveError={profileSaveState === "error"}
-          completedLoops={completedLoops}
-          repetitionsPerStep={REPETITIONS_PER_STEP}
-          bestPracticeSpeed={bestPracticeSpeed}
-          countInEnabled={countInEnabled}
-          autoRampEnabled={autoRampEnabled}
           onTuningChange={handleTuningChange}
           onPractice={handleLessonPractice}
           onReplay={playLessonRange}
           onSeek={seekTo}
           onBeforeTunerStart={handleBeforeTunerStart}
-          onToggleCountIn={() => {
-            if (isCountingIn) cancelCountInPlayback();
-            setCountInEnabled((value) => !value);
-          }}
-          onToggleAutoRamp={() =>
-            setAutoRampEnabled((value) => !value)
-          }
         />
       ) : (
         <>
