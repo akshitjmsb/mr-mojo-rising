@@ -19,7 +19,7 @@ import ChordShapeCoach from "./ChordShapeCoach";
 import RhythmTimeline from "./RhythmTimeline";
 import SoloPhraseTab from "./SoloPhraseTab";
 
-type LessonId = "setup" | "chords" | "rhythm" | "intro" | "solo";
+type LessonId = "phrase" | "setup" | "chords" | "rhythm" | "play";
 
 type PracticeRange = {
   start: number;
@@ -70,6 +70,12 @@ const LESSONS: Array<{
   description: string;
 }> = [
   {
+    id: "phrase",
+    shortLabel: "Phrase",
+    title: "What do you want to learn?",
+    description: "Choose one part of the song. Every next step will focus only on it.",
+  },
+  {
     id: "setup",
     shortLabel: "Tune",
     title: "Get the guitar ready",
@@ -88,16 +94,10 @@ const LESSONS: Array<{
     description: "Use slow down-strums first. Rhythm can become more detailed later.",
   },
   {
-    id: "intro",
-    shortLabel: "Intro",
-    title: "Copy one tiny phrase",
-    description: "Listen, copy, and loop a few seconds. Do not read the whole tab at once.",
-  },
-  {
-    id: "solo",
-    shortLabel: "Solo",
-    title: "Build the solo phrase by phrase",
-    description: "The solo is the final step—not the starting point. Accuracy comes before speed.",
+    id: "play",
+    shortLabel: "Play",
+    title: "Learn it one tiny phrase at a time",
+    description: "Listen, copy, and loop a few seconds. Accuracy comes before speed.",
   },
 ];
 
@@ -132,27 +132,18 @@ function isPracticeSpeed(value: number): value is PracticeSpeed {
   return PRACTICE_SPEEDS.some((option) => option.value === value);
 }
 
-function findSection(sections: Section[], lesson: LessonId) {
-  const patterns: Record<Exclude<LessonId, "setup">, RegExp[]> = {
-    chords: [/verse/i, /chorus/i, /intro/i],
-    rhythm: [/chorus/i, /verse/i, /intro/i],
-    intro: [/intro/i],
-    solo: [/solo/i, /lead/i],
-  };
-  if (lesson === "setup") return sections[0] ?? null;
-  for (const pattern of patterns[lesson]) {
-    const match = sections.find((section) => pattern.test(section.label));
-    if (match) return match;
-  }
-  return sections[0] ?? null;
-}
-
 function makePracticeRange(
   lesson: LessonId,
   section: Section | null,
   bpm: number | null,
 ): PracticeRange | null {
-  if (!section || lesson === "setup" || lesson === "chords") return null;
+  if (
+    !section ||
+    lesson === "phrase" ||
+    lesson === "setup" ||
+    lesson === "chords" ||
+    lesson === "play"
+  ) return null;
   if (lesson === "rhythm") {
     const twoBars = bpm && bpm > 0 ? (8 * 60) / bpm : 6;
     return {
@@ -204,13 +195,44 @@ export default function LearnMode({
   onToggleAutoRamp,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [phraseIndex, setPhraseIndex] = useState(0);
-  const [showFullSolo, setShowFullSolo] = useState(false);
+  const [showFullSection, setShowFullSection] = useState(false);
   const [tunerComplete, setTunerComplete] = useState(false);
   const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
   const lesson = LESSONS[lessonIndex];
   const tuning = getPracticeTuning(profile.tuning_id);
-  const section = findSection(sections, lesson.id);
+  const section =
+    sections.find((item) => item.id === selectedSectionId) ?? null;
+  const sectionOptions = useMemo(
+    () =>
+      sections.map((item, index) => {
+        const matchingSections = sections.filter(
+          (candidate) => candidate.label === item.label,
+        );
+        const occurrence =
+          sections
+            .slice(0, index + 1)
+            .filter((candidate) => candidate.label === item.label).length;
+        return {
+          section: item,
+          label:
+            matchingSections.length > 1
+              ? `${item.label} ${occurrence}`
+              : item.label,
+        };
+      }),
+    [sections],
+  );
+  const selectedSectionPreview = section
+    ? {
+        start: section.start_time,
+        end: Math.min(section.end_time, section.start_time + 8),
+      }
+    : null;
+  const selectedSectionLabel =
+    sectionOptions.find((option) => option.section.id === section?.id)?.label ??
+    "Song phrase";
   const positionedNotes = useMemo(
     () => positionNotesForTuning(notes, profile.tuning_offset),
     [notes, profile.tuning_offset],
@@ -229,26 +251,30 @@ export default function LearnMode({
     [positionedNotes, profile.tab_confidence_threshold, section],
   );
   const phraseRanges = useMemo<PracticePhrase[]>(() => {
-    if (!section || (lesson.id !== "intro" && lesson.id !== "solo")) return [];
+    if (!section || lesson.id !== "play") return [];
     return buildMusicalPhrases(
       reliableSectionNotes,
       section.start_time,
       section.end_time,
-      lesson.id === "solo"
-        ? { minimumDuration: 1.8, maximumDuration: 5.5, pauseThreshold: 0.28 }
-        : { minimumDuration: 1.5, maximumDuration: 4.5, pauseThreshold: 0.32 },
+      { minimumDuration: 1.8, maximumDuration: 5.5, pauseThreshold: 0.28 },
     );
   }, [lesson.id, reliableSectionNotes, section]);
-  const range =
-    lesson.id === "intro" || lesson.id === "solo"
-      ? (phraseRanges[Math.min(phraseIndex, phraseRanges.length - 1)] ?? null)
-      : makePracticeRange(lesson.id, section, bpm);
+  const range = useMemo<PracticeRange | null>(
+    () =>
+      lesson.id === "play"
+        ? (phraseRanges[Math.min(phraseIndex, phraseRanges.length - 1)] ??
+          (section
+            ? {
+                start: section.start_time,
+                end: Math.min(section.end_time, section.start_time + 5.5),
+              }
+            : null))
+        : makePracticeRange(lesson.id, section, bpm),
+    [bpm, lesson.id, phraseIndex, phraseRanges, section],
+  );
   const phraseNotes = useMemo(() => {
     if (!range) return [];
-    const source =
-      lesson.id === "intro" || lesson.id === "solo"
-        ? reliableSectionNotes
-        : positionedNotes;
+    const source = lesson.id === "play" ? reliableSectionNotes : positionedNotes;
     return source.filter(
       (note) => note.start_time >= range.start && note.start_time < range.end,
     );
@@ -275,8 +301,8 @@ export default function LearnMode({
   }, [chords, profile.chord_shape_shift, section]);
 
   const phraseCount = Math.max(1, phraseRanges.length);
-  const fullSoloRange: PracticePhrase | null =
-    lesson.id === "solo" && section
+  const fullSectionRange: PracticePhrase | null =
+    lesson.id === "play" && section
       ? { start: section.start_time, end: section.end_time }
       : null;
   const activeNoteIndex = phraseNotes.findIndex(
@@ -296,6 +322,11 @@ export default function LearnMode({
     isPlaying &&
     Math.abs(loopStart - range.start) < 0.05 &&
     Math.abs(loopEnd - range.end) < 0.05;
+  const isSectionPreviewPlaying =
+    selectedSectionPreview !== null &&
+    isPlaying &&
+    Math.abs(loopStart - selectedSectionPreview.start) < 0.05 &&
+    Math.abs(loopEnd - selectedSectionPreview.end) < 0.05;
   const phraseLoopProgress = completedLoops % repetitionsPerStep;
 
   useEffect(() => {
@@ -315,7 +346,13 @@ export default function LearnMode({
   function selectLesson(index: number) {
     setLessonIndex(index);
     setPhraseIndex(0);
-    setShowFullSolo(false);
+    setShowFullSection(false);
+  }
+
+  function selectSection(nextSection: Section) {
+    setSelectedSectionId(nextSection.id);
+    setPhraseIndex(0);
+    setShowFullSection(false);
   }
 
   function selectPhrase(nextIndex: number) {
@@ -325,7 +362,7 @@ export default function LearnMode({
     if (isPlaying && nextRange) onReplay(nextRange, practiceSpeed);
   }
 
-  function seekInFullSolo(time: number) {
+  function seekInFullSection(time: number) {
     const nextIndex = phraseRanges.findIndex(
       (phrase) => time >= phrase.start && time <= phrase.end,
     );
@@ -400,8 +437,9 @@ export default function LearnMode({
           <button
             key={item.id}
             onClick={() => selectLesson(index)}
+            disabled={index > 0 && !section}
             aria-current={index === lessonIndex ? "step" : undefined}
-            className={`min-h-10 cursor-pointer rounded-[2px] border px-1 font-josefin text-[7px] uppercase tracking-[0.07em] ${
+            className={`min-h-10 cursor-pointer rounded-[2px] border px-1 font-josefin text-[7px] uppercase tracking-[0.07em] disabled:cursor-default disabled:opacity-35 ${
               index === lessonIndex
                 ? "border-gold bg-gold/10 text-gold"
                 : index < lessonIndex
@@ -416,6 +454,21 @@ export default function LearnMode({
       </div>
 
       <div className="mt-4 border-t border-border-dark pt-4">
+        {lesson.id !== "phrase" && section && (
+          <button
+            type="button"
+            onClick={() => selectLesson(0)}
+            className="mb-3 flex min-h-9 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
+          >
+            <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
+              Learning · <span className="text-gold">{selectedSectionLabel}</span>
+            </span>
+            <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+              Change
+            </span>
+          </button>
+        )}
+
         {lesson.id !== "chords" && lesson.id !== "rhythm" && (
           <>
             <p className="font-playfair text-[22px] italic leading-tight text-text">
@@ -425,6 +478,58 @@ export default function LearnMode({
               {lesson.description}
             </p>
           </>
+        )}
+
+        {lesson.id === "phrase" && (
+          <div className="mt-4">
+            <div className="grid grid-cols-2 gap-2" aria-label="Song phrases">
+              {sectionOptions.map((option) => {
+                const selected = option.section.id === section?.id;
+                return (
+                  <button
+                    key={option.section.id}
+                    type="button"
+                    onClick={() => selectSection(option.section)}
+                    aria-pressed={selected}
+                    className={`min-h-16 cursor-pointer rounded-[2px] border px-3 py-2 text-left ${
+                      selected
+                        ? "border-gold bg-gold/10"
+                        : "border-border-dark bg-bg/30"
+                    }`}
+                  >
+                    <span className={`block font-playfair text-[17px] italic ${selected ? "text-gold" : "text-text"}`}>
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                      {formatTime(option.section.start_time)}–{formatTime(option.section.end_time)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedSectionPreview && (
+              <button
+                type="button"
+                onClick={() =>
+                  isSectionPreviewPlaying
+                    ? onPractice(selectedSectionPreview, 1, "guitar")
+                    : onReplay(selectedSectionPreview, 1, "guitar")
+                }
+                className="mt-3 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
+              >
+                {isSectionPreviewPlaying
+                  ? "Pause preview"
+                  : `Hear ${selectedSectionLabel}`}
+              </button>
+            )}
+
+            {sectionOptions.length === 0 && (
+              <p className="rounded-[2px] border border-border-dark p-3 font-josefin text-[10px] text-text-muted">
+                Song phrases are still being detected.
+              </p>
+            )}
+          </div>
         )}
 
         {lesson.id === "setup" && (
@@ -519,7 +624,7 @@ export default function LearnMode({
           </div>
         )}
 
-        {(lesson.id === "intro" || lesson.id === "solo") && range && (
+        {lesson.id === "play" && range && (
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
               <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
@@ -530,40 +635,38 @@ export default function LearnMode({
               </p>
             </div>
 
-            {lesson.id === "solo" && (
-              <div className="mt-2.5">
-                <SoloPhraseTab
-                  notes={reliableSectionNotes}
-                  range={range}
-                  strings={tuning.strings}
-                  currentTime={currentTime}
-                  onSeek={onSeek}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowFullSolo((value) => !value)}
-                  aria-expanded={showFullSolo}
-                  className="mt-2 min-h-9 w-full cursor-pointer rounded-[2px] border border-border bg-transparent px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
-                >
-                  {showFullSolo ? "Hide entire solo" : "Show entire solo"}
-                </button>
-                {showFullSolo && fullSoloRange && (
-                  <div className="mt-2.5">
-                    <p className="mb-1.5 font-josefin text-[8px] uppercase tracking-[0.13em] text-text-dark">
-                      Entire solo · swipe sideways · tap any fret to jump
-                    </p>
-                    <SoloPhraseTab
-                      notes={reliableSectionNotes}
-                      range={fullSoloRange}
-                      strings={tuning.strings}
-                      currentTime={currentTime}
-                      expanded
-                      onSeek={seekInFullSolo}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="mt-2.5">
+              <SoloPhraseTab
+                notes={reliableSectionNotes}
+                range={range}
+                strings={tuning.strings}
+                currentTime={currentTime}
+                onSeek={onSeek}
+              />
+              <button
+                type="button"
+                onClick={() => setShowFullSection((value) => !value)}
+                aria-expanded={showFullSection}
+                className="mt-2 min-h-9 w-full cursor-pointer rounded-[2px] border border-border bg-transparent px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
+              >
+                {showFullSection ? "Hide entire part" : "Show entire part"}
+              </button>
+              {showFullSection && fullSectionRange && (
+                <div className="mt-2.5">
+                  <p className="mb-1.5 font-josefin text-[8px] uppercase tracking-[0.13em] text-text-dark">
+                    Entire {selectedSectionLabel} · swipe sideways · tap any fret to jump
+                  </p>
+                  <SoloPhraseTab
+                    notes={reliableSectionNotes}
+                    range={fullSectionRange}
+                    strings={tuning.strings}
+                    currentTime={currentTime}
+                    expanded
+                    onSeek={seekInFullSection}
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="mt-2 space-y-2" aria-live="polite">
               {instructionNotes.map((note, index) => {
@@ -751,12 +854,19 @@ export default function LearnMode({
           {lessonIndex < LESSONS.length - 1 ? (
             <button
               onClick={goNext}
-              disabled={lesson.id === "setup" && !tunerComplete}
+              disabled={
+                (lesson.id === "phrase" && !section) ||
+                (lesson.id === "setup" && !tunerComplete)
+              }
               className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
             >
-              {lesson.id === "setup" && !tunerComplete
-                ? "Tune all strings to continue"
-                : "I’m comfortable · Next"}
+              {lesson.id === "phrase" && !section
+                ? "Choose a phrase"
+                : lesson.id === "phrase"
+                  ? "Learn this phrase · Next"
+                : lesson.id === "setup" && !tunerComplete
+                  ? "Tune all strings to continue"
+                  : "I’m comfortable · Next"}
             </button>
           ) : (
             <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
