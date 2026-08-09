@@ -23,7 +23,7 @@ export default async function SongLayout({
       <Header
         songTitle={song?.title}
         songArtist={song?.artist || undefined}
-        backHref="/library"
+        backHref="/practice"
       />
       <TabNav />
       {children}

@@ -328,7 +328,7 @@ function AddSongPageInner() {
             <path d="M21 12a9 9 0 11-6.219-8.56" />
           </svg>
           <p className="font-playfair text-[20px] font-bold italic leading-[1.3] text-gold">
-            Adding to your library...
+            Adding your song...
           </p>
           {importingTitle && (
             <p className="-mt-3 max-w-[320px] font-josefin text-[12px] tracking-[0.06em] text-text-muted">
@@ -446,8 +446,8 @@ function AddSongPageInner() {
           </div>
           <p className="font-josefin text-[12px] tracking-[0.06em] text-text-secondary">
             {resolvedExistingSong
-              ? "This song is already in your library."
-              : "Add this to your library?"}
+              ? "This song is already available to learn."
+              : "Add this song?"}
           </p>
           <div className="flex gap-2">
             <button
@@ -457,7 +457,7 @@ function AddSongPageInner() {
                   router.push(
                     resolvedExistingSong.status === "ready"
                       ? `/song/${resolvedExistingSong.id}`
-                      : "/library",
+                      : "/practice",
                   );
                 } else {
                   handleConfirmAdd();
@@ -468,8 +468,8 @@ function AddSongPageInner() {
               {resolvedExistingSong
                 ? resolvedExistingSong.status === "ready"
                   ? "Open song"
-                  : "View in library"
-                : "Add to library"}
+                  : "View in Learn"
+                : "Add song"}
             </button>
             <button
               type="button"
@@ -505,7 +505,7 @@ function AddSongPageInner() {
                     router.push(
                       existingSong.status === "ready"
                         ? `/song/${existingSong.id}`
-                        : "/library",
+                        : "/practice",
                     );
                   } else {
                     handleResultTap(result);
@@ -544,7 +544,7 @@ function AddSongPageInner() {
                       existingSong ? "text-text-muted" : "text-gold"
                     }`}
                   >
-                    {existingSong ? "Already in library · Open" : "Add to library"}
+                    {existingSong ? "Already added · Open" : "Add song"}
                   </p>
                 </div>
               </button>

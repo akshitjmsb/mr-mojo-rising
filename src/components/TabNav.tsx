@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { label: "Add Song", href: "/" },
-  { label: "Library", href: "/library" },
   { label: "Learn", href: "/practice" },
   { label: "Tuner", href: "/tuner" },
 ];
@@ -15,6 +14,9 @@ export default function TabNav() {
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
+    if (href === "/practice") {
+      return pathname.startsWith("/practice") || pathname.startsWith("/song/");
+    }
     return pathname.startsWith(href);
   }
 
