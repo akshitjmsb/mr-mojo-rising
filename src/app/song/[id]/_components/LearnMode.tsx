@@ -16,6 +16,7 @@ import {
 import { buildMusicalPhrases, type PracticePhrase } from "@/lib/solo-phrases";
 import InlineTuner from "./InlineTuner";
 import ChordShapeCoach from "./ChordShapeCoach";
+import RhythmTimeline from "./RhythmTimeline";
 import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "setup" | "chords" | "rhythm" | "intro" | "solo";
@@ -40,6 +41,11 @@ interface Props {
   loopEnd: number;
   savingTuning: boolean;
   tuningSaveError: boolean;
+  completedLoops: number;
+  repetitionsPerStep: number;
+  bestPracticeSpeed: number;
+  countInEnabled: boolean;
+  autoRampEnabled: boolean;
   onTuningChange: (id: PracticeTuningId) => void;
   onPractice: (
     range: PracticeRange,
@@ -53,6 +59,8 @@ interface Props {
   ) => void;
   onSeek: (time: number) => void;
   onBeforeTunerStart: () => void;
+  onToggleCountIn: () => void;
+  onToggleAutoRamp: () => void;
 }
 
 const LESSONS: Array<{
@@ -142,12 +150,14 @@ function findSection(sections: Section[], lesson: LessonId) {
 function makePracticeRange(
   lesson: LessonId,
   section: Section | null,
+  bpm: number | null,
 ): PracticeRange | null {
   if (!section || lesson === "setup" || lesson === "chords") return null;
   if (lesson === "rhythm") {
+    const twoBars = bpm && bpm > 0 ? (8 * 60) / bpm : 6;
     return {
       start: section.start_time,
-      end: Math.min(section.end_time, section.start_time + 6),
+      end: Math.min(section.end_time, section.start_time + twoBars),
     };
   }
   return null;
@@ -180,11 +190,18 @@ export default function LearnMode({
   loopEnd,
   savingTuning,
   tuningSaveError,
+  completedLoops,
+  repetitionsPerStep,
+  bestPracticeSpeed,
+  countInEnabled,
+  autoRampEnabled,
   onTuningChange,
   onPractice,
   onReplay,
   onSeek,
   onBeforeTunerStart,
+  onToggleCountIn,
+  onToggleAutoRamp,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [phraseIndex, setPhraseIndex] = useState(0);
@@ -225,7 +242,7 @@ export default function LearnMode({
   const range =
     lesson.id === "intro" || lesson.id === "solo"
       ? (phraseRanges[Math.min(phraseIndex, phraseRanges.length - 1)] ?? null)
-      : makePracticeRange(lesson.id, section);
+      : makePracticeRange(lesson.id, section, bpm);
   const phraseNotes = useMemo(() => {
     if (!range) return [];
     const source =
@@ -279,13 +296,7 @@ export default function LearnMode({
     isPlaying &&
     Math.abs(loopStart - range.start) < 0.05 &&
     Math.abs(loopEnd - range.end) < 0.05;
-  const rhythmBeat =
-    lesson.id === "rhythm" &&
-    range &&
-    bpm &&
-    isCurrentRangePlaying
-      ? Math.floor(Math.max(0, currentTime - range.start) / (60 / bpm)) % 4
-      : -1;
+  const phraseLoopProgress = completedLoops % repetitionsPerStep;
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -466,22 +477,13 @@ export default function LearnMode({
 
         {lesson.id === "rhythm" && range && (
           <div className="mt-2">
-            <div
-              className="flex h-28 items-end justify-center gap-3 border-y border-border-dark py-5"
-              aria-label="Four-beat rhythm pulse"
-            >
-              {[0, 1, 2, 3].map((beat) => (
-                <span
-                  key={beat}
-                  aria-hidden="true"
-                  className={`w-8 rounded-t-[2px] transition-[height,background-color] duration-75 ${
-                    beat === rhythmBeat
-                      ? "h-20 bg-gold"
-                      : "h-10 bg-border-dark"
-                  }`}
-                />
-              ))}
-            </div>
+            <RhythmTimeline
+              notes={reliableSectionNotes}
+              start={range.start}
+              end={range.end}
+              currentTime={currentTime}
+              active={isCurrentRangePlaying}
+            />
 
             <div className="mt-3 grid grid-cols-2 gap-2">
               {RHYTHM_SPEEDS.map((option) => {
@@ -625,6 +627,58 @@ export default function LearnMode({
               >
                 Next
               </button>
+            </div>
+
+            <div
+              className="mt-3 border-t border-border-dark pt-3"
+              aria-label="Phrase practice"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex gap-1.5" aria-label={`${phraseLoopProgress} of ${repetitionsPerStep} loops`}>
+                  {Array.from({ length: repetitionsPerStep }, (_, index) => (
+                    <span
+                      key={index}
+                      className={`h-2 w-2 rounded-full ${
+                        index < phraseLoopProgress
+                          ? "bg-gold"
+                          : "bg-border-dark"
+                      }`}
+                    />
+                  ))}
+                </div>
+                {bestPracticeSpeed > 0 && (
+                  <span className="font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
+                    Best {Math.round(bestPracticeSpeed * 100)}%
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={onToggleCountIn}
+                  disabled={!bpm}
+                  aria-pressed={countInEnabled}
+                  className={`min-h-9 cursor-pointer rounded-[2px] border font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-40 ${
+                    countInEnabled
+                      ? "border-gold bg-gold/10 text-gold"
+                      : "border-border-dark text-text-muted"
+                  }`}
+                >
+                  Count-in
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleAutoRamp}
+                  aria-pressed={autoRampEnabled}
+                  className={`min-h-9 cursor-pointer rounded-[2px] border font-josefin text-[8px] uppercase tracking-[0.1em] ${
+                    autoRampEnabled
+                      ? "border-gold bg-gold/10 text-gold"
+                      : "border-border-dark text-text-muted"
+                  }`}
+                >
+                  Auto +5%
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -18,7 +18,6 @@ import type { DownloadStemKey } from "./_components/DownloadPanel";
 import Scrubber from "./_components/Scrubber";
 import TransportControls from "./_components/TransportControls";
 import SpeedPresets from "./_components/SpeedPresets";
-import PhraseTrainer from "./_components/PhraseTrainer";
 import PlayingSetup from "./_components/PlayingSetup";
 import LearnMode from "./_components/LearnMode";
 import { useCountIn } from "./_hooks/useCountIn";
@@ -504,40 +503,6 @@ export default function SongPlayerPage() {
     startCountIn,
   ]);
 
-  function snapToBeat(time: number) {
-    if (!song?.bpm) return time;
-    const beatDuration = 60 / song.bpm;
-    return Math.round(time / beatDuration) * beatDuration;
-  }
-
-  function handleSetLoopStart() {
-    const minimumPhrase = song?.bpm ? 60 / song.bpm : 0.5;
-    const start = Math.max(0, snapToBeat(currentTime));
-    if (start > loopEnd - minimumPhrase) return;
-    setPracticeRange({ start, end: loopEnd });
-    resetLoopProgress();
-  }
-
-  function handleSetLoopEnd() {
-    const minimumPhrase = song?.bpm ? 60 / song.bpm : 0.5;
-    const end = Math.min(
-      duration || Number.POSITIVE_INFINITY,
-      snapToBeat(currentTime),
-    );
-    if (end < loopStart + minimumPhrase) return;
-    setPracticeRange({ start: loopStart, end });
-    resetLoopProgress();
-  }
-
-  function handleResetPracticeRange() {
-    if (!activeSection) return;
-    setPracticeRange({
-      start: activeSection.start_time,
-      end: activeSection.end_time,
-    });
-    resetLoopProgress();
-  }
-
   function handleSpeedChange(nextSpeed: number) {
     setSpeed(nextSpeed);
     resetLoopProgress();
@@ -745,11 +710,23 @@ export default function SongPlayerPage() {
           loopEnd={loopEnd}
           savingTuning={profileSaveState === "saving"}
           tuningSaveError={profileSaveState === "error"}
+          completedLoops={completedLoops}
+          repetitionsPerStep={REPETITIONS_PER_STEP}
+          bestPracticeSpeed={bestPracticeSpeed}
+          countInEnabled={countInEnabled}
+          autoRampEnabled={autoRampEnabled}
           onTuningChange={handleTuningChange}
           onPractice={handleLessonPractice}
           onReplay={playLessonRange}
           onSeek={seekTo}
           onBeforeTunerStart={handleBeforeTunerStart}
+          onToggleCountIn={() => {
+            if (isCountingIn) cancelCountInPlayback();
+            setCountInEnabled((value) => !value);
+          }}
+          onToggleAutoRamp={() =>
+            setAutoRampEnabled((value) => !value)
+          }
         />
       ) : (
         <>
@@ -808,27 +785,6 @@ export default function SongPlayerPage() {
             activeSection={activeSection}
             onSelect={handleSelectSection}
           />
-          {tabNotes.length > 0 && loopEnd > loopStart && (
-            <PhraseTrainer
-              loopStart={loopStart}
-              loopEnd={loopEnd}
-              bpm={song.bpm}
-              speed={speed}
-              completedLoops={completedLoops}
-              repetitionsPerStep={REPETITIONS_PER_STEP}
-              bestPracticeSpeed={bestPracticeSpeed}
-              countInEnabled={countInEnabled}
-              autoRampEnabled={autoRampEnabled}
-              onSetStart={handleSetLoopStart}
-              onSetEnd={handleSetLoopEnd}
-              onResetRange={handleResetPracticeRange}
-              onToggleCountIn={() => {
-                if (isCountingIn) cancelCountInPlayback();
-                setCountInEnabled((value) => !value);
-              }}
-              onToggleAutoRamp={() => setAutoRampEnabled((value) => !value)}
-            />
-          )}
           <TabPanel
             notes={tabNotes}
             currentTime={currentTime}
