@@ -58,6 +58,19 @@ export const TUNINGS: Tuning[] = [
     ],
   },
   {
+    id: "eb-standard",
+    label: "E♭ Standard",
+    description: "E♭ A♭ D♭ G♭ B♭ E♭",
+    strings: [
+      note("E♭2", 39),
+      note("A♭2", 44),
+      note("D♭3", 49),
+      note("G♭3", 54),
+      note("B♭3", 58),
+      note("E♭4", 63),
+    ],
+  },
+  {
     id: "drop-d",
     label: "Drop D",
     description: "D A D G B E",

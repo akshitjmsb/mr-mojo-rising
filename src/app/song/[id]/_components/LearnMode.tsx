@@ -14,6 +14,7 @@ import {
   type PracticeTuningId,
 } from "@/lib/guitar";
 import { buildMusicalPhrases, type PracticePhrase } from "@/lib/solo-phrases";
+import InlineTuner from "./InlineTuner";
 import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "setup" | "chords" | "rhythm" | "intro" | "solo";
@@ -38,6 +39,7 @@ interface Props {
   onPractice: (range: PracticeRange, speed: number) => void;
   onReplay: (range: PracticeRange, speed: number) => void;
   onSeek: (time: number) => void;
+  onBeforeTunerStart: () => void;
 }
 
 const LESSONS: Array<{
@@ -148,10 +150,12 @@ export default function LearnMode({
   onPractice,
   onReplay,
   onSeek,
+  onBeforeTunerStart,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [showFullSolo, setShowFullSolo] = useState(false);
+  const [tunerComplete, setTunerComplete] = useState(false);
   const lesson = LESSONS[lessonIndex];
   const tuning = getPracticeTuning(profile.tuning_id);
   const section = findSection(sections, lesson.id);
@@ -341,6 +345,15 @@ export default function LearnMode({
                 Tuning could not be saved. Try once more.
               </p>
             )}
+            <InlineTuner
+              onBeforeStart={onBeforeTunerStart}
+              onComplete={() => {
+                if (profile.tuning_id !== "eb-standard") {
+                  onTuningChange("eb-standard");
+                }
+                setTunerComplete(true);
+              }}
+            />
           </div>
         )}
 
@@ -514,9 +527,12 @@ export default function LearnMode({
           {lessonIndex < LESSONS.length - 1 ? (
             <button
               onClick={goNext}
-              className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
+              disabled={lesson.id === "setup" && !tunerComplete}
+              className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
             >
-              I’m comfortable · Next
+              {lesson.id === "setup" && !tunerComplete
+                ? "Tune all strings to continue"
+                : "I’m comfortable · Next"}
             </button>
           ) : (
             <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">

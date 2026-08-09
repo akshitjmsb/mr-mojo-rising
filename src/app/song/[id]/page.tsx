@@ -603,6 +603,13 @@ export default function SongPlayerPage() {
     );
   }
 
+  function handleBeforeTunerStart() {
+    if (isCountingIn) cancelCountInPlayback();
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    setMetronomeOn(false);
+  }
+
   function handleLessonPractice(range: PracticeRange, nextSpeed: number) {
     const sameRange =
       Math.abs(loopStart - range.start) < 0.05 &&
@@ -704,6 +711,7 @@ export default function SongPlayerPage() {
           onPractice={handleLessonPractice}
           onReplay={playLessonRange}
           onSeek={seekTo}
+          onBeforeTunerStart={handleBeforeTunerStart}
         />
       ) : (
         <>
