@@ -25,6 +25,8 @@ type PracticeRange = {
   end: number;
 };
 
+type LessonAudioSource = "guitar" | "full";
+
 interface Props {
   sections: Section[];
   chords: Chord[];
@@ -33,13 +35,22 @@ interface Props {
   profile: PracticeProfile;
   currentTime: number;
   isPlaying: boolean;
+  currentAudioSource: "guitar" | "bass" | "vocals" | "full";
   loopStart: number;
   loopEnd: number;
   savingTuning: boolean;
   tuningSaveError: boolean;
   onTuningChange: (id: PracticeTuningId) => void;
-  onPractice: (range: PracticeRange, speed: number) => void;
-  onReplay: (range: PracticeRange, speed: number) => void;
+  onPractice: (
+    range: PracticeRange,
+    speed: number,
+    source?: LessonAudioSource,
+  ) => void;
+  onReplay: (
+    range: PracticeRange,
+    speed: number,
+    source?: LessonAudioSource,
+  ) => void;
   onSeek: (time: number) => void;
   onBeforeTunerStart: () => void;
 }
@@ -98,6 +109,11 @@ const PRACTICE_SPEEDS = [
   { value: 0.65, percent: 65, purpose: "Build" },
   { value: 0.8, percent: 80, purpose: "Prepare" },
   { value: 1, percent: 100, purpose: "Original" },
+] as const;
+
+const RHYTHM_SPEEDS = [
+  { speed: 0.8, label: "Slow", percent: "80%", source: "guitar" },
+  { speed: 1, label: "Original", percent: "100%", source: "full" },
 ] as const;
 
 type PracticeSpeed = (typeof PRACTICE_SPEEDS)[number]["value"];
@@ -159,6 +175,7 @@ export default function LearnMode({
   profile,
   currentTime,
   isPlaying,
+  currentAudioSource,
   loopStart,
   loopEnd,
   savingTuning,
@@ -262,6 +279,13 @@ export default function LearnMode({
     isPlaying &&
     Math.abs(loopStart - range.start) < 0.05 &&
     Math.abs(loopEnd - range.end) < 0.05;
+  const rhythmBeat =
+    lesson.id === "rhythm" &&
+    range &&
+    bpm &&
+    isCurrentRangePlaying
+      ? Math.floor(Math.max(0, currentTime - range.start) / (60 / bpm)) % 4
+      : -1;
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -319,6 +343,31 @@ export default function LearnMode({
     if (isCurrentRangePlaying && range) onReplay(range, nextSpeed);
   }
 
+  function playRhythm(
+    nextSpeed: 0.8 | 1,
+    source: LessonAudioSource,
+  ) {
+    if (!range) return;
+    const samePlayingSpeed =
+      isCurrentRangePlaying &&
+      practiceSpeed === nextSpeed &&
+      currentAudioSource === source;
+    setPracticeSpeed(nextSpeed);
+    try {
+      window.localStorage.setItem(
+        PRACTICE_SPEED_STORAGE_KEY,
+        String(nextSpeed),
+      );
+    } catch {
+      // Keep the in-memory selection when storage is unavailable.
+    }
+    if (samePlayingSpeed) {
+      onPractice(range, nextSpeed, source);
+    } else {
+      onReplay(range, nextSpeed, source);
+    }
+  }
+
   return (
     <section className="mx-5 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
       <div className="flex items-center justify-between gap-4">
@@ -356,7 +405,7 @@ export default function LearnMode({
       </div>
 
       <div className="mt-4 border-t border-border-dark pt-4">
-        {lesson.id !== "chords" && (
+        {lesson.id !== "chords" && lesson.id !== "rhythm" && (
           <>
             <p className="font-playfair text-[22px] italic leading-tight text-text">
               {lesson.title}
@@ -415,17 +464,55 @@ export default function LearnMode({
           </div>
         )}
 
-        {lesson.id === "rhythm" && (
-          <div className="mt-4 rounded-[2px] border border-border-dark bg-bg/50 p-3">
-            <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-              Beginner rhythm
-            </p>
-            <p className="mt-2 font-playfair text-[18px] italic text-gold">
-              ↓ &nbsp; ↓ &nbsp; ↓ &nbsp; ↓
-            </p>
-            <p className="mt-2 font-josefin text-[10px] leading-relaxed text-text-muted">
-              One relaxed down-strum per beat. Keep moving even if a chord change is imperfect.
-            </p>
+        {lesson.id === "rhythm" && range && (
+          <div className="mt-2">
+            <div
+              className="flex h-28 items-end justify-center gap-3 border-y border-border-dark py-5"
+              aria-label="Four-beat rhythm pulse"
+            >
+              {[0, 1, 2, 3].map((beat) => (
+                <span
+                  key={beat}
+                  aria-hidden="true"
+                  className={`w-8 rounded-t-[2px] transition-[height,background-color] duration-75 ${
+                    beat === rhythmBeat
+                      ? "h-20 bg-gold"
+                      : "h-10 bg-border-dark"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {RHYTHM_SPEEDS.map((option) => {
+                const active =
+                  practiceSpeed === option.speed &&
+                  currentAudioSource === option.source &&
+                  isCurrentRangePlaying;
+                return (
+                  <button
+                    key={option.speed}
+                    type="button"
+                    onClick={() =>
+                      playRhythm(option.speed, option.source)
+                    }
+                    aria-pressed={active}
+                    className={`min-h-16 cursor-pointer rounded-[2px] border font-josefin uppercase tracking-[0.12em] ${
+                      active
+                        ? "border-gold bg-gold/10 text-gold"
+                        : "border-border-dark bg-transparent text-text-muted"
+                    }`}
+                  >
+                    <span className="block text-[10px]">
+                      {active ? "Pause" : option.label}
+                    </span>
+                    <span className="mt-1 block text-[8px] text-text-dark">
+                      {option.percent}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -542,7 +629,7 @@ export default function LearnMode({
           </div>
         )}
 
-        {range && (
+        {range && lesson.id !== "rhythm" && (
           <div className="mt-4">
             <fieldset>
               <legend className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">

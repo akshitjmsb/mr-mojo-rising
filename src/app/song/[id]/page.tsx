@@ -268,6 +268,10 @@ export default function SongPlayerPage() {
     time: 0,
     playing: false,
   });
+  const pendingLessonPlaybackRef = useRef<{
+    time: number;
+    playing: boolean;
+  } | null>(null);
 
   const finishCountIn = useCallback(() => {
     const audio = audioRef.current;
@@ -328,7 +332,11 @@ export default function SongPlayerPage() {
     audio.addEventListener("ended", onEnded);
 
     return () => {
-      resumeRef.current = { time: audio.currentTime, playing: !audio.paused };
+      resumeRef.current = pendingLessonPlaybackRef.current ?? {
+        time: audio.currentTime,
+        playing: !audio.paused,
+      };
+      pendingLessonPlaybackRef.current = null;
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("ended", onEnded);
       audio.pause();
@@ -583,12 +591,20 @@ export default function SongPlayerPage() {
     }
   }
 
-  function playLessonRange(range: PracticeRange, nextSpeed: number) {
+  function playLessonRange(
+    range: PracticeRange,
+    nextSpeed: number,
+    requestedSource: "guitar" | "full" = "guitar",
+  ) {
     if (isCountingIn) cancelCountInPlayback();
     const audio = audioRef.current;
     if (!audio) return;
 
-    setStemMode("guitar");
+    const nextSource =
+      requestedSource === "guitar" && !stems?.guitar_url
+        ? "full"
+        : requestedSource;
+
     setActiveSection(findSectionForTime(range.start));
     setPracticeRange(range);
     setSpeed(nextSpeed);
@@ -597,6 +613,18 @@ export default function SongPlayerPage() {
     audio.currentTime = range.start;
     audio.playbackRate = nextSpeed;
     setCurrentTime(range.start);
+
+    if (stemMode !== nextSource) {
+      audio.pause();
+      pendingLessonPlaybackRef.current = {
+        time: range.start,
+        playing: true,
+      };
+      setIsPlaying(false);
+      setStemMode(nextSource);
+      return;
+    }
+
     void audio.play().then(
       () => setIsPlaying(true),
       () => setIsPlaying(false),
@@ -610,16 +638,24 @@ export default function SongPlayerPage() {
     setMetronomeOn(false);
   }
 
-  function handleLessonPractice(range: PracticeRange, nextSpeed: number) {
+  function handleLessonPractice(
+    range: PracticeRange,
+    nextSpeed: number,
+    requestedSource: "guitar" | "full" = "guitar",
+  ) {
+    const nextSource =
+      requestedSource === "guitar" && !stems?.guitar_url
+        ? "full"
+        : requestedSource;
     const sameRange =
       Math.abs(loopStart - range.start) < 0.05 &&
       Math.abs(loopEnd - range.end) < 0.05;
-    if (isPlaying && sameRange) {
+    if (isPlaying && sameRange && stemMode === nextSource) {
       audioRef.current?.pause();
       setIsPlaying(false);
       return;
     }
-    playLessonRange(range, nextSpeed);
+    playLessonRange(range, nextSpeed, nextSource);
   }
 
   // Keyboard shortcuts: ←/→ seek, space toggles play.
@@ -704,6 +740,7 @@ export default function SongPlayerPage() {
           profile={practiceProfile}
           currentTime={currentTime}
           isPlaying={isPlaying}
+          currentAudioSource={stemMode}
           loopStart={loopStart}
           loopEnd={loopEnd}
           savingTuning={profileSaveState === "saving"}
