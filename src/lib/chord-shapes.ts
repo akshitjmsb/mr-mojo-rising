@@ -67,3 +67,11 @@ export const OPEN_CHORD_SHAPES: Readonly<Record<string, ChordShape>> = {
 export function getChordShape(chord: string) {
   return OPEN_CHORD_SHAPES[chord] ?? null;
 }
+
+const STANDARD_OPEN_MIDI = [40, 45, 50, 55, 59, 64] as const;
+
+export function chordMidiNotes(shape: ChordShape, tuningOffset: number) {
+  return shape.frets.flatMap((fret, stringIndex) =>
+    fret === null ? [] : [STANDARD_OPEN_MIDI[stringIndex] + tuningOffset + fret],
+  );
+}

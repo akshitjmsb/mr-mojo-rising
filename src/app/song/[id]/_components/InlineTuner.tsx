@@ -7,6 +7,10 @@ import {
   TUNINGS,
   centsToTargetFolded,
 } from "@/app/(main)/tuner/_lib/tunings";
+import {
+  playReferenceNote,
+  stopReferenceAudio,
+} from "@/lib/reference-audio";
 
 interface Props {
   onBeforeStart: () => void;
@@ -85,6 +89,7 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
   }, [allTuned, onComplete, stop]);
 
   function chooseString(index: number) {
+    if (running) stop();
     stableSinceRef.current = null;
     setHoldProgress(0);
     setTargetIndex(index);
@@ -94,6 +99,7 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
       ),
     );
     reportedCompleteRef.current = false;
+    void playReferenceNote(EB_TUNING.strings[index].frequency);
   }
 
   function markTunedElsewhere() {
@@ -166,7 +172,7 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
             type="button"
             onClick={() => chooseString(index)}
             aria-pressed={targetIndex === index}
-            aria-label={`${string.name}${tuned[index] ? ", tuned" : ""}`}
+            aria-label={`Play ${string.name} reference${tuned[index] ? ", tuned" : ""}`}
             className={`min-h-11 cursor-pointer rounded-[1px] border font-playfair text-[12px] italic ${
               tuned[index]
                 ? "border-gold bg-gold/10 text-gold"
@@ -188,6 +194,7 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
             if (running) {
               stop();
             } else {
+              stopReferenceAudio();
               onBeforeStart();
               void start();
             }

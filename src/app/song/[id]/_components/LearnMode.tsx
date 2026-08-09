@@ -127,12 +127,11 @@ function makePracticeRange(
   lesson: LessonId,
   section: Section | null,
 ): PracticeRange | null {
-  if (!section || lesson === "setup") return null;
-  if (lesson === "chords" || lesson === "rhythm") {
-    const length = lesson === "chords" ? 8 : 6;
+  if (!section || lesson === "setup" || lesson === "chords") return null;
+  if (lesson === "rhythm") {
     return {
       start: section.start_time,
-      end: Math.min(section.end_time, section.start_time + length),
+      end: Math.min(section.end_time, section.start_time + 6),
     };
   }
   return null;
@@ -357,12 +356,16 @@ export default function LearnMode({
       </div>
 
       <div className="mt-4 border-t border-border-dark pt-4">
-        <p className="font-playfair text-[22px] italic leading-tight text-text">
-          {lesson.title}
-        </p>
-        <p className="mt-1.5 font-josefin text-[10px] font-thin leading-relaxed text-text-muted">
-          {lesson.description}
-        </p>
+        {lesson.id !== "chords" && (
+          <>
+            <p className="font-playfair text-[22px] italic leading-tight text-text">
+              {lesson.title}
+            </p>
+            <p className="mt-1.5 font-josefin text-[10px] font-thin leading-relaxed text-text-muted">
+              {lesson.description}
+            </p>
+          </>
+        )}
 
         {lesson.id === "setup" && (
           <div className="mt-4 rounded-[2px] border border-border-dark bg-bg/50 p-3">
@@ -404,18 +407,11 @@ export default function LearnMode({
         )}
 
         {lesson.id === "chords" && (
-          <div className="mt-4">
-            <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-              Your first shapes
-            </p>
+          <div className="mt-1">
             <ChordShapeCoach
               chords={sectionChords}
-              tuningName={tuning.name}
               tuningOffset={profile.tuning_offset}
             />
-            <p className="mt-3 font-josefin text-[10px] leading-relaxed text-text-muted">
-              Hold each shape, pick every string, and fix any buzz. Then change between two shapes without a timer.
-            </p>
           </div>
         )}
 
