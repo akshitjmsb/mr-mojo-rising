@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Spinner from "@/components/Spinner";
 import type {
@@ -22,7 +22,7 @@ type PracticeRange = {
   end: number;
 };
 
-type AudioSource = "guitar" | "bass" | "full";
+type AudioSource = "guitar" | "bass" | "backing" | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getPracticeTuning("standard");
@@ -61,6 +61,7 @@ export default function SongPlayerPage() {
   const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioGroupRef = useRef<HTMLAudioElement[]>([]);
   const animFrameRef = useRef<number>(0);
 
   // Fetch the full song bundle once, then use the lightweight status endpoint
@@ -151,12 +152,14 @@ export default function SongPlayerPage() {
     };
   }, [songId]);
 
-  const audioUrl =
-    stemMode === "guitar"
-      ? stems?.guitar_url
-      : stemMode === "bass"
-        ? stems?.bass_url
-        : stems?.original_url;
+  const audioUrls = useMemo(() => {
+    if (stemMode === "guitar") return stems?.guitar_url ? [stems.guitar_url] : [];
+    if (stemMode === "bass") return stems?.bass_url ? [stems.bass_url] : [];
+    if (stemMode === "full") return stems?.original_url ? [stems.original_url] : [];
+    return [stems?.vocals_url, stems?.drums_url, stems?.bass_url].filter(
+      (url): url is string => Boolean(url),
+    );
+  }, [stemMode, stems]);
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
@@ -169,47 +172,65 @@ export default function SongPlayerPage() {
     playing: boolean;
   } | null>(null);
 
-  // Wire up the audio element when the source changes.
+  // A backing track is a synchronized group of vocals, drums, and bass.
+  // Other sources remain a one-element group and use the same transport.
   useEffect(() => {
-    if (!audioUrl) return;
-    const audio = new Audio(audioUrl);
-    audio.playbackRate = speed;
-    // Slowing down must not drop the pitch — this is a practice tool.
-    audio.preservesPitch = true;
-    audioRef.current = audio;
+    if (audioUrls.length === 0) return;
+    const audios = audioUrls.map((url) => {
+      const audio = new Audio(url);
+      audio.preload = "auto";
+      audio.playbackRate = speed;
+      audio.volume = stemMode === "backing" ? 0.72 : 1;
+      // Slowing down must not drop the pitch — this is a practice tool.
+      audio.preservesPitch = true;
+      return audio;
+    });
+    const leader = audios[0];
+    audioRef.current = leader;
+    audioGroupRef.current = audios;
 
     const resume = resumeRef.current;
+    let readyCount = 0;
     const onLoaded = () => {
-      if (resume.time > 0 && resume.time < audio.duration) {
-        audio.currentTime = resume.time;
+      readyCount += 1;
+      if (readyCount < audios.length) return;
+      if (resume.time > 0 && resume.time < leader.duration) {
+        for (const audio of audios) audio.currentTime = resume.time;
         setCurrentTime(resume.time);
       }
       if (resume.playing) {
-        audio.play().catch(() => setIsPlaying(false));
-        setIsPlaying(true);
+        void Promise.all(audios.map((audio) => audio.play())).then(
+          () => setIsPlaying(true),
+          () => setIsPlaying(false),
+        );
       }
     };
     const onEnded = () => setIsPlaying(false);
-    audio.addEventListener("loadedmetadata", onLoaded);
-    audio.addEventListener("ended", onEnded);
+    for (const audio of audios) {
+      audio.addEventListener("loadedmetadata", onLoaded);
+    }
+    leader.addEventListener("ended", onEnded);
 
     return () => {
       resumeRef.current = pendingLessonPlaybackRef.current ?? {
-        time: audio.currentTime,
-        playing: !audio.paused,
+        time: leader.currentTime,
+        playing: !leader.paused,
       };
       pendingLessonPlaybackRef.current = null;
-      audio.removeEventListener("loadedmetadata", onLoaded);
-      audio.removeEventListener("ended", onEnded);
-      audio.pause();
-      audio.src = "";
+      for (const audio of audios) {
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.pause();
+        audio.src = "";
+      }
+      leader.removeEventListener("ended", onEnded);
       audioRef.current = null;
+      audioGroupRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioUrl]);
+  }, [audioUrls]);
 
   useEffect(() => {
-    if (audioRef.current) audioRef.current.playbackRate = speed;
+    for (const audio of audioGroupRef.current) audio.playbackRate = speed;
   }, [speed]);
 
   const seekTo = useCallback((time: number) => {
@@ -220,7 +241,7 @@ export default function SongPlayerPage() {
         ? audio.duration
         : time;
     const clamped = Math.max(0, Math.min(time, max));
-    audio.currentTime = clamped;
+    for (const track of audioGroupRef.current) track.currentTime = clamped;
     setCurrentTime(clamped);
   }, []);
 
@@ -236,8 +257,12 @@ export default function SongPlayerPage() {
     setCurrentTime(now);
 
     if (loopEnd > loopStart && now >= loopEnd) {
-      audio.currentTime = loopStart;
+      for (const track of audioGroupRef.current) track.currentTime = loopStart;
       setCurrentTime(loopStart);
+    } else if (audioGroupRef.current.length > 1) {
+      for (const track of audioGroupRef.current.slice(1)) {
+        if (Math.abs(track.currentTime - now) > 0.08) track.currentTime = now;
+      }
     }
 
     if (isPlaying) animFrameRef.current = requestAnimationFrame(updateTime);
@@ -276,6 +301,26 @@ export default function SongPlayerPage() {
     }
   }
 
+  function resolveAudioSource(requestedSource: AudioSource): AudioSource {
+    if (requestedSource === "guitar" && !stems?.guitar_url) return "full";
+    if (requestedSource === "bass" && !stems?.bass_url) return "full";
+    if (
+      requestedSource === "backing" &&
+      (!stems?.vocals_url || !stems?.drums_url || !stems?.bass_url)
+    ) {
+      return "full";
+    }
+    return requestedSource;
+  }
+
+  function pauseAudioGroup() {
+    for (const audio of audioGroupRef.current) audio.pause();
+  }
+
+  function playAudioGroup() {
+    return Promise.all(audioGroupRef.current.map((audio) => audio.play()));
+  }
+
   function playLessonRange(
     range: PracticeRange,
     nextSpeed: number,
@@ -284,20 +329,18 @@ export default function SongPlayerPage() {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const nextSource =
-      (requestedSource === "guitar" && !stems?.guitar_url) ||
-      (requestedSource === "bass" && !stems?.bass_url)
-        ? "full"
-        : requestedSource;
+    const nextSource = resolveAudioSource(requestedSource);
 
     setPracticeRange(range);
     setSpeed(nextSpeed);
-    audio.currentTime = range.start;
-    audio.playbackRate = nextSpeed;
+    for (const track of audioGroupRef.current) {
+      track.currentTime = range.start;
+      track.playbackRate = nextSpeed;
+    }
     setCurrentTime(range.start);
 
     if (stemMode !== nextSource) {
-      audio.pause();
+      pauseAudioGroup();
       pendingLessonPlaybackRef.current = {
         time: range.start,
         playing: true,
@@ -307,14 +350,14 @@ export default function SongPlayerPage() {
       return;
     }
 
-    void audio.play().then(
+    void playAudioGroup().then(
       () => setIsPlaying(true),
       () => setIsPlaying(false),
     );
   }
 
   function handleBeforeTunerStart() {
-    audioRef.current?.pause();
+    pauseAudioGroup();
     setIsPlaying(false);
   }
 
@@ -323,16 +366,12 @@ export default function SongPlayerPage() {
     nextSpeed: number,
     requestedSource: AudioSource = "guitar",
   ) {
-    const nextSource =
-      (requestedSource === "guitar" && !stems?.guitar_url) ||
-      (requestedSource === "bass" && !stems?.bass_url)
-        ? "full"
-        : requestedSource;
+    const nextSource = resolveAudioSource(requestedSource);
     const sameRange =
       Math.abs(loopStart - range.start) < 0.05 &&
       Math.abs(loopEnd - range.end) < 0.05;
     if (isPlaying && sameRange && stemMode === nextSource) {
-      audioRef.current?.pause();
+      pauseAudioGroup();
       setIsPlaying(false);
       return;
     }
@@ -371,6 +410,9 @@ export default function SongPlayerPage() {
         bpm={song.bpm}
         hasGuitarStem={Boolean(stems?.guitar_url)}
         hasBassStem={Boolean(stems?.bass_url)}
+        hasBackingTrack={Boolean(
+          stems?.vocals_url && stems?.drums_url && stems?.bass_url,
+        )}
         profile={practiceProfile}
         currentTime={currentTime}
         isPlaying={isPlaying}
@@ -384,6 +426,7 @@ export default function SongPlayerPage() {
         onPractice={handleLessonPractice}
         onReplay={playLessonRange}
         onSeek={seekTo}
+        onPause={handleBeforeTunerStart}
         onBeforeTunerStart={handleBeforeTunerStart}
       />
     </main>

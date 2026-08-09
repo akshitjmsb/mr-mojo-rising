@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { TabNote } from "@/lib/database.types";
 import type { PracticePhrase } from "@/lib/solo-phrases";
 
@@ -69,6 +69,18 @@ export default function SoloPhraseTab({
   const playheadPercent =
     ((currentTime - range.start) / duration) * 100;
   const showPlayhead = currentTime >= range.start && currentTime <= range.end;
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!expanded || !showPlayhead || !scrollerRef.current) return;
+    const scroller = scrollerRef.current;
+    const progress = Math.max(0, Math.min(1, playheadPercent / 100));
+    const target = progress * scroller.scrollWidth - scroller.clientWidth * 0.42;
+    scroller.scrollLeft = Math.max(
+      0,
+      Math.min(scroller.scrollWidth - scroller.clientWidth, target),
+    );
+  }, [expanded, playheadPercent, showPlayhead]);
 
   return (
     <div>
@@ -89,7 +101,10 @@ export default function SoloPhraseTab({
           ))}
         </div>
 
-        <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:thin]">
+        <div
+          ref={scrollerRef}
+          className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:thin]"
+        >
           <div
             className="relative select-none"
             role="group"

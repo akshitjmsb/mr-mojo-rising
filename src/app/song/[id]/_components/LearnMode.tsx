@@ -20,9 +20,11 @@ import {
   snapLearningRange,
   type LearningRange,
 } from "@/lib/learning-range";
+import { extractLeadNotes } from "@/lib/lead-notes";
 import InlineTuner from "./InlineTuner";
 import ChordShapeCoach from "./ChordShapeCoach";
 import LearningRangePicker from "./LearningRangePicker";
+import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmTimeline from "./RhythmTimeline";
 import SoloPhraseTab from "./SoloPhraseTab";
 
@@ -34,7 +36,7 @@ type PracticeRange = {
   end: number;
 };
 
-type LessonAudioSource = "guitar" | "bass" | "full";
+type LessonAudioSource = "guitar" | "bass" | "backing" | "full";
 
 interface Props {
   sections: Section[];
@@ -43,6 +45,7 @@ interface Props {
   bpm: number | null;
   hasGuitarStem: boolean;
   hasBassStem: boolean;
+  hasBackingTrack: boolean;
   profile: PracticeProfile;
   currentTime: number;
   isPlaying: boolean;
@@ -64,6 +67,7 @@ interface Props {
     source?: LessonAudioSource,
   ) => void;
   onSeek: (time: number) => void;
+  onPause: () => void;
   onBeforeTunerStart: () => void;
 }
 
@@ -205,6 +209,7 @@ export default function LearnMode({
   bpm,
   hasGuitarStem,
   hasBassStem,
+  hasBackingTrack,
   profile,
   currentTime,
   isPlaying,
@@ -218,6 +223,7 @@ export default function LearnMode({
   onPractice,
   onReplay,
   onSeek,
+  onPause,
   onBeforeTunerStart,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
@@ -313,6 +319,10 @@ export default function LearnMode({
           )
         : [],
     [learningRange, reliableSectionNotes],
+  );
+  const leadLearningNotes = useMemo(
+    () => extractLeadNotes(reliableLearningNotes),
+    [reliableLearningNotes],
   );
   const range = makePracticeRange(lesson.id, learningRange);
   const sectionChords = useMemo(() => {
@@ -784,15 +794,24 @@ export default function LearnMode({
         {lesson.id === "chords" &&
           selectedInstrument === "lead" &&
           learningRange && (
-            <div className="mt-2">
-              <SoloPhraseTab
-                notes={reliableLearningNotes}
-                range={learningRange}
-                strings={tuning.strings}
-                currentTime={currentTime}
-                onSeek={onSeek}
-              />
-            </div>
+            <LeadNotesTrainer
+              key={`${learningRange.start}-${learningRange.end}`}
+              notes={leadLearningNotes}
+              selection={learningRange}
+              strings={tuning.strings}
+              bpm={bpm}
+              currentTime={currentTime}
+              currentSpeed={currentSpeed}
+              currentAudioSource={currentAudioSource}
+              isPlaying={isPlaying}
+              loopStart={loopStart}
+              loopEnd={loopEnd}
+              hasBackingTrack={hasBackingTrack}
+              onPractice={onPractice}
+              onReplay={onReplay}
+              onSeek={onSeek}
+              onPause={onPause}
+            />
           )}
 
         {lesson.id === "chords" &&
@@ -872,7 +891,30 @@ export default function LearnMode({
           </div>
         )}
 
-        {lesson.id === "play" && range && (
+        {lesson.id === "play" &&
+          selectedInstrument === "lead" &&
+          learningRange && (
+            <LeadNotesTrainer
+              key={`play-${learningRange.start}-${learningRange.end}`}
+              notes={leadLearningNotes}
+              selection={learningRange}
+              strings={tuning.strings}
+              bpm={bpm}
+              currentTime={currentTime}
+              currentSpeed={currentSpeed}
+              currentAudioSource={currentAudioSource}
+              isPlaying={isPlaying}
+              loopStart={loopStart}
+              loopEnd={loopEnd}
+              hasBackingTrack={hasBackingTrack}
+              onPractice={onPractice}
+              onReplay={onReplay}
+              onSeek={onSeek}
+              onPause={onPause}
+            />
+          )}
+
+        {lesson.id === "play" && selectedInstrument !== "lead" && range && (
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
               <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
