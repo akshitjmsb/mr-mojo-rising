@@ -65,7 +65,7 @@ const LESSONS: Array<{
 }> = [
   {
     id: "phrase",
-    shortLabel: "Phrase",
+    shortLabel: "Choose",
     title: "What do you want to learn?",
     description: "Choose one part of the song. Every next step will focus only on it.",
   },
@@ -398,7 +398,7 @@ export default function LearnMode({
   }
 
   return (
-    <section className="mx-5 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
+    <section className="mx-5 mt-3 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="font-josefin text-[9px] uppercase tracking-[0.22em] text-gold">

@@ -2,52 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import dynamic from "next/dynamic";
 import Spinner from "@/components/Spinner";
 import type {
   Chord,
-  Lyrics,
   PracticeProfile,
   Section,
   Song,
   Stem,
   TabNote,
 } from "@/lib/database.types";
-import StemSelector, { type StemMode } from "./_components/StemSelector";
-import type { DownloadStemKey } from "./_components/DownloadPanel";
-import Scrubber from "./_components/Scrubber";
-import TransportControls from "./_components/TransportControls";
-import SpeedPresets from "./_components/SpeedPresets";
-import PlayingSetup from "./_components/PlayingSetup";
 import LearnMode from "./_components/LearnMode";
-import { useCountIn } from "./_hooks/useCountIn";
-import { useMetronome } from "./_hooks/useMetronome";
 import {
   getPracticeTuning,
   type PracticeTuningId,
 } from "@/lib/guitar";
 
-// Heavy or interaction-on-demand panels — split out of the initial bundle.
-const Waveform = dynamic(() => import("./_components/Waveform"), {
-  loading: () => <div className="h-[60px] px-5 pt-4 pb-2" />,
-});
-const DownloadPanel = dynamic(() => import("./_components/DownloadPanel"));
-const ChordLyricsPanel = dynamic(
-  () => import("./_components/ChordLyricsPanel"),
-);
-const TabPanel = dynamic(() => import("./_components/TabPanel"));
-const SectionList = dynamic(() => import("./_components/SectionList"));
-
-const SEEK_STEP_SECONDS = 10;
-const TRAINER_PREFS_KEY = "mr-mojo:phrase-trainer:v1";
-const REPETITIONS_PER_STEP = 3;
-const SPEED_STEP = 0.05;
-const MAX_TRAINER_SPEED = 1;
-
 type PracticeRange = {
   start: number;
   end: number;
 };
+
+type AudioSource = "guitar" | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getPracticeTuning("standard");
@@ -70,7 +45,6 @@ export default function SongPlayerPage() {
   const [stems, setStems] = useState<Stem | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [chords, setChords] = useState<Chord[]>([]);
-  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile>(() =>
     defaultPracticeProfile(songId),
@@ -80,25 +54,14 @@ export default function SongPlayerPage() {
   >("idle");
   const [loading, setLoading] = useState(true);
 
-  const [stemMode, setStemMode] = useState<StemMode>("guitar");
-  const [activeSection, setActiveSection] = useState<Section | null>(null);
+  const [stemMode, setStemMode] = useState<AudioSource>("guitar");
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLooping, setIsLooping] = useState(true);
   const [speed, setSpeed] = useState(1.0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [metronomeOn, setMetronomeOn] = useState(false);
   const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(null);
-  const [countInEnabled, setCountInEnabled] = useState(true);
-  const [autoRampEnabled, setAutoRampEnabled] = useState(true);
-  const [bestPracticeSpeed, setBestPracticeSpeed] = useState(0);
-  const [trainerPrefsLoaded, setTrainerPrefsLoaded] = useState(false);
-  const [playerView, setPlayerView] = useState<"learn" | "advanced">("learn");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number>(0);
-  const completedLoopsRef = useRef(0);
-  const countInVolumeRef = useRef<number | null>(null);
 
   // Fetch the full song bundle once, then use the lightweight status endpoint
   // while processing. Refresh the large chord/tab payload only when a stage
@@ -119,13 +82,11 @@ export default function SongPlayerPage() {
         setStems(data.stems);
         setSections(data.sections || []);
         setChords(data.chords || []);
-        setLyrics(data.lyrics || null);
         setTabNotes(data.tab_notes || []);
         setPracticeProfile(
           data.practice_profile || defaultPracticeProfile(songId),
         );
         if (data.sections?.length > 0) {
-          setActiveSection((current) => current ?? data.sections[0]);
           setPracticeRange((current) =>
             current ?? {
               start: data.sections[0].start_time,
@@ -190,75 +151,8 @@ export default function SongPlayerPage() {
     };
   }, [songId]);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(TRAINER_PREFS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as {
-          countInEnabled?: boolean;
-          autoRampEnabled?: boolean;
-        };
-        if (typeof parsed.countInEnabled === "boolean") {
-          setCountInEnabled(parsed.countInEnabled);
-        }
-        if (typeof parsed.autoRampEnabled === "boolean") {
-          setAutoRampEnabled(parsed.autoRampEnabled);
-        }
-      }
-
-      const savedProgress = localStorage.getItem(
-        `mr-mojo:phrase-progress:v1:${songId}`,
-      );
-      if (savedProgress) {
-        const parsed = JSON.parse(savedProgress) as {
-          bestPracticeSpeed?: number;
-        };
-        if (
-          typeof parsed.bestPracticeSpeed === "number" &&
-          Number.isFinite(parsed.bestPracticeSpeed)
-        ) {
-          setBestPracticeSpeed(parsed.bestPracticeSpeed);
-        }
-      }
-    } catch {
-      // Storage can be unavailable; the trainer still works for this session.
-    } finally {
-      setTrainerPrefsLoaded(true);
-    }
-  }, [songId]);
-
-  useEffect(() => {
-    if (!trainerPrefsLoaded) return;
-    try {
-      localStorage.setItem(
-        TRAINER_PREFS_KEY,
-        JSON.stringify({ countInEnabled, autoRampEnabled }),
-      );
-    } catch {
-      // Ignore unavailable storage.
-    }
-  }, [autoRampEnabled, countInEnabled, trainerPrefsLoaded]);
-
-  useEffect(() => {
-    if (!trainerPrefsLoaded || bestPracticeSpeed <= 0) return;
-    try {
-      localStorage.setItem(
-        `mr-mojo:phrase-progress:v1:${songId}`,
-        JSON.stringify({ bestPracticeSpeed }),
-      );
-    } catch {
-      // Ignore unavailable storage.
-    }
-  }, [bestPracticeSpeed, songId, trainerPrefsLoaded]);
-
   const audioUrl =
-    stemMode === "guitar"
-      ? stems?.guitar_url
-      : stemMode === "bass"
-        ? stems?.bass_url
-        : stemMode === "vocals"
-          ? stems?.vocals_url
-          : stems?.original_url;
+    stemMode === "guitar" ? stems?.guitar_url : stems?.original_url;
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
@@ -271,39 +165,6 @@ export default function SongPlayerPage() {
     playing: boolean;
   } | null>(null);
 
-  const finishCountIn = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = practiceRange?.start ?? activeSection?.start_time ?? 0;
-    if (countInVolumeRef.current !== null) {
-      audio.volume = countInVolumeRef.current;
-      countInVolumeRef.current = null;
-    }
-    void audio.play().then(
-      () => setIsPlaying(true),
-      () => setIsPlaying(false),
-    );
-  }, [activeSection, practiceRange]);
-
-  const {
-    beat: countInBeat,
-    isCountingIn,
-    start: startCountIn,
-    cancel: cancelCountIn,
-  } = useCountIn({ bpm: song?.bpm, speed, onComplete: finishCountIn });
-
-  const cancelCountInPlayback = useCallback(() => {
-    cancelCountIn();
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    if (countInVolumeRef.current !== null) {
-      audio.volume = countInVolumeRef.current;
-      countInVolumeRef.current = null;
-    }
-    setIsPlaying(false);
-  }, [cancelCountIn]);
-
   // Wire up the audio element when the source changes.
   useEffect(() => {
     if (!audioUrl) return;
@@ -315,7 +176,6 @@ export default function SongPlayerPage() {
 
     const resume = resumeRef.current;
     const onLoaded = () => {
-      setDuration(audio.duration);
       if (resume.time > 0 && resume.time < audio.duration) {
         audio.currentTime = resume.time;
         setCurrentTime(resume.time);
@@ -348,167 +208,41 @@ export default function SongPlayerPage() {
     if (audioRef.current) audioRef.current.playbackRate = speed;
   }, [speed]);
 
-  const findSectionForTime = useCallback(
-    (time: number): Section | null => {
-      if (sections.length === 0) return null;
-      const match = sections.find(
-        (s) => time >= s.start_time && time < s.end_time,
-      );
-      if (match) return match;
-      if (time >= sections[sections.length - 1].end_time)
-        return sections[sections.length - 1];
-      return sections[0];
-    },
-    [sections],
-  );
-
-  const syncActiveSectionWithTime = useCallback(
-    (time: number) => {
-      const section = findSectionForTime(time);
-      if (section && section.id !== activeSection?.id) {
-        setActiveSection(section);
-      }
-      return section;
-    },
-    [activeSection?.id, findSectionForTime],
-  );
-
-  const seekTo = useCallback(
-    (time: number) => {
-      if (!audioRef.current) return;
-      const audio = audioRef.current;
-      const max =
-        Number.isFinite(audio.duration) && audio.duration > 0
-          ? audio.duration
-          : duration;
-      const clamped = Math.max(0, Math.min(time, max || 0));
-      audio.currentTime = clamped;
-      setCurrentTime(clamped);
-      syncActiveSectionWithTime(clamped);
-    },
-    [duration, syncActiveSectionWithTime],
-  );
-
-  const seekBy = useCallback(
-    (seconds: number) => {
-      if (!audioRef.current) return;
-      seekTo(audioRef.current.currentTime + seconds);
-    },
-    [seekTo],
-  );
-
-  const rewind = useCallback(() => seekBy(-SEEK_STEP_SECONDS), [seekBy]);
-  const forward = useCallback(() => seekBy(SEEK_STEP_SECONDS), [seekBy]);
-
-  const loopStart =
-    practiceRange?.start ?? activeSection?.start_time ?? 0;
-  const loopEnd =
-    practiceRange?.end ?? activeSection?.end_time ?? duration;
-
-  const resetLoopProgress = useCallback(() => {
-    completedLoopsRef.current = 0;
+  const seekTo = useCallback((time: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const max =
+      Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : time;
+    const clamped = Math.max(0, Math.min(time, max));
+    audio.currentTime = clamped;
+    setCurrentTime(clamped);
   }, []);
 
-  // Drive currentTime, section sync, phrase looping and automatic speed
-  // progression from a single animation-frame loop.
+  const loopStart = practiceRange?.start ?? 0;
+  const loopEnd = practiceRange?.end ?? Number.POSITIVE_INFINITY;
+
+  // One learning pipeline means one playback model: the chosen phrase loops
+  // at exactly the source and speed the learner selected.
   const updateTime = useCallback(() => {
     if (!audioRef.current) return;
     const audio = audioRef.current;
     const now = audio.currentTime;
     setCurrentTime(now);
-    syncActiveSectionWithTime(now);
 
-    if (isLooping && loopEnd > loopStart && now >= loopEnd) {
+    if (loopEnd > loopStart && now >= loopEnd) {
       audio.currentTime = loopStart;
       setCurrentTime(loopStart);
-
-      const nextLoopCount = completedLoopsRef.current + 1;
-      completedLoopsRef.current = nextLoopCount;
-      setBestPracticeSpeed((current) => Math.max(current, speed));
-
-      if (
-        autoRampEnabled &&
-        nextLoopCount % REPETITIONS_PER_STEP === 0 &&
-        speed < MAX_TRAINER_SPEED
-      ) {
-        setSpeed((current) =>
-          Math.min(
-            MAX_TRAINER_SPEED,
-            Math.round((current + SPEED_STEP) * 100) / 100,
-          ),
-        );
-      }
     }
 
     if (isPlaying) animFrameRef.current = requestAnimationFrame(updateTime);
-  }, [
-    autoRampEnabled,
-    isPlaying,
-    isLooping,
-    loopEnd,
-    loopStart,
-    speed,
-    syncActiveSectionWithTime,
-  ]);
+  }, [isPlaying, loopEnd, loopStart]);
 
   useEffect(() => {
     if (isPlaying) animFrameRef.current = requestAnimationFrame(updateTime);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [isPlaying, updateTime]);
-
-  const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isCountingIn) {
-      cancelCountInPlayback();
-      return;
-    }
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-      setMetronomeOn(false);
-    } else {
-      if (currentTime < loopStart || currentTime >= loopEnd) {
-        audio.currentTime = loopStart;
-        setCurrentTime(loopStart);
-      }
-
-      if (countInEnabled && song?.bpm) {
-        countInVolumeRef.current = audio.volume;
-        audio.volume = 0;
-        audio.currentTime = loopStart;
-        void audio.play().catch(() => {
-          cancelCountInPlayback();
-        });
-        startCountIn();
-      } else {
-        void audio.play().then(
-          () => setIsPlaying(true),
-          () => setIsPlaying(false),
-        );
-      }
-    }
-  }, [
-    cancelCountInPlayback,
-    countInEnabled,
-    currentTime,
-    isCountingIn,
-    isPlaying,
-    loopEnd,
-    loopStart,
-    song?.bpm,
-    startCountIn,
-  ]);
-
-  function handleSpeedChange(nextSpeed: number) {
-    setSpeed(nextSpeed);
-    resetLoopProgress();
-  }
-
-  function handleStemModeChange(nextMode: StemMode) {
-    if (isCountingIn) cancelCountInPlayback();
-    setStemMode(nextMode);
-  }
 
   async function handleTuningChange(tuningId: PracticeTuningId) {
     if (tuningId === practiceProfile.tuning_id) return;
@@ -538,27 +272,11 @@ export default function SongPlayerPage() {
     }
   }
 
-  function handleSelectSection(section: Section) {
-    if (isCountingIn) cancelCountInPlayback();
-    setActiveSection(section);
-    setPracticeRange({ start: section.start_time, end: section.end_time });
-    resetLoopProgress();
-    if (audioRef.current) {
-      audioRef.current.currentTime = section.start_time;
-      setCurrentTime(section.start_time);
-      if (!isPlaying) {
-        audioRef.current.play();
-        setIsPlaying(true);
-      }
-    }
-  }
-
   function playLessonRange(
     range: PracticeRange,
     nextSpeed: number,
     requestedSource: "guitar" | "full" = "guitar",
   ) {
-    if (isCountingIn) cancelCountInPlayback();
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -567,14 +285,8 @@ export default function SongPlayerPage() {
         ? "full"
         : requestedSource;
 
-    // Learn Mode uses explicit listening and loop speeds. Hidden auto-ramping
-    // would make the phrase change tempo without the learner asking for it.
-    setAutoRampEnabled(false);
-    setActiveSection(findSectionForTime(range.start));
     setPracticeRange(range);
     setSpeed(nextSpeed);
-    setIsLooping(true);
-    resetLoopProgress();
     audio.currentTime = range.start;
     audio.playbackRate = nextSpeed;
     setCurrentTime(range.start);
@@ -597,10 +309,8 @@ export default function SongPlayerPage() {
   }
 
   function handleBeforeTunerStart() {
-    if (isCountingIn) cancelCountInPlayback();
     audioRef.current?.pause();
     setIsPlaying(false);
-    setMetronomeOn(false);
   }
 
   function handleLessonPractice(
@@ -623,26 +333,6 @@ export default function SongPlayerPage() {
     playLessonRange(range, nextSpeed, nextSource);
   }
 
-  // Keyboard shortcuts: ←/→ seek, space toggles play.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        rewind();
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        forward();
-      } else if (event.key === " ") {
-        event.preventDefault();
-        togglePlay();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [forward, rewind, togglePlay]);
-
-  useMetronome({ enabled: metronomeOn, bpm: song?.bpm, speed });
-
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
@@ -661,9 +351,6 @@ export default function SongPlayerPage() {
     );
   }
 
-  const currentDownloadStem: DownloadStemKey =
-    stemMode === "full" ? "full" : stemMode;
-
   return (
     <main className="flex-1 overflow-hidden">
       {song.status !== "ready" && (
@@ -671,123 +358,26 @@ export default function SongPlayerPage() {
           Preview playing · refining high-quality stems
         </div>
       )}
-      <div className="mx-5 my-3 grid grid-cols-2 overflow-hidden rounded-[2px] border border-border-dark">
-        <button
-          onClick={() => setPlayerView("learn")}
-          aria-pressed={playerView === "learn"}
-          className={`min-h-10 cursor-pointer border-none font-josefin text-[9px] uppercase tracking-[0.14em] ${
-            playerView === "learn"
-              ? "bg-gold/10 text-gold"
-              : "bg-transparent text-text-dark"
-          }`}
-        >
-          Learn Mode
-        </button>
-        <button
-          onClick={() => setPlayerView("advanced")}
-          aria-pressed={playerView === "advanced"}
-          className={`min-h-10 cursor-pointer border-none border-l border-border-dark font-josefin text-[9px] uppercase tracking-[0.14em] ${
-            playerView === "advanced"
-              ? "bg-gold/10 text-gold"
-              : "bg-transparent text-text-dark"
-          }`}
-        >
-          Advanced Tools
-        </button>
-      </div>
-
-      {playerView === "learn" ? (
-        <LearnMode
-          sections={sections}
-          chords={chords}
-          notes={tabNotes}
-          bpm={song.bpm}
-          profile={practiceProfile}
-          currentTime={currentTime}
-          isPlaying={isPlaying}
-          currentSpeed={speed}
-          currentAudioSource={stemMode}
-          loopStart={loopStart}
-          loopEnd={loopEnd}
-          savingTuning={profileSaveState === "saving"}
-          tuningSaveError={profileSaveState === "error"}
-          onTuningChange={handleTuningChange}
-          onPractice={handleLessonPractice}
-          onReplay={playLessonRange}
-          onSeek={seekTo}
-          onBeforeTunerStart={handleBeforeTunerStart}
-        />
-      ) : (
-        <>
-          <StemSelector value={stemMode} onChange={handleStemModeChange} />
-          <DownloadPanel
-            songId={songId}
-            stems={stems}
-            songTitle={song.title}
-            currentStem={currentDownloadStem}
-          />
-          <Waveform
-            sections={sections}
-            currentTime={currentTime}
-            duration={duration}
-          />
-          <Scrubber
-            activeSection={activeSection}
-            currentTime={currentTime}
-            duration={duration}
-            seekTo={seekTo}
-          />
-          <TransportControls
-            isPlaying={isPlaying}
-            isLooping={isLooping}
-            metronomeOn={metronomeOn}
-            bpm={song.bpm}
-            speed={speed}
-            countInBeat={countInBeat}
-            togglePlay={togglePlay}
-            toggleLoop={() => {
-              setIsLooping((value) => !value);
-              resetLoopProgress();
-            }}
-            toggleMetronome={() => setMetronomeOn((v) => !v)}
-            rewind={rewind}
-            forward={forward}
-            seekStepSeconds={SEEK_STEP_SECONDS}
-          />
-          <SpeedPresets value={speed} onChange={handleSpeedChange} />
-          <PlayingSetup
-            profile={practiceProfile}
-            chords={chords}
-            currentTime={currentTime}
-            saving={profileSaveState === "saving"}
-            saveError={profileSaveState === "error"}
-            onTuningChange={handleTuningChange}
-          />
-          <ChordLyricsPanel
-            chords={chords}
-            lyrics={lyrics}
-            currentTime={currentTime}
-            chordShapeShift={practiceProfile.chord_shape_shift}
-          />
-          <SectionList
-            sections={sections}
-            activeSection={activeSection}
-            onSelect={handleSelectSection}
-          />
-          <TabPanel
-            notes={tabNotes}
-            currentTime={currentTime}
-            duration={duration}
-            bpm={song.bpm}
-            loopStart={loopStart}
-            loopEnd={loopEnd}
-            tuningId={practiceProfile.tuning_id}
-            tuningOffset={practiceProfile.tuning_offset}
-            confidenceThreshold={practiceProfile.tab_confidence_threshold}
-            seekTo={seekTo}
-          />
-        </>
-      )}
+      <LearnMode
+        sections={sections}
+        chords={chords}
+        notes={tabNotes}
+        bpm={song.bpm}
+        profile={practiceProfile}
+        currentTime={currentTime}
+        isPlaying={isPlaying}
+        currentSpeed={speed}
+        currentAudioSource={stemMode}
+        loopStart={loopStart}
+        loopEnd={loopEnd}
+        savingTuning={profileSaveState === "saving"}
+        tuningSaveError={profileSaveState === "error"}
+        onTuningChange={handleTuningChange}
+        onPractice={handleLessonPractice}
+        onReplay={playLessonRange}
+        onSeek={seekTo}
+        onBeforeTunerStart={handleBeforeTunerStart}
+      />
     </main>
   );
 }
