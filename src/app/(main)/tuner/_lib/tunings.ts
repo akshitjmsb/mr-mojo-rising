@@ -42,6 +42,18 @@ function note(name: string, midi: number): GuitarString {
   return { name, midi, frequency: midiToFrequency(midi) };
 }
 
+export const EB_BASS_TUNING: Tuning = {
+  id: "eb-bass",
+  label: "E♭ Standard Bass",
+  description: "E♭ A♭ D♭ G♭",
+  strings: [
+    note("E♭1", 27),
+    note("A♭1", 32),
+    note("D♭2", 37),
+    note("G♭2", 42),
+  ],
+};
+
 // MIDI numbers for standard guitar (low to high): E2=40, A2=45, D3=50, G3=55, B3=59, E4=64
 export const TUNINGS: Tuning[] = [
   {

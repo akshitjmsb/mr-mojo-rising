@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import TuningGauge from "@/app/(main)/tuner/_components/TuningGauge";
 import { usePitchDetection } from "@/app/(main)/tuner/_hooks/usePitchDetection";
 import {
+  EB_BASS_TUNING,
   TUNINGS,
   centsToTargetFolded,
 } from "@/app/(main)/tuner/_lib/tunings";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/reference-audio";
 
 interface Props {
+  instrument: "guitar" | "bass";
   onBeforeStart: () => void;
   onComplete: () => void;
 }
@@ -21,22 +23,27 @@ const EB_TUNING = TUNINGS.find((tuning) => tuning.id === "eb-standard")!;
 const STABLE_MS = 700;
 const IN_TUNE_CENTS = 4;
 
-export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
+export default function InlineTuner({
+  instrument,
+  onBeforeStart,
+  onComplete,
+}: Props) {
+  const targetTuning = instrument === "bass" ? EB_BASS_TUNING : EB_TUNING;
   const [targetIndex, setTargetIndex] = useState(0);
   const [tuned, setTuned] = useState(() =>
-    EB_TUNING.strings.map(() => false),
+    targetTuning.strings.map(() => false),
   );
   const [holdProgress, setHoldProgress] = useState(0);
   const stableSinceRef = useRef<number | null>(null);
   const reportedCompleteRef = useRef(false);
   const { reading, running, error, start, stop } = usePitchDetection({
-    minFrequency: 60,
+    minFrequency: instrument === "bass" ? 30 : 60,
     maxFrequency: 700,
     minClarity: 0.78,
     silenceRms: 0.009,
   });
 
-  const target = EB_TUNING.strings[targetIndex];
+  const target = targetTuning.strings[targetIndex];
   const cents = useMemo(
     () =>
       reading.frequency === null
@@ -99,16 +106,16 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
       ),
     );
     reportedCompleteRef.current = false;
-    void playReferenceNote(EB_TUNING.strings[index].frequency);
+    void playReferenceNote(targetTuning.strings[index].frequency);
   }
 
   function markTunedElsewhere() {
-    setTuned(EB_TUNING.strings.map(() => true));
+    setTuned(targetTuning.strings.map(() => true));
   }
 
   const direction =
     cents === null
-      ? `Pluck the ${targetIndex === 0 ? "thickest" : targetIndex === 5 ? "thinnest" : target.name.replace(/\d/, "")} string`
+      ? `Pluck the ${targetIndex === 0 ? "thickest" : targetIndex === targetTuning.strings.length - 1 ? "thinnest" : target.name.replace(/\d/, "")} string`
       : Math.abs(cents) <= IN_TUNE_CENTS
         ? "Hold it steady"
         : cents < 0
@@ -120,14 +127,14 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-            Built-in tuner · E♭ Standard
+            Built-in tuner · {targetTuning.label}
           </p>
           <p className="mt-1 font-josefin text-[10px] leading-relaxed text-text-muted">
             Tune thickest to thinnest. Let each note ring until it locks.
           </p>
         </div>
         <p className="shrink-0 font-josefin text-[8px] uppercase tracking-[0.1em] text-gold">
-          {tuned.filter(Boolean).length} / 6
+          {tuned.filter(Boolean).length} / {targetTuning.strings.length}
         </p>
       </div>
 
@@ -156,7 +163,9 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
           stableSignal ? "text-gold" : "text-text-muted"
         }`}
       >
-        {allTuned ? "All six strings are ready" : direction}
+        {allTuned
+          ? `All ${targetTuning.strings.length} strings are ready`
+          : direction}
       </p>
       <div className="mx-auto mt-2 h-1 w-full overflow-hidden bg-border-darkest">
         <div
@@ -165,8 +174,11 @@ export default function InlineTuner({ onBeforeStart, onComplete }: Props) {
         />
       </div>
 
-      <div className="mt-3 grid grid-cols-6 gap-1" aria-label="E-flat tuning strings">
-        {EB_TUNING.strings.map((string, index) => (
+      <div
+        className={`mt-3 grid gap-1 ${instrument === "bass" ? "grid-cols-4" : "grid-cols-6"}`}
+        aria-label={`${targetTuning.label} strings`}
+      >
+        {targetTuning.strings.map((string, index) => (
           <button
             key={`${string.midi}-${index}`}
             type="button"

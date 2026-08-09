@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  EB_BASS_TUNING,
   TUNINGS,
   centsToTargetFolded,
   midiToFrequency,
@@ -23,4 +24,11 @@ test("folded cents accepts the octave harmonic of a tuned string", () => {
   const target = midiToFrequency(39);
   assert.ok(Math.abs(centsToTargetFolded(target * 2, target)) < 0.001);
   assert.ok(centsToTargetFolded(target * 2 ** (3 / 1200), target) > 2.9);
+});
+
+test("E-flat bass tuning contains the correct four concert pitches", () => {
+  assert.deepEqual(
+    EB_BASS_TUNING.strings.map((string) => string.midi),
+    [27, 32, 37, 42],
+  );
 });

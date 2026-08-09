@@ -22,7 +22,7 @@ type PracticeRange = {
   end: number;
 };
 
-type AudioSource = "guitar" | "full";
+type AudioSource = "guitar" | "bass" | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getPracticeTuning("standard");
@@ -152,7 +152,11 @@ export default function SongPlayerPage() {
   }, [songId]);
 
   const audioUrl =
-    stemMode === "guitar" ? stems?.guitar_url : stems?.original_url;
+    stemMode === "guitar"
+      ? stems?.guitar_url
+      : stemMode === "bass"
+        ? stems?.bass_url
+        : stems?.original_url;
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
@@ -275,13 +279,14 @@ export default function SongPlayerPage() {
   function playLessonRange(
     range: PracticeRange,
     nextSpeed: number,
-    requestedSource: "guitar" | "full" = "guitar",
+    requestedSource: AudioSource = "guitar",
   ) {
     const audio = audioRef.current;
     if (!audio) return;
 
     const nextSource =
-      requestedSource === "guitar" && !stems?.guitar_url
+      (requestedSource === "guitar" && !stems?.guitar_url) ||
+      (requestedSource === "bass" && !stems?.bass_url)
         ? "full"
         : requestedSource;
 
@@ -316,10 +321,11 @@ export default function SongPlayerPage() {
   function handleLessonPractice(
     range: PracticeRange,
     nextSpeed: number,
-    requestedSource: "guitar" | "full" = "guitar",
+    requestedSource: AudioSource = "guitar",
   ) {
     const nextSource =
-      requestedSource === "guitar" && !stems?.guitar_url
+      (requestedSource === "guitar" && !stems?.guitar_url) ||
+      (requestedSource === "bass" && !stems?.bass_url)
         ? "full"
         : requestedSource;
     const sameRange =
@@ -363,6 +369,8 @@ export default function SongPlayerPage() {
         chords={chords}
         notes={tabNotes}
         bpm={song.bpm}
+        hasGuitarStem={Boolean(stems?.guitar_url)}
+        hasBassStem={Boolean(stems?.bass_url)}
         profile={practiceProfile}
         currentTime={currentTime}
         isPlaying={isPlaying}

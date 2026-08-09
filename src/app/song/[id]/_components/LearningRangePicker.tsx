@@ -9,11 +9,11 @@ interface Props {
   sectionLabel: string;
   notes: TabNote[];
   range: LearningRange;
-  suggestions: LearningRange[];
   accuracyPassed: boolean;
+  showWaveform: boolean;
+  readyLabel: string;
   previewPlaying: boolean;
   onChangeSection: () => void;
-  onSelectSuggestion: (range: LearningRange) => void;
   onBoundaryChange: (boundary: "start" | "end", value: number) => void;
   onBoundaryCommit: () => void;
   onPreview: () => void;
@@ -33,11 +33,11 @@ export default function LearningRangePicker({
   sectionLabel,
   notes,
   range,
-  suggestions,
   accuracyPassed,
+  showWaveform,
+  readyLabel,
   previewPlaying,
   onChangeSection,
-  onSelectSuggestion,
   onBoundaryChange,
   onBoundaryCommit,
   onPreview,
@@ -81,44 +81,21 @@ export default function LearningRangePicker({
         </button>
       </div>
 
-      {suggestions.length > 1 && (
-        <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Suggested guitar phrases">
-          {suggestions.map((suggestion, index) => {
-            const selected =
-              Math.abs(suggestion.start - range.start) < 0.05 &&
-              Math.abs(suggestion.end - range.end) < 0.05;
-            return (
-              <button
-                key={`${suggestion.start}-${suggestion.end}`}
-                type="button"
-                onClick={() => onSelectSuggestion(suggestion)}
-                aria-pressed={selected}
-                className={`min-h-9 shrink-0 cursor-pointer rounded-[2px] border px-3 font-josefin text-[8px] uppercase tracking-[0.08em] ${
-                  selected
-                    ? "border-gold bg-gold/10 text-gold"
-                    : "border-border-dark bg-transparent text-text-muted"
-                }`}
-              >
-                Phrase {index + 1}
-              </button>
-            );
-          })}
+      {showWaveform && (
+        <div className="relative mt-3 flex h-14 items-center gap-[2px] overflow-hidden rounded-[2px] border border-border-dark bg-bg px-1.5" aria-label="Guitar activity waveform">
+          {waveform.map((height, index) => (
+            <span
+              key={index}
+              className="flex-1 bg-text-darkest/55"
+              style={{ height: `${height}%` }}
+            />
+          ))}
+          <span
+            className="pointer-events-none absolute bottom-0 top-0 border-x border-gold bg-gold/15"
+            style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }}
+          />
         </div>
       )}
-
-      <div className="relative mt-3 flex h-14 items-center gap-[2px] overflow-hidden rounded-[2px] border border-border-dark bg-bg px-1.5" aria-label="Guitar activity waveform">
-        {waveform.map((height, index) => (
-          <span
-            key={index}
-            className="flex-1 bg-text-darkest/55"
-            style={{ height: `${height}%` }}
-          />
-        ))}
-        <span
-          className="pointer-events-none absolute bottom-0 top-0 border-x border-gold bg-gold/15"
-          style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }}
-        />
-      </div>
 
       <div className="mt-3 space-y-3">
         {(["start", "end"] as const).map((boundary) => {
@@ -180,7 +157,7 @@ export default function LearningRangePicker({
 
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-border-dark pt-3">
         <p className={`font-josefin text-[7px] uppercase tracking-[0.1em] ${accuracyPassed ? "text-gold" : "text-terracotta"}`}>
-          {accuracyPassed ? "✓ Accuracy gate passed" : "Adjusting to guitar notes…"}
+          {accuracyPassed ? `✓ ${readyLabel}` : "Adjusting selection…"}
         </p>
         <p className="font-josefin text-[8px] text-text-dark">
           {(range.end - range.start).toFixed(1)} sec
@@ -194,7 +171,7 @@ export default function LearningRangePicker({
       >
         {accuracyPassed
           ? previewPlaying
-            ? "Pause selected phrase"
+            ? "Pause selection"
             : `Hear ${formatPreciseTime(range.start)}–${formatPreciseTime(range.end)}`
           : "Snap to guitar"}
       </button>
