@@ -8,6 +8,7 @@ import type {
   Section,
   Song,
   Stem,
+  StemLayer,
   TabNote,
 } from "@/lib/database.types";
 import { getPracticeTuning, PRACTICE_TUNINGS } from "@/lib/guitar";
@@ -26,6 +27,41 @@ function defaultPracticeProfile(songId: string): PracticeProfile {
   };
 }
 
+function legacyStemLayers(stems: Stem | null): StemLayer[] {
+  if (!stems) return [];
+  const definitions: Array<{
+    key: string;
+    label: string;
+    instrument: StemLayer["instrument"];
+    url: string | null;
+    learnable: 0 | 1;
+  }> = [
+    { key: "guitars", label: "All Guitars", instrument: "guitar", url: stems.guitar_url, learnable: 1 },
+    { key: "bass", label: "Bass", instrument: "bass", url: stems.bass_url, learnable: 1 },
+    { key: "vocals", label: "Vocals", instrument: "vocals", url: stems.vocals_url, learnable: 0 },
+    { key: "drums", label: "Drums", instrument: "drums", url: stems.drums_url, learnable: 0 },
+    { key: "full", label: "Full Song", instrument: "full", url: stems.original_url, learnable: 0 },
+  ];
+  return definitions.flatMap((definition, sortOrder) =>
+    definition.url
+      ? [{
+          id: `legacy-${definition.key}`,
+          song_id: stems.song_id,
+          layer_key: definition.key,
+          label: definition.label,
+          instrument: definition.instrument,
+          role: "all",
+          url: definition.url,
+          source_model: null,
+          quality_status: "ready" as const,
+          is_learnable: definition.learnable,
+          sort_order: sortOrder,
+          updated_at: 0,
+        }]
+      : [],
+  );
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -40,6 +76,17 @@ export async function GET(
   const stems = await queryOne<Stem>(`SELECT * FROM stems WHERE song_id = ?`, [
     id,
   ]);
+
+  let stemLayers: StemLayer[] = [];
+  try {
+    stemLayers = await queryAll<StemLayer>(
+      `SELECT * FROM stem_layers WHERE song_id = ? ORDER BY sort_order ASC`,
+      [id],
+    );
+  } catch {
+    // Legacy databases continue to work until the additive migration runs.
+  }
+  if (stemLayers.length === 0) stemLayers = legacyStemLayers(stems ?? null);
 
   const sections = await queryAll<Section>(
     `SELECT * FROM sections WHERE song_id = ? ORDER BY start_time ASC`,
@@ -75,6 +122,7 @@ export async function GET(
   return NextResponse.json({
     song,
     stems: stems ?? null,
+    stem_layers: stemLayers,
     sections,
     chords,
     lyrics: lyrics ?? null,
@@ -145,6 +193,15 @@ export async function DELETE(
   const stems = await queryOne<Stem>(`SELECT * FROM stems WHERE song_id = ?`, [
     id,
   ]);
+  let stemLayers: StemLayer[] = [];
+  try {
+    stemLayers = await queryAll<StemLayer>(
+      `SELECT * FROM stem_layers WHERE song_id = ?`,
+      [id],
+    );
+  } catch {
+    // The legacy stems row still covers blob cleanup before migration.
+  }
 
   // Delete the database row first. Its cascading job deletion causes the Mac
   // worker to release the lease and terminate any expensive subprocess.
@@ -165,6 +222,7 @@ export async function DELETE(
       stems.vocals_url,
       stems.drums_url,
       stems.bass_url,
+      ...stemLayers.map((layer) => layer.url),
     ].filter((u): u is string => typeof u === "string" && u.length > 0);
 
     if (urls.length > 0) {

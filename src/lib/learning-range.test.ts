@@ -4,6 +4,7 @@ import type { TabNote } from "./database.types";
 import {
   buildLearningRangeSuggestions,
   clampLearningRange,
+  defaultLearningRangeForSection,
   passesLearningRangeAccuracyGate,
   snapLearningRange,
 } from "./learning-range";
@@ -63,6 +64,17 @@ test("allows a manual selection to reach the full section end", () => {
     clampLearningRange({ start: 0, end: 52.9 }, 0, 52.9, "end"),
     { start: 0, end: 52.9 },
   );
+});
+
+test("selects the complete song part by default", () => {
+  assert.deepEqual(defaultLearningRangeForSection(0, 52.9), {
+    start: 0,
+    end: 52.9,
+  });
+  assert.deepEqual(defaultLearningRangeForSection(52.93, 84.26), {
+    start: 52.93,
+    end: 84.26,
+  });
 });
 
 test("accuracy gate accepts a full section and rejects empty selections", () => {

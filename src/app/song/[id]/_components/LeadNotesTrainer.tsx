@@ -12,6 +12,7 @@ type AudioSource = "guitar" | "backing" | "full";
 type PracticeSpeed = 0.5 | 0.65 | 0.8 | 1;
 
 interface Props {
+  mode: "notes" | "play";
   notes: TabNote[];
   selection: LearningRange;
   strings: readonly string[];
@@ -46,11 +47,14 @@ const SPEEDS: Array<{ value: PracticeSpeed; label: string }> = [
 
 function formatTime(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
-  const remainder = (Math.max(0, seconds) % 60).toFixed(1).padStart(4, "0");
+  const remainder = Math.floor(Math.max(0, seconds) % 60)
+    .toString()
+    .padStart(2, "0");
   return `${minutes}:${remainder}`;
 }
 
 export default function LeadNotesTrainer({
+  mode,
   notes,
   selection,
   strings,
@@ -69,37 +73,46 @@ export default function LeadNotesTrainer({
 }: Props) {
   const windows = useMemo(
     () =>
-      buildLearningRangeSuggestions(
-        notes,
-        selection.start,
-        selection.end,
-        bpm,
-      ),
-    [bpm, notes, selection.end, selection.start],
+      mode === "notes"
+        ? [selection]
+        : buildLearningRangeSuggestions(
+            notes,
+            selection.start,
+            selection.end,
+            bpm,
+          ),
+    [bpm, mode, notes, selection],
   );
-  const [windowIndex, setWindowIndex] = useState(0);
   const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
   const [countIn, setCountIn] = useState<number | null>(null);
   const countInTimersRef = useRef<number[]>([]);
   const countInAudioRef = useRef<AudioContext | null>(null);
-  const boundedIndex = Math.min(windowIndex, Math.max(0, windows.length - 1));
   const playingIndex = isPlaying
     ? windows.findIndex(
         (range) => currentTime >= range.start && currentTime < range.end,
       )
     : -1;
-  const safeIndex = playingIndex >= 0 ? playingIndex : boundedIndex;
+  const safeIndex = playingIndex >= 0 ? playingIndex : 0;
   const activeWindow = windows[safeIndex] ?? selection;
+  const activeWindowNotes = useMemo(
+    () =>
+      notes.filter(
+        (note) =>
+          note.start_time >= activeWindow.start &&
+          note.start_time < activeWindow.end,
+      ),
+    [activeWindow.end, activeWindow.start, notes],
+  );
   const currentWindowPlaying =
     isPlaying &&
     Math.abs(loopStart - activeWindow.start) < 0.05 &&
     Math.abs(loopEnd - activeWindow.end) < 0.05;
 
-  function sourcePlaying(source: AudioSource) {
+  function sourcePlaying(source: AudioSource, targetSpeed = practiceSpeed) {
     return (
       currentWindowPlaying &&
       currentAudioSource === source &&
-      Math.abs(currentSpeed - practiceSpeed) < 0.01
+      Math.abs(currentSpeed - targetSpeed) < 0.01
     );
   }
 
@@ -119,29 +132,12 @@ export default function LeadNotesTrainer({
     setCountIn(null);
   }
 
-  function changeWindow(nextIndex: number) {
+  function toggleSource(source: AudioSource, targetSpeed = practiceSpeed) {
     cancelCountIn();
-    const clampedIndex = Math.max(0, Math.min(windows.length - 1, nextIndex));
-    const nextWindow = windows[clampedIndex];
-    if (!nextWindow) return;
-    setWindowIndex(clampedIndex);
-    if (isPlaying) {
-      const source: AudioSource =
-        currentAudioSource === "backing" || currentAudioSource === "full"
-          ? currentAudioSource
-          : "guitar";
-      onReplay(nextWindow, practiceSpeed, source);
+    if (sourcePlaying(source, targetSpeed)) {
+      onPractice(activeWindow, targetSpeed, source);
     } else {
-      onSeek(nextWindow.start);
-    }
-  }
-
-  function toggleSource(source: AudioSource) {
-    cancelCountIn();
-    if (sourcePlaying(source)) {
-      onPractice(activeWindow, practiceSpeed, source);
-    } else {
-      onReplay(activeWindow, practiceSpeed, source);
+      onReplay(activeWindow, targetSpeed, source);
     }
   }
 
@@ -195,126 +191,132 @@ export default function LeadNotesTrainer({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="font-josefin text-[8px] uppercase tracking-[0.14em] text-gold">
-            Window {safeIndex + 1} of {windows.length || 1}
-          </p>
-          <p className="mt-1 font-josefin text-[9px] text-text-dark">
-            {formatTime(activeWindow.start)}–{formatTime(activeWindow.end)}
+            {mode === "notes"
+              ? "Entire selected part"
+              : `Small step ${safeIndex + 1} of ${windows.length || 1}`}
           </p>
         </div>
         <p className="font-josefin text-[8px] text-text-dark">
-          {(activeWindow.end - activeWindow.start).toFixed(1)} sec
+          {activeWindowNotes.length} {activeWindowNotes.length === 1 ? "note" : "notes"} · {formatTime(activeWindow.start)}–{formatTime(activeWindow.end)}
         </p>
       </div>
 
-      <div className="mt-2 grid grid-cols-[1fr_2fr_1fr] gap-2">
-        <button
-          type="button"
-          onClick={() => changeWindow(safeIndex - 1)}
-          disabled={safeIndex === 0}
-          className="min-h-10 cursor-pointer rounded-[2px] border border-border-dark bg-transparent font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          onClick={() => onSeek(activeWindow.start)}
-          className="min-h-10 cursor-pointer rounded-[2px] border border-gold/35 bg-gold/[0.04] font-josefin text-[8px] uppercase tracking-[0.1em] text-gold"
-        >
-          Start this window
-        </button>
-        <button
-          type="button"
-          onClick={() => changeWindow(safeIndex + 1)}
-          disabled={safeIndex >= windows.length - 1}
-          className="min-h-10 cursor-pointer rounded-[2px] border border-border-dark bg-transparent font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted disabled:cursor-default disabled:opacity-30"
-        >
-          Next
-        </button>
-      </div>
-
-      <div className="mt-3">
-        <SoloPhraseTab
-          notes={notes}
-          range={activeWindow}
-          strings={strings}
-          currentTime={currentTime}
-          expanded
-          onSeek={onSeek}
-        />
-      </div>
-
-      <fieldset className="mt-3 border-t border-border-dark pt-3">
-        <legend className="font-josefin text-[8px] uppercase tracking-[0.14em] text-text-dark">
-          Practice speed
-        </legend>
-        <div className="mt-2 grid grid-cols-4 gap-1.5">
-          {SPEEDS.map((option) => (
+      {mode === "notes" ? (
+        <>
+          <section className="mt-3 rounded-[2px] border border-gold/35 bg-gold/[0.04] p-3">
             <button
-              key={option.value}
               type="button"
-              onClick={() => {
-                setPracticeSpeed(option.value);
-                if (currentWindowPlaying) {
-                  const source: AudioSource =
-                    currentAudioSource === "backing" ||
-                    currentAudioSource === "full"
-                      ? currentAudioSource
-                      : "guitar";
-                  onReplay(activeWindow, option.value, source);
-                }
-              }}
-              aria-pressed={practiceSpeed === option.value}
-              className={`min-h-10 cursor-pointer rounded-[2px] border font-josefin text-[9px] ${
-                practiceSpeed === option.value
-                  ? "border-gold bg-gold/10 text-gold"
-                  : "border-border-dark bg-transparent text-text-muted"
-              }`}
+              onClick={() => toggleSource("guitar", 1)}
+              aria-pressed={sourcePlaying("guitar", 1)}
+              className="mt-2 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-3 font-josefin text-[9px] uppercase tracking-[0.13em] text-gold"
             >
-              {option.label}
+              {sourcePlaying("guitar", 1)
+                ? "Pause"
+                : "Play selected part"}
             </button>
-          ))}
-        </div>
-      </fieldset>
+            <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+              Isolated guitar · original tempo
+            </p>
+          </section>
 
-      <div className="mt-3 grid grid-cols-3 gap-1.5">
-        <button
-          type="button"
-          onClick={() => toggleSource("guitar")}
-          aria-pressed={sourcePlaying("guitar")}
-          className="min-h-14 cursor-pointer rounded-[2px] border border-gold/45 bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold"
-        >
-          {sourcePlaying("guitar")
-            ? "Pause"
-            : "Hear guitar"}
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleSource("full")}
-          aria-pressed={sourcePlaying("full")}
-          className="min-h-14 cursor-pointer rounded-[2px] border border-border-dark bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-text-muted"
-        >
-          {sourcePlaying("full")
-            ? "Pause"
-            : "Hear in song"}
-        </button>
-        <button
-          type="button"
-          onClick={playWithCountIn}
-          disabled={!hasBackingTrack}
-          aria-pressed={sourcePlaying("backing")}
-          className="min-h-14 cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold disabled:cursor-default disabled:opacity-35"
-        >
-          {countIn !== null
-            ? `Count in · ${countIn}`
-            : sourcePlaying("backing")
-              ? "Pause"
-              : "Play along"}
-        </button>
-      </div>
+          <div className="mt-3">
+            <SoloPhraseTab
+              notes={notes}
+              range={selection}
+              strings={strings}
+              currentTime={currentTime}
+              expanded
+              onSeek={onSeek}
+            />
+          </div>
 
-      <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.09em] text-text-darkest">
-        Play along = vocals + drums + bass · guitar removed
-      </p>
+          <p className="mt-3 text-center font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
+            Follow the gold line from left to right
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="mt-3">
+            <SoloPhraseTab
+              notes={notes}
+              range={activeWindow}
+              strings={strings}
+              currentTime={currentTime}
+              expanded
+              onSeek={onSeek}
+            />
+          </div>
+
+          <fieldset className="mt-3 border-t border-border-dark pt-3">
+            <legend className="font-josefin text-[8px] uppercase tracking-[0.14em] text-text-dark">
+              Practice speed
+            </legend>
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {SPEEDS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setPracticeSpeed(option.value);
+                    if (currentWindowPlaying) {
+                      const source: AudioSource =
+                        currentAudioSource === "backing" ||
+                        currentAudioSource === "full"
+                          ? currentAudioSource
+                          : "guitar";
+                      onReplay(activeWindow, option.value, source);
+                    }
+                  }}
+                  aria-pressed={practiceSpeed === option.value}
+                  className={`min-h-10 cursor-pointer rounded-[2px] border font-josefin text-[9px] ${
+                    practiceSpeed === option.value
+                      ? "border-gold bg-gold/10 text-gold"
+                      : "border-border-dark bg-transparent text-text-muted"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => toggleSource("guitar")}
+              aria-pressed={sourcePlaying("guitar")}
+              className="min-h-14 cursor-pointer rounded-[2px] border border-gold/45 bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold"
+            >
+              {sourcePlaying("guitar") ? "Pause" : "Hear guitar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleSource("full")}
+              aria-pressed={sourcePlaying("full")}
+              className="min-h-14 cursor-pointer rounded-[2px] border border-border-dark bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-text-muted"
+            >
+              {sourcePlaying("full") ? "Pause" : "Hear in song"}
+            </button>
+            <button
+              type="button"
+              onClick={playWithCountIn}
+              disabled={!hasBackingTrack}
+              aria-pressed={sourcePlaying("backing")}
+              className="min-h-14 cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold disabled:cursor-default disabled:opacity-35"
+            >
+              {countIn !== null
+                ? `Count in · ${countIn}`
+                : sourcePlaying("backing")
+                  ? "Pause"
+                  : "Play along"}
+            </button>
+          </div>
+
+          <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.09em] text-text-darkest">
+            Play along = vocals + drums + bass · guitar removed
+          </p>
+        </>
+      )}
     </div>
   );
 }

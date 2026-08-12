@@ -42,6 +42,7 @@ from turso_db import (
     claim_worker_command,
     claim_next_job,
     complete_worker_command,
+    ensure_stem_layers_table,
     ensure_worker_status_table,
     get_client as get_turso_client,
     new_id,
@@ -228,7 +229,10 @@ async def startup_workers():
         warmup_enabled=WORKER_WARMUP_ENABLED,
     )
 
-    await asyncio.to_thread(ensure_worker_status_table)
+    await asyncio.gather(
+        asyncio.to_thread(ensure_worker_status_table),
+        asyncio.to_thread(ensure_stem_layers_table),
+    )
     await asyncio.to_thread(update_worker_status, WORKER_ID, "starting")
 
     if WORKER_WARMUP_ENABLED:
@@ -1071,6 +1075,49 @@ def upsert_stem_urls(db, song_id: str, urls: dict[str, str]) -> None:
     )
 
 
+def upsert_stem_layers(db, song_id: str, layers: list[dict]) -> None:
+    """Publish an extensible, truthful inventory alongside legacy stem columns."""
+    if not db.query_one("SELECT id FROM songs WHERE id = ?", [song_id]):
+        raise JobCancelled(f"Song {song_id} was deleted during processing")
+
+    statements = []
+    for layer in layers:
+        statements.append(
+            (
+                """INSERT INTO stem_layers
+                     (id, song_id, layer_key, label, instrument, role, url,
+                      source_model, quality_status, is_learnable, sort_order,
+                      updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+                   ON CONFLICT(song_id, layer_key) DO UPDATE SET
+                     label = excluded.label,
+                     instrument = excluded.instrument,
+                     role = excluded.role,
+                     url = excluded.url,
+                     source_model = excluded.source_model,
+                     quality_status = excluded.quality_status,
+                     is_learnable = excluded.is_learnable,
+                     sort_order = excluded.sort_order,
+                     updated_at = unixepoch()""",
+                [
+                    new_id(),
+                    song_id,
+                    layer["layer_key"],
+                    layer["label"],
+                    layer["instrument"],
+                    layer.get("role", "all"),
+                    layer["url"],
+                    layer.get("source_model"),
+                    layer.get("quality_status", "preview"),
+                    1 if layer.get("is_learnable") else 0,
+                    layer.get("sort_order", 0),
+                ],
+            )
+        )
+    if statements:
+        db.execute_batch(statements)
+
+
 async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     db = get_turso_client()
     work_dir = source_cache_dir(OUTPUT_DIR, youtube_url, PIPELINE_VERSION)
@@ -1220,6 +1267,59 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         )
         assert_job_active(db, job_id, song_id)
         upsert_stem_urls(db, song_id, preview_urls)
+        upsert_stem_layers(
+            db,
+            song_id,
+            [
+                {
+                    "layer_key": "full",
+                    "label": "Full Song",
+                    "instrument": "full",
+                    "url": preview_urls["original_url"],
+                    "source_model": "source",
+                    "quality_status": "ready",
+                    "sort_order": 4,
+                },
+                {
+                    "layer_key": "vocals",
+                    "label": "Vocals",
+                    "instrument": "vocals",
+                    "url": preview_urls["vocals_url"],
+                    "source_model": DEMUCS_MODEL,
+                    "quality_status": "preview",
+                    "sort_order": 2,
+                },
+                {
+                    "layer_key": "guitars",
+                    "label": "All Guitars",
+                    "instrument": "guitar",
+                    "url": preview_urls["guitar_url"],
+                    "source_model": DEMUCS_MODEL,
+                    "quality_status": "preview",
+                    "is_learnable": True,
+                    "sort_order": 0,
+                },
+                {
+                    "layer_key": "bass",
+                    "label": "Bass",
+                    "instrument": "bass",
+                    "url": preview_urls["bass_url"],
+                    "source_model": DEMUCS_MODEL,
+                    "quality_status": "ready",
+                    "is_learnable": True,
+                    "sort_order": 1,
+                },
+                {
+                    "layer_key": "drums",
+                    "label": "Drums",
+                    "instrument": "drums",
+                    "url": preview_urls["drums_url"],
+                    "source_model": DEMUCS_MODEL,
+                    "quality_status": "ready",
+                    "sort_order": 3,
+                },
+            ],
+        )
         checkpoint.mark_upload(song_id, "preview")
     stage_done(
         stage="preview_upload",
@@ -1332,6 +1432,39 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         )
         assert_job_active(db, job_id, song_id)
         upsert_stem_urls(db, song_id, final_urls)
+        upsert_stem_layers(
+            db,
+            song_id,
+            [
+                {
+                    "layer_key": "vocals",
+                    "label": "Vocals",
+                    "instrument": "vocals",
+                    "url": final_urls["vocals_url"],
+                    "source_model": (
+                        VOCAL_REFINE_MODEL
+                        if checkpoint.compute_done("vocal_refine")
+                        else DEMUCS_MODEL
+                    ),
+                    "quality_status": "ready",
+                    "sort_order": 2,
+                },
+                {
+                    "layer_key": "guitars",
+                    "label": "All Guitars",
+                    "instrument": "guitar",
+                    "url": final_urls["guitar_url"],
+                    "source_model": (
+                        GUITAR_REFINE_MODEL
+                        if checkpoint.compute_done("guitar_refine")
+                        else DEMUCS_MODEL
+                    ),
+                    "quality_status": "ready",
+                    "is_learnable": True,
+                    "sort_order": 0,
+                },
+            ],
+        )
         checkpoint.mark_upload(song_id, "final")
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
 

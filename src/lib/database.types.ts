@@ -43,6 +43,21 @@ export type Stem = {
   bass_url: string | null;
 };
 
+export type StemLayer = {
+  id: string;
+  song_id: string;
+  layer_key: string;
+  label: string;
+  instrument: "full" | "vocals" | "guitar" | "bass" | "drums" | "other";
+  role: string;
+  url: string;
+  source_model: string | null;
+  quality_status: "preview" | "ready";
+  is_learnable: 0 | 1;
+  sort_order: number;
+  updated_at: number;
+};
+
 export type Section = {
   id: string;
   song_id: string;

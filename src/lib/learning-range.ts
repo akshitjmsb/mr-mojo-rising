@@ -20,6 +20,16 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+export function defaultLearningRangeForSection(
+  sectionStart: number,
+  sectionEnd: number,
+): LearningRange {
+  return {
+    start: sectionStart,
+    end: sectionEnd,
+  };
+}
+
 export function clampLearningRange(
   range: LearningRange,
   sectionStart: number,

@@ -9,6 +9,7 @@ import type {
   Section,
   Song,
   Stem,
+  StemLayer,
   TabNote,
 } from "@/lib/database.types";
 import LearnMode from "./_components/LearnMode";
@@ -43,6 +44,7 @@ export default function SongPlayerPage() {
 
   const [song, setSong] = useState<Song | null>(null);
   const [stems, setStems] = useState<Stem | null>(null);
+  const [stemLayers, setStemLayers] = useState<StemLayer[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [chords, setChords] = useState<Chord[]>([]);
   const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
@@ -81,6 +83,7 @@ export default function SongPlayerPage() {
         lastStage = data.song?.processing_stage ?? null;
         setSong(data.song);
         setStems(data.stems);
+        setStemLayers(data.stem_layers || []);
         setSections(data.sections || []);
         setChords(data.chords || []);
         setTabNotes(data.tab_notes || []);
@@ -404,6 +407,7 @@ export default function SongPlayerPage() {
         </div>
       )}
       <LearnMode
+        stemLayers={stemLayers}
         sections={sections}
         chords={chords}
         notes={tabNotes}

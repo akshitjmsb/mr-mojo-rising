@@ -216,6 +216,34 @@ def ensure_worker_status_table() -> None:
     )
 
 
+def ensure_stem_layers_table() -> None:
+    """Defensively create the layer manifest before the worker publishes audio."""
+    client = get_client()
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS stem_layers (
+           id TEXT PRIMARY KEY,
+           song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+           layer_key TEXT NOT NULL,
+           label TEXT NOT NULL,
+           instrument TEXT NOT NULL,
+           role TEXT NOT NULL DEFAULT 'all',
+           url TEXT NOT NULL,
+           source_model TEXT,
+           quality_status TEXT NOT NULL DEFAULT 'preview'
+             CHECK (quality_status IN ('preview', 'ready')),
+           is_learnable INTEGER NOT NULL DEFAULT 0
+             CHECK (is_learnable IN (0, 1)),
+           sort_order INTEGER NOT NULL DEFAULT 0,
+           updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+           UNIQUE (song_id, layer_key)
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS stem_layers_song_sort_idx
+           ON stem_layers (song_id, sort_order)"""
+    )
+
+
 def update_worker_status(
     worker_id: str,
     status: str,

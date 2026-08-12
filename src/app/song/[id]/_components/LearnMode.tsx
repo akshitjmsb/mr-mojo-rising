@@ -5,6 +5,7 @@ import type {
   Chord,
   PracticeProfile,
   Section,
+  StemLayer,
   TabNote,
 } from "@/lib/database.types";
 import {
@@ -14,8 +15,8 @@ import {
   type PracticeTuningId,
 } from "@/lib/guitar";
 import {
-  buildLearningRangeSuggestions,
   clampLearningRange,
+  defaultLearningRangeForSection,
   passesLearningRangeAccuracyGate,
   snapLearningRange,
   type LearningRange,
@@ -30,6 +31,7 @@ import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "phrase" | "setup" | "chords" | "rhythm" | "play";
 type LearningInstrument = "lead" | "rhythm" | "bass";
+type LearningLayerInstrument = "guitar" | "bass";
 
 type PracticeRange = {
   start: number;
@@ -39,6 +41,7 @@ type PracticeRange = {
 type LessonAudioSource = "guitar" | "bass" | "backing" | "full";
 
 interface Props {
+  stemLayers: StemLayer[];
   sections: Section[];
   chords: Chord[];
   notes: TabNote[];
@@ -80,8 +83,8 @@ const LESSONS: Array<{
   {
     id: "phrase",
     shortLabel: "Choose",
-    title: "What do you want to learn?",
-    description: "Choose an instrument focus, a song part, then set start and end.",
+    title: "Choose a separated layer",
+    description: "Start with the sound you want to learn. Then choose the exact song part.",
   },
   {
     id: "setup",
@@ -203,6 +206,7 @@ function formatTime(seconds: number) {
 }
 
 export default function LearnMode({
+  stemLayers,
   sections,
   chords,
   notes,
@@ -229,6 +233,8 @@ export default function LearnMode({
   const [lessonIndex, setLessonIndex] = useState(0);
   const [selectedInstrument, setSelectedInstrument] =
     useState<LearningInstrument | null>(null);
+  const [selectedLayerInstrument, setSelectedLayerInstrument] =
+    useState<LearningLayerInstrument | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
   const [showSectionChoices, setShowSectionChoices] = useState(true);
@@ -240,6 +246,9 @@ export default function LearnMode({
   const lesson = lessons[lessonIndex];
   const instrument = INSTRUMENTS.find(
     (option) => option.id === selectedInstrument,
+  );
+  const selectedLayer = stemLayers.find(
+    (layer) => layer.instrument === selectedLayerInstrument,
   );
   const instrumentAudioSource: LessonAudioSource =
     selectedInstrument === "bass" ? "bass" : "guitar";
@@ -402,33 +411,26 @@ export default function LearnMode({
     setLessonIndex(0);
   }
 
+  function selectLearningLayer(layer: StemLayer) {
+    if (!layer.is_learnable) return;
+    if (layer.instrument === "guitar") {
+      setSelectedLayerInstrument("guitar");
+      return;
+    }
+    if (layer.instrument === "bass") {
+      setSelectedLayerInstrument("bass");
+      selectInstrument("bass");
+    }
+  }
+
   function selectSection(nextSection: Section) {
-    const nextNotes = positionedNotes.filter(
-      (note) =>
-        note.start_time >= nextSection.start_time &&
-        note.start_time < nextSection.end_time &&
-        (note.confidence === null ||
-          note.confidence >= profile.tab_confidence_threshold),
-    );
-    const initialRange =
-      selectedInstrument === "bass"
-        ? clampLearningRange(
-            {
-              start: nextSection.start_time,
-              end: Math.min(nextSection.end_time, nextSection.start_time + 7),
-            },
-            nextSection.start_time,
-            nextSection.end_time,
-            "end",
-          )
-        : (buildLearningRangeSuggestions(
-            nextNotes,
-            nextSection.start_time,
-            nextSection.end_time,
-            bpm,
-          )[0] ?? null);
     setSelectedSectionId(nextSection.id);
-    setLearningRange(initialRange);
+    setLearningRange(
+      defaultLearningRangeForSection(
+        nextSection.start_time,
+        nextSection.end_time,
+      ),
+    );
     setShowSectionChoices(false);
   }
 
@@ -611,31 +613,71 @@ export default function LearnMode({
 
         {lesson.id === "phrase" && (
           <div className="mt-4">
-            {!selectedInstrument && (
-              <div
-                className="grid grid-cols-3 gap-2"
-                aria-label="Instrument to learn"
-              >
-                {INSTRUMENTS.map((option) => {
-                  const available =
-                    option.id === "bass" ? hasBassStem : hasGuitarStem;
+            {!selectedLayerInstrument && (
+              stemLayers.length > 0 ? (
+                <div
+                  className="grid grid-cols-2 gap-2"
+                  aria-label="Separated audio layers"
+                >
+                  {stemLayers.map((layer) => {
+                  const learnable = Boolean(layer.is_learnable);
                   return (
+                    <button
+                      key={layer.layer_key}
+                      type="button"
+                      onClick={() => selectLearningLayer(layer)}
+                      disabled={!learnable}
+                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left disabled:cursor-default disabled:opacity-55"
+                    >
+                      <span className="block font-playfair text-[16px] italic leading-tight text-text">
+                        {layer.label}
+                      </span>
+                      <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.08em] text-text-dark">
+                        {learnable ? "Choose to learn" : "Separated · reference"}
+                      </span>
+                      <span className="mt-2 block font-josefin text-[7px] uppercase tracking-[0.08em] text-gold/70">
+                        {layer.quality_status === "ready" ? "Ready" : "Preview"}
+                      </span>
+                    </button>
+                  );
+                  })}
+                </div>
+              ) : (
+                <p className="rounded-[2px] border border-border-dark p-3 font-josefin text-[9px] text-text-muted">
+                  Audio layers are still being prepared.
+                </p>
+              )
+            )}
+
+            {selectedLayerInstrument === "guitar" && !selectedInstrument && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLayerInstrument(null)}
+                  className="mb-3 min-h-9 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark"
+                >
+                  ← All layers
+                </button>
+                <p className="mb-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
+                  All Guitars · What do you want to practise?
+                </p>
+                <div className="grid grid-cols-2 gap-2" aria-label="Guitar learning focus">
+                  {INSTRUMENTS.filter((option) => option.id !== "bass").map((option) => (
                     <button
                       key={option.id}
                       type="button"
                       onClick={() => selectInstrument(option.id)}
-                      disabled={!available}
-                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-2 py-3 text-left disabled:cursor-default disabled:opacity-35"
+                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
                     >
-                      <span className="block font-playfair text-[15px] italic leading-tight text-text">
+                      <span className="block font-playfair text-[16px] italic leading-tight text-text">
                         {option.label}
                       </span>
                       <span className="mt-1.5 block font-josefin text-[7px] leading-relaxed text-text-dark">
-                        {available ? option.purpose : "Not available"}
+                        {option.purpose}
                       </span>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             )}
 
@@ -644,6 +686,7 @@ export default function LearnMode({
                 type="button"
                 onClick={() => {
                   setSelectedInstrument(null);
+                  setSelectedLayerInstrument(null);
                   setSelectedSectionId(null);
                   setLearningRange(null);
                   setShowSectionChoices(true);
@@ -652,7 +695,7 @@ export default function LearnMode({
                 className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
               >
                 <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-                  Instrument · <span className="text-gold">{instrument?.label}</span>
+                  Learning · <span className="text-gold">{selectedLayer?.label} / {instrument?.label}</span>
                 </span>
                 <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
                   Change
@@ -796,6 +839,7 @@ export default function LearnMode({
           learningRange && (
             <LeadNotesTrainer
               key={`${learningRange.start}-${learningRange.end}`}
+              mode="notes"
               notes={leadLearningNotes}
               selection={learningRange}
               strings={tuning.strings}
@@ -896,6 +940,7 @@ export default function LearnMode({
           learningRange && (
             <LeadNotesTrainer
               key={`play-${learningRange.start}-${learningRange.end}`}
+              mode="play"
               notes={leadLearningNotes}
               selection={learningRange}
               strings={tuning.strings}
@@ -1065,6 +1110,8 @@ export default function LearnMode({
                   ? `Learn ${formatTime(learningRange!.start)}–${formatTime(learningRange!.end)} · Next`
                 : lesson.id === "setup" && !tunerComplete
                   ? "Tune all strings to continue"
+                  : lesson.id === "chords" && selectedInstrument === "lead"
+                    ? "Next · learn the timing"
                   : "I’m comfortable · Next"}
             </button>
           ) : (

@@ -24,6 +24,24 @@ export const SCHEMA_STATEMENTS: string[] = [
     bass_url TEXT
   )`,
 
+  `CREATE TABLE IF NOT EXISTS stem_layers (
+    id TEXT PRIMARY KEY,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    layer_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'all',
+    url TEXT NOT NULL,
+    source_model TEXT,
+    quality_status TEXT NOT NULL DEFAULT 'preview'
+      CHECK (quality_status IN ('preview', 'ready')),
+    is_learnable INTEGER NOT NULL DEFAULT 0
+      CHECK (is_learnable IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE (song_id, layer_key)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS sections (
     id TEXT PRIMARY KEY,
     song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
@@ -132,6 +150,9 @@ export const SCHEMA_STATEMENTS: string[] = [
 
   `CREATE INDEX IF NOT EXISTS tab_notes_song_start_idx
     ON tab_notes (song_id, start_time)`,
+
+  `CREATE INDEX IF NOT EXISTS stem_layers_song_sort_idx
+    ON stem_layers (song_id, sort_order)`,
 
   `CREATE INDEX IF NOT EXISTS processing_jobs_status_run_after_idx
     ON processing_jobs (status, run_after, created_at)`,
