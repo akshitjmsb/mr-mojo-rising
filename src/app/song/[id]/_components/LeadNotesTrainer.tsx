@@ -19,7 +19,13 @@ interface Props {
   bpm: number | null;
   currentTime: number;
   currentSpeed: number;
-  currentAudioSource: "guitar" | "bass" | "backing" | "full";
+  currentAudioSource:
+    | "guitar"
+    | "bass"
+    | "vocals"
+    | "drums"
+    | "backing"
+    | "full";
   isPlaying: boolean;
   loopStart: number;
   loopEnd: number;

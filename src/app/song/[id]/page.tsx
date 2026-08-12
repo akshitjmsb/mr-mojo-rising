@@ -23,7 +23,13 @@ type PracticeRange = {
   end: number;
 };
 
-type AudioSource = "guitar" | "bass" | "backing" | "full";
+type AudioSource =
+  | "guitar"
+  | "bass"
+  | "vocals"
+  | "drums"
+  | "backing"
+  | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getPracticeTuning("standard");
@@ -158,6 +164,8 @@ export default function SongPlayerPage() {
   const audioUrls = useMemo(() => {
     if (stemMode === "guitar") return stems?.guitar_url ? [stems.guitar_url] : [];
     if (stemMode === "bass") return stems?.bass_url ? [stems.bass_url] : [];
+    if (stemMode === "vocals") return stems?.vocals_url ? [stems.vocals_url] : [];
+    if (stemMode === "drums") return stems?.drums_url ? [stems.drums_url] : [];
     if (stemMode === "full") return stems?.original_url ? [stems.original_url] : [];
     return [stems?.vocals_url, stems?.drums_url, stems?.bass_url].filter(
       (url): url is string => Boolean(url),
@@ -307,6 +315,8 @@ export default function SongPlayerPage() {
   function resolveAudioSource(requestedSource: AudioSource): AudioSource {
     if (requestedSource === "guitar" && !stems?.guitar_url) return "full";
     if (requestedSource === "bass" && !stems?.bass_url) return "full";
+    if (requestedSource === "vocals" && !stems?.vocals_url) return "full";
+    if (requestedSource === "drums" && !stems?.drums_url) return "full";
     if (
       requestedSource === "backing" &&
       (!stems?.vocals_url || !stems?.drums_url || !stems?.bass_url)

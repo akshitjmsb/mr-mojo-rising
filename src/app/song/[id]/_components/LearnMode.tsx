@@ -31,14 +31,19 @@ import SoloPhraseTab from "./SoloPhraseTab";
 
 type LessonId = "phrase" | "setup" | "chords" | "rhythm" | "play";
 type LearningInstrument = "lead" | "rhythm" | "bass";
-type LearningLayerInstrument = "guitar" | "bass";
 
 type PracticeRange = {
   start: number;
   end: number;
 };
 
-type LessonAudioSource = "guitar" | "bass" | "backing" | "full";
+type LessonAudioSource =
+  | "guitar"
+  | "bass"
+  | "vocals"
+  | "drums"
+  | "backing"
+  | "full";
 
 interface Props {
   stemLayers: StemLayer[];
@@ -233,8 +238,7 @@ export default function LearnMode({
   const [lessonIndex, setLessonIndex] = useState(0);
   const [selectedInstrument, setSelectedInstrument] =
     useState<LearningInstrument | null>(null);
-  const [selectedLayerInstrument, setSelectedLayerInstrument] =
-    useState<LearningLayerInstrument | null>(null);
+  const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
   const [showSectionChoices, setShowSectionChoices] = useState(true);
@@ -248,8 +252,21 @@ export default function LearnMode({
     (option) => option.id === selectedInstrument,
   );
   const selectedLayer = stemLayers.find(
-    (layer) => layer.instrument === selectedLayerInstrument,
+    (layer) => layer.layer_key === selectedLayerKey,
   );
+  const selectedLayerInstrument = selectedLayer?.instrument ?? null;
+  const isReferenceLayer =
+    selectedLayerInstrument === "vocals" ||
+    selectedLayerInstrument === "drums" ||
+    selectedLayerInstrument === "full";
+  const selectedLayerAudioSource: LessonAudioSource =
+    selectedLayerInstrument === "vocals" ||
+    selectedLayerInstrument === "drums" ||
+    selectedLayerInstrument === "full"
+      ? selectedLayerInstrument
+      : selectedLayerInstrument === "bass"
+        ? "bass"
+        : "guitar";
   const instrumentAudioSource: LessonAudioSource =
     selectedInstrument === "bass" ? "bass" : "guitar";
   const isolatedSourceLabel =
@@ -299,8 +316,17 @@ export default function LearnMode({
         : [],
     [positionedNotes, profile.tab_confidence_threshold, section],
   );
-  const accuracyPassed =
-    selectedInstrument === "bass"
+  const validReferenceRange = Boolean(
+    isReferenceLayer &&
+      section &&
+      learningRange &&
+      learningRange.start >= section.start_time &&
+      learningRange.end <= section.end_time &&
+      learningRange.end - learningRange.start >= 2,
+  );
+  const accuracyPassed = isReferenceLayer
+    ? validReferenceRange
+    : selectedInstrument === "bass"
       ? Boolean(
           hasBassStem &&
             section &&
@@ -412,13 +438,15 @@ export default function LearnMode({
   }
 
   function selectLearningLayer(layer: StemLayer) {
-    if (!layer.is_learnable) return;
+    setSelectedLayerKey(layer.layer_key);
+    setSelectedSectionId(null);
+    setLearningRange(null);
+    setShowSectionChoices(true);
+    setLessonIndex(0);
     if (layer.instrument === "guitar") {
-      setSelectedLayerInstrument("guitar");
       return;
     }
     if (layer.instrument === "bass") {
-      setSelectedLayerInstrument("bass");
       selectInstrument("bass");
     }
   }
@@ -452,7 +480,7 @@ export default function LearnMode({
   function commitLearningRange() {
     if (!section || !learningRange) return;
     const committedRange =
-      selectedInstrument === "bass"
+      selectedInstrument === "bass" || isReferenceLayer
         ? clampLearningRange(
             learningRange,
             section.start_time,
@@ -466,7 +494,13 @@ export default function LearnMode({
             section.end_time,
           );
     setLearningRange(committedRange);
-    if (isPlaying) onReplay(committedRange, 1, instrumentAudioSource);
+    if (isPlaying) {
+      onReplay(
+        committedRange,
+        1,
+        isReferenceLayer ? selectedLayerAudioSource : instrumentAudioSource,
+      );
+    }
   }
 
   function goNext() {
@@ -613,34 +647,32 @@ export default function LearnMode({
 
         {lesson.id === "phrase" && (
           <div className="mt-4">
-            {!selectedLayerInstrument && (
+            {!selectedLayer && (
               stemLayers.length > 0 ? (
                 <div
                   className="grid grid-cols-2 gap-2"
                   aria-label="Separated audio layers"
                 >
-                  {stemLayers.map((layer) => {
-                  const learnable = Boolean(layer.is_learnable);
-                  return (
+                  {stemLayers.map((layer) => (
                     <button
                       key={layer.layer_key}
                       type="button"
                       onClick={() => selectLearningLayer(layer)}
-                      disabled={!learnable}
-                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left disabled:cursor-default disabled:opacity-55"
+                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
                     >
                       <span className="block font-playfair text-[16px] italic leading-tight text-text">
                         {layer.label}
                       </span>
                       <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.08em] text-text-dark">
-                        {learnable ? "Choose to learn" : "Separated · reference"}
+                        {layer.instrument === "guitar" || layer.instrument === "bass"
+                          ? "Choose to learn"
+                          : "Choose to listen"}
                       </span>
                       <span className="mt-2 block font-josefin text-[7px] uppercase tracking-[0.08em] text-gold/70">
                         {layer.quality_status === "ready" ? "Ready" : "Preview"}
                       </span>
                     </button>
-                  );
-                  })}
+                  ))}
                 </div>
               ) : (
                 <p className="rounded-[2px] border border-border-dark p-3 font-josefin text-[9px] text-text-muted">
@@ -653,7 +685,7 @@ export default function LearnMode({
               <div>
                 <button
                   type="button"
-                  onClick={() => setSelectedLayerInstrument(null)}
+                  onClick={() => setSelectedLayerKey(null)}
                   className="mb-3 min-h-9 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark"
                 >
                   ← All layers
@@ -686,7 +718,7 @@ export default function LearnMode({
                 type="button"
                 onClick={() => {
                   setSelectedInstrument(null);
-                  setSelectedLayerInstrument(null);
+                  setSelectedLayerKey(null);
                   setSelectedSectionId(null);
                   setLearningRange(null);
                   setShowSectionChoices(true);
@@ -703,7 +735,28 @@ export default function LearnMode({
               </button>
             )}
 
-            {selectedInstrument && showSectionChoices && (
+            {isReferenceLayer && (
+              <button
+                type="button"
+                onClick={() => {
+                  onPause();
+                  setSelectedLayerKey(null);
+                  setSelectedSectionId(null);
+                  setLearningRange(null);
+                  setShowSectionChoices(true);
+                }}
+                className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
+              >
+                <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
+                  Listening · <span className="text-gold">{selectedLayer?.label}</span>
+                </span>
+                <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                  Change
+                </span>
+              </button>
+            )}
+
+            {(selectedInstrument || isReferenceLayer) && showSectionChoices && (
               <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
                 {sectionOptions.map((option) => {
                   const selected = option.section.id === section?.id;
@@ -731,32 +784,49 @@ export default function LearnMode({
               </div>
             )}
 
-            {selectedInstrument && !showSectionChoices && section && learningRange && (
+            {(selectedInstrument || isReferenceLayer) &&
+              !showSectionChoices &&
+              section &&
+              learningRange && (
               <LearningRangePicker
                 section={section}
                 sectionLabel={selectedSectionLabel}
                 notes={reliableSectionNotes}
                 range={learningRange}
                 accuracyPassed={accuracyPassed}
-                showWaveform={selectedInstrument !== "bass"}
+                showWaveform={
+                  selectedInstrument !== "bass" && !isReferenceLayer
+                }
                 readyLabel={
-                  selectedInstrument === "bass"
+                  isReferenceLayer
+                    ? `${selectedLayer?.label} ready · original tempo`
+                    : selectedInstrument === "bass"
                     ? "Bass stem ready"
                     : "Accuracy gate passed"
                 }
                 previewPlaying={
                   isSelectedRangePlaying &&
-                  currentAudioSource === instrumentAudioSource
+                  currentAudioSource ===
+                    (isReferenceLayer
+                      ? selectedLayerAudioSource
+                      : instrumentAudioSource)
                 }
                 onChangeSection={() => setShowSectionChoices(true)}
                 onBoundaryChange={changeLearningBoundary}
                 onBoundaryCommit={commitLearningRange}
-                onPreview={() =>
-                  isSelectedRangePlaying &&
-                  currentAudioSource === instrumentAudioSource
-                    ? onPractice(learningRange, 1, instrumentAudioSource)
-                    : onReplay(learningRange, 1, instrumentAudioSource)
-                }
+                onPreview={() => {
+                  const source = isReferenceLayer
+                    ? selectedLayerAudioSource
+                    : instrumentAudioSource;
+                  if (
+                    isSelectedRangePlaying &&
+                    currentAudioSource === source
+                  ) {
+                    onPractice(learningRange, 1, source);
+                  } else {
+                    onReplay(learningRange, 1, source);
+                  }
+                }}
               />
             )}
 
@@ -1088,36 +1158,44 @@ export default function LearnMode({
         )}
 
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-dark pt-3">
-          <button
-            onClick={() => selectLesson(Math.max(0, lessonIndex - 1))}
-            disabled={lessonIndex === 0}
-            className="min-h-9 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-30"
-          >
-            Back
-          </button>
-          {lessonIndex < lessons.length - 1 ? (
-            <button
-              onClick={goNext}
-              disabled={
-                (lesson.id === "phrase" && !selectionReady) ||
-                (lesson.id === "setup" && !tunerComplete)
-              }
-              className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
-            >
-              {lesson.id === "phrase" && !selectionReady
-                ? "Pass accuracy gate"
-                : lesson.id === "phrase"
-                  ? `Learn ${formatTime(learningRange!.start)}–${formatTime(learningRange!.end)} · Next`
-                : lesson.id === "setup" && !tunerComplete
-                  ? "Tune all strings to continue"
-                  : lesson.id === "chords" && selectedInstrument === "lead"
-                    ? "Next · learn the timing"
-                  : "I’m comfortable · Next"}
-            </button>
-          ) : (
-            <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
-              Repeat slowly, then add 5%
+          {isReferenceLayer ? (
+            <p className="ml-auto font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
+              Listen above · original tempo
             </p>
+          ) : (
+            <>
+              <button
+                onClick={() => selectLesson(Math.max(0, lessonIndex - 1))}
+                disabled={lessonIndex === 0}
+                className="min-h-9 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-30"
+              >
+                Back
+              </button>
+              {lessonIndex < lessons.length - 1 ? (
+                <button
+                  onClick={goNext}
+                  disabled={
+                    (lesson.id === "phrase" && !selectionReady) ||
+                    (lesson.id === "setup" && !tunerComplete)
+                  }
+                  className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
+                >
+                  {lesson.id === "phrase" && !selectionReady
+                    ? "Pass accuracy gate"
+                    : lesson.id === "phrase"
+                      ? `Learn ${formatTime(learningRange!.start)}–${formatTime(learningRange!.end)} · Next`
+                      : lesson.id === "setup" && !tunerComplete
+                        ? "Tune all strings to continue"
+                        : lesson.id === "chords" && selectedInstrument === "lead"
+                          ? "Next · learn the timing"
+                          : "I’m comfortable · Next"}
+                </button>
+              ) : (
+                <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
+                  Repeat slowly, then add 5%
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
