@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type {
   Chord,
   PracticeProfile,
@@ -27,9 +27,8 @@ import ChordShapeCoach from "./ChordShapeCoach";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmTimeline from "./RhythmTimeline";
-import SoloPhraseTab from "./SoloPhraseTab";
 
-type LessonId = "phrase" | "setup" | "chords" | "rhythm" | "play";
+type LessonId = "phrase" | "setup" | "practice";
 type LearningInstrument = "lead" | "rhythm" | "bass";
 
 type PracticeRange = {
@@ -98,22 +97,10 @@ const LESSONS: Array<{
     description: "Tune down first. Everything becomes easier when your guitar matches the recording.",
   },
   {
-    id: "chords",
-    shortLabel: "Chords",
-    title: "Learn the shapes",
-    description: "Make each shape clean before trying to keep up with the song.",
-  },
-  {
-    id: "rhythm",
-    shortLabel: "Rhythm",
-    title: "Make the changes musical",
-    description: "Use slow down-strums first. Rhythm can become more detailed later.",
-  },
-  {
-    id: "play",
-    shortLabel: "Play",
-    title: "Learn your selection step by step",
-    description: "Listen, copy, and loop a few seconds. Accuracy comes before speed.",
+    id: "practice",
+    shortLabel: "Practice",
+    title: "Practice",
+    description: "Press play, follow the music, and copy what you hear.",
   },
 ];
 
@@ -127,75 +114,6 @@ const INSTRUMENTS: Array<{
   { id: "bass", label: "Bass guitar", purpose: "Bass stem & groove" },
 ];
 
-const INSTRUMENT_LESSONS: Record<LearningInstrument, typeof LESSONS> = {
-  lead: LESSONS.map((lesson) => {
-    if (lesson.id === "chords") {
-      return {
-        ...lesson,
-        shortLabel: "Notes",
-        title: "See every note",
-        description: "Follow the verified guitar tab and its fretboard position.",
-      };
-    }
-    if (lesson.id === "rhythm") {
-      return {
-        ...lesson,
-        shortLabel: "Timing",
-        title: "Place the notes in time",
-        description: "See where each attack lands before playing at speed.",
-      };
-    }
-    if (lesson.id === "play") {
-      return {
-        ...lesson,
-        title: "Play the whole selection",
-        description: "Follow the gold line from left to right at the original tempo.",
-      };
-    }
-    return lesson;
-  }),
-  rhythm: LESSONS,
-  bass: LESSONS.map((lesson) => {
-    if (lesson.id === "chords") {
-      return {
-        ...lesson,
-        shortLabel: "Listen",
-        title: "Hear the bass clearly",
-        description: "Learn the line by ear from the isolated bass stem.",
-      };
-    }
-    if (lesson.id === "rhythm") {
-      return {
-        ...lesson,
-        shortLabel: "Groove",
-        title: "Lock in the groove",
-        description: "Loop the selection slowly, then return to the original tempo.",
-      };
-    }
-    return lesson;
-  }),
-};
-
-const PRACTICE_SPEEDS = [
-  { value: 0.5, percent: 50, purpose: "Learn" },
-  { value: 0.65, percent: 65, purpose: "Build" },
-  { value: 0.8, percent: 80, purpose: "Prepare" },
-  { value: 1, percent: 100, purpose: "Original" },
-] as const;
-
-const RHYTHM_SPEEDS = [
-  { speed: 0.8, label: "Slow", percent: "80%", source: "isolated" },
-  { speed: 1, label: "Original", percent: "100%", source: "full" },
-] as const;
-
-type PracticeSpeed = (typeof PRACTICE_SPEEDS)[number]["value"];
-
-const PRACTICE_SPEED_STORAGE_KEY = "mr-mojo:learn-speed:v1";
-
-function isPracticeSpeed(value: number): value is PracticeSpeed {
-  return PRACTICE_SPEEDS.some((option) => option.value === value);
-}
-
 function makePracticeRange(
   lesson: LessonId,
   learningRange: LearningRange | null,
@@ -203,8 +121,7 @@ function makePracticeRange(
   if (
     !learningRange ||
     lesson === "phrase" ||
-    lesson === "setup" ||
-    lesson === "chords"
+    lesson === "setup"
   ) return null;
   return learningRange;
 }
@@ -250,10 +167,10 @@ export default function LearnMode({
   const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
   const [showSectionChoices, setShowSectionChoices] = useState(true);
   const [tunerComplete, setTunerComplete] = useState(false);
-  const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
-  const lessons = selectedInstrument
-    ? INSTRUMENT_LESSONS[selectedInstrument]
-    : LESSONS;
+  const [practiceMix, setPracticeMix] = useState<"isolated" | "full">(
+    "isolated",
+  );
+  const lessons = LESSONS;
   const lesson = lessons[lessonIndex];
   const instrument = INSTRUMENTS.find(
     (option) => option.id === selectedInstrument,
@@ -276,10 +193,6 @@ export default function LearnMode({
         : "guitar";
   const instrumentAudioSource: LessonAudioSource =
     selectedInstrument === "bass" ? "bass" : "guitar";
-  const isolatedSourceLabel =
-    selectedInstrument === "bass"
-      ? "bass"
-      : "guitar track";
   const tuning = getPracticeTuning(profile.tuning_id);
   const section =
     sections.find((item) => item.id === selectedSectionId) ?? null;
@@ -398,32 +311,12 @@ export default function LearnMode({
     isPlaying &&
     Math.abs(loopStart - learningRange.start) < 0.05 &&
     Math.abs(loopEnd - learningRange.end) < 0.05;
-  const isolatedListenActive =
+  const practiceAudioSource: LessonAudioSource =
+    practiceMix === "full" ? "full" : instrumentAudioSource;
+  const practicePlaybackActive =
     isCurrentRangePlaying &&
-    currentAudioSource === instrumentAudioSource &&
+    currentAudioSource === practiceAudioSource &&
     Math.abs(currentSpeed - 1) < 0.01;
-  const fullMixListenActive =
-    isCurrentRangePlaying &&
-    currentAudioSource === "full" &&
-    Math.abs(currentSpeed - 1) < 0.01;
-  const practiceLoopActive =
-    isCurrentRangePlaying &&
-    currentAudioSource === instrumentAudioSource &&
-    Math.abs(currentSpeed - practiceSpeed) < 0.01;
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      try {
-        const storedSpeed = Number.parseFloat(
-          window.localStorage.getItem(PRACTICE_SPEED_STORAGE_KEY) ?? "",
-        );
-        if (isPracticeSpeed(storedSpeed)) setPracticeSpeed(storedSpeed);
-      } catch {
-        // Practice still works when private browsing blocks local storage.
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
 
   function selectLesson(index: number) {
     setLessonIndex(index);
@@ -441,6 +334,7 @@ export default function LearnMode({
     setLearningRange(null);
     setShowSectionChoices(true);
     setTunerComplete(false);
+    setPracticeMix("isolated");
     setLessonIndex(0);
   }
 
@@ -514,115 +408,50 @@ export default function LearnMode({
     if (lessonIndex < lessons.length - 1) selectLesson(lessonIndex + 1);
   }
 
-  function selectPracticeSpeed(nextSpeed: PracticeSpeed) {
-    const wasPracticing = practiceLoopActive;
-    setPracticeSpeed(nextSpeed);
-    try {
-      window.localStorage.setItem(
-        PRACTICE_SPEED_STORAGE_KEY,
-        String(nextSpeed),
-      );
-    } catch {
-      // Keep the in-memory selection when storage is unavailable.
-    }
-    if (wasPracticing && range) {
-      onReplay(range, nextSpeed, instrumentAudioSource);
-    }
-  }
-
-  function playRhythm(
-    nextSpeed: 0.8 | 1,
-    source: LessonAudioSource,
-  ) {
-    if (!range) return;
-    const samePlayingSpeed =
-      isCurrentRangePlaying &&
-      practiceSpeed === nextSpeed &&
-      currentAudioSource === source;
-    setPracticeSpeed(nextSpeed);
-    try {
-      window.localStorage.setItem(
-        PRACTICE_SPEED_STORAGE_KEY,
-        String(nextSpeed),
-      );
-    } catch {
-      // Keep the in-memory selection when storage is unavailable.
-    }
-    if (samePlayingSpeed) {
-      onPractice(range, nextSpeed, source);
-    } else {
-      onReplay(range, nextSpeed, source);
-    }
-  }
-
-  function playPhrase(
-    nextSpeed: PracticeSpeed,
-    source: LessonAudioSource,
-    rememberAsPracticeSpeed = false,
-  ) {
+  function playPracticeSource(source: LessonAudioSource) {
     if (!range) return;
     const samePlayback =
       isCurrentRangePlaying &&
       currentAudioSource === source &&
-      Math.abs(currentSpeed - nextSpeed) < 0.01;
-
-    if (rememberAsPracticeSpeed) {
-      setPracticeSpeed(nextSpeed);
-      try {
-        window.localStorage.setItem(
-          PRACTICE_SPEED_STORAGE_KEY,
-          String(nextSpeed),
-        );
-      } catch {
-        // Keep the in-memory selection when storage is unavailable.
-      }
-    }
+      Math.abs(currentSpeed - 1) < 0.01;
 
     if (samePlayback) {
-      onPractice(range, nextSpeed, source);
+      onPractice(range, 1, source);
     } else {
-      onReplay(range, nextSpeed, source);
+      onReplay(range, 1, source);
     }
   }
 
   return (
     <section className="mx-5 mt-3 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="font-josefin text-[9px] uppercase tracking-[0.22em] text-gold">
-            Learn Patience
-          </p>
-          <p className="mt-1 font-josefin text-[9px] text-text-dark">
-            One small win at a time
-          </p>
-        </div>
-        <p className="font-playfair text-[17px] italic text-text-muted">
-          {lessonIndex + 1} / {lessons.length}
-        </p>
-      </div>
-
-      <div className="mt-3 grid grid-cols-5 gap-1" aria-label="Lesson steps">
+      <nav
+        className="flex items-center justify-center gap-3 border-b border-border-dark pb-3"
+        aria-label="Learning path"
+      >
         {lessons.map((item, index) => (
           <button
             key={item.id}
             onClick={() => selectLesson(index)}
-            disabled={index > 0 && !selectionReady}
+            disabled={
+              (index > 0 && !selectionReady) ||
+              (index > 1 && !tunerComplete)
+            }
             aria-current={index === lessonIndex ? "step" : undefined}
-            className={`min-h-10 cursor-pointer rounded-[2px] border px-1 font-josefin text-[7px] uppercase tracking-[0.07em] disabled:cursor-default disabled:opacity-35 ${
+            className={`min-h-8 cursor-pointer border-none bg-transparent px-1 font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-30 ${
               index === lessonIndex
-                ? "border-gold bg-gold/10 text-gold"
+                ? "text-gold"
                 : index < lessonIndex
-                  ? "border-gold/25 bg-transparent text-text-muted"
-                  : "border-border-dark bg-transparent text-text-dark"
+                  ? "text-text-muted"
+                  : "text-text-dark"
             }`}
           >
-            <span className="block text-[8px]">{index < lessonIndex ? "✓" : index + 1}</span>
+            {index < lessonIndex ? "✓ " : `${index + 1} `}
             {item.shortLabel}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <div className="mt-4 border-t border-border-dark pt-4">
+      <div className="pt-4">
         {lesson.id !== "phrase" && section && (
           <button
             type="button"
@@ -630,7 +459,8 @@ export default function LearnMode({
             className="mb-3 flex min-h-9 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
           >
             <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-              Learning · <span className="text-gold">{selectedSectionLabel}</span>
+              <span className="text-gold">{instrument?.label}</span>
+              {` · ${selectedSectionLabel}`}
               {learningRange
                 ? ` · ${formatTime(learningRange.start)}–${formatTime(learningRange.end)}`
                 : ""}
@@ -641,7 +471,7 @@ export default function LearnMode({
           </button>
         )}
 
-        {lesson.id !== "chords" && lesson.id !== "rhythm" && (
+        {lesson.id !== "practice" && (
           <>
             <p className="font-playfair text-[22px] italic leading-tight text-text">
               {lesson.title}
@@ -809,7 +639,7 @@ export default function LearnMode({
                     ? `${selectedLayer?.label} ready · original tempo`
                     : selectedInstrument === "bass"
                     ? "Bass stem ready"
-                    : "Accuracy gate passed"
+                    : "Selection ready"
                 }
                 previewPlaying={
                   isSelectedRangePlaying &&
@@ -902,21 +732,11 @@ export default function LearnMode({
           </div>
         )}
 
-        {lesson.id === "chords" && selectedInstrument === "rhythm" && (
-          <div className="mt-1">
-            <ChordShapeCoach
-              chords={sectionChords}
-              tuningOffset={profile.tuning_offset}
-            />
-          </div>
-        )}
-
-        {lesson.id === "chords" &&
+        {lesson.id === "practice" &&
           selectedInstrument === "lead" &&
           learningRange && (
             <LeadNotesTrainer
               key={`${learningRange.start}-${learningRange.end}`}
-              mode="notes"
               notes={leadLearningNotes}
               selection={learningRange}
               strings={tuning.strings}
@@ -935,228 +755,77 @@ export default function LearnMode({
             />
           )}
 
-        {lesson.id === "chords" &&
-          selectedInstrument === "bass" &&
-          learningRange && (
-            <div className="mt-2 rounded-[2px] border border-border-dark bg-bg/40 p-3">
-              <p className="font-josefin text-[9px] leading-relaxed text-text-muted">
-                Bass audio is isolated and ready. Verified bass tab is not available yet, so the app will not show guessed notes.
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  isSelectedRangePlaying && currentAudioSource === "bass"
-                    ? onPractice(learningRange, 1, "bass")
-                    : onReplay(learningRange, 1, "bass")
-                }
-                className="mt-3 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
-              >
-                {isSelectedRangePlaying && currentAudioSource === "bass"
-                  ? "Pause bass"
-                  : "Hear isolated bass"}
-              </button>
-            </div>
-          )}
-
-        {lesson.id === "rhythm" && range && (
-          <div className="mt-2">
-            {selectedInstrument !== "bass" && (
-              <RhythmTimeline
-                notes={reliableLearningNotes}
-                start={range.start}
-                end={range.end}
-                currentTime={currentTime}
-                active={isCurrentRangePlaying}
-                bpm={bpm}
-              />
-            )}
-
-            {selectedInstrument === "bass" && (
-              <p className="border-y border-border-dark py-3 font-josefin text-[9px] leading-relaxed text-text-muted">
-                Hear the bass alone at 80%, then compare it with the full song at the original tempo.
-              </p>
-            )}
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {RHYTHM_SPEEDS.map((option) => {
-                const optionSource: LessonAudioSource =
-                  option.source === "full" ? "full" : instrumentAudioSource;
-                const active =
-                  practiceSpeed === option.speed &&
-                  currentAudioSource === optionSource &&
-                  isCurrentRangePlaying;
-                return (
+        {lesson.id === "practice" &&
+          selectedInstrument !== "lead" &&
+          range && (
+            <div className="mt-3">
+              <div className="grid grid-cols-2 gap-1" aria-label="Practice audio">
+                {(["isolated", "full"] as const).map((mix) => (
                   <button
-                    key={option.speed}
+                    key={mix}
                     type="button"
-                    onClick={() =>
-                      playRhythm(option.speed, optionSource)
-                    }
-                    aria-pressed={active}
-                    className={`min-h-16 cursor-pointer rounded-[2px] border font-josefin uppercase tracking-[0.12em] ${
-                      active
-                        ? "border-gold bg-gold/10 text-gold"
-                        : "border-border-dark bg-transparent text-text-muted"
+                    onClick={() => {
+                      setPracticeMix(mix);
+                      if (isCurrentRangePlaying) {
+                        onReplay(
+                          range,
+                          1,
+                          mix === "full" ? "full" : instrumentAudioSource,
+                        );
+                      }
+                    }}
+                    aria-pressed={practiceMix === mix}
+                    className={`min-h-9 cursor-pointer border-b bg-transparent font-josefin text-[8px] uppercase tracking-[0.1em] ${
+                      practiceMix === mix
+                        ? "border-gold text-gold"
+                        : "border-border-dark text-text-dark"
                     }`}
                   >
-                    <span className="block text-[10px]">
-                      {active ? "Pause" : option.label}
-                    </span>
-                    <span className="mt-1 block text-[8px] text-text-dark">
-                      {option.percent}
-                    </span>
+                    {mix === "full"
+                      ? "Song"
+                      : selectedInstrument === "bass"
+                        ? "Bass"
+                        : "Guitar"}
                   </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {lesson.id === "play" &&
-          selectedInstrument === "lead" &&
-          learningRange && (
-            <LeadNotesTrainer
-              key={`play-${learningRange.start}-${learningRange.end}`}
-              mode="play"
-              notes={leadLearningNotes}
-              selection={learningRange}
-              strings={tuning.strings}
-              bpm={bpm}
-              currentTime={currentTime}
-              currentSpeed={currentSpeed}
-              currentAudioSource={currentAudioSource}
-              isPlaying={isPlaying}
-              loopStart={loopStart}
-              loopEnd={loopEnd}
-              hasBackingTrack={hasBackingTrack}
-              onPractice={onPractice}
-              onReplay={onReplay}
-              onSeek={onSeek}
-              onPause={onPause}
-            />
-          )}
-
-        {lesson.id === "play" && selectedInstrument !== "lead" && range && (
-          <div className="mt-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-                Your selection
-              </p>
-              <p className="font-josefin text-[9px] text-text-dark">
-                {formatTime(range.start)}–{formatTime(range.end)}
-              </p>
-            </div>
-
-            <div className="mt-3 rounded-[2px] border border-border-dark bg-bg/40 p-3">
-              <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-gold">
-                1 · Listen
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => playPhrase(1, instrumentAudioSource)}
-                  aria-pressed={isolatedListenActive}
-                  className={`min-h-14 cursor-pointer rounded-[2px] border font-josefin uppercase tracking-[0.1em] ${
-                    isolatedListenActive
-                      ? "border-gold bg-gold/10 text-gold"
-                      : "border-gold/45 bg-transparent text-text"
-                  }`}
-                >
-                  <span className="block text-[9px]">
-                    {isolatedListenActive
-                      ? "Pause"
-                      : `Hear ${isolatedSourceLabel}`}
-                  </span>
-                  <span className="mt-1 block text-[7px] text-text-dark">
-                    Isolated · 100%
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => playPhrase(1, "full")}
-                  aria-pressed={fullMixListenActive}
-                  className={`min-h-14 cursor-pointer rounded-[2px] border font-josefin uppercase tracking-[0.1em] ${
-                    fullMixListenActive
-                      ? "border-gold bg-gold/10 text-gold"
-                      : "border-border-dark bg-transparent text-text-muted"
-                  }`}
-                >
-                  <span className="block text-[9px]">
-                    {fullMixListenActive ? "Pause" : "Hear in song"}
-                  </span>
-                  <span className="mt-1 block text-[7px] text-text-dark">
-                    Full mix · 100%
-                  </span>
-                </button>
+                ))}
               </div>
-            </div>
-
-            {selectedInstrument !== "bass" ? (
-              <div className="mt-3 border-t border-border-dark pt-3">
-                <p className="mb-2 font-josefin text-[8px] uppercase tracking-[0.16em] text-gold">
-                  2 · Copy this tab
-                </p>
-                <SoloPhraseTab
-                  notes={reliableLearningNotes}
-                  range={range}
-                  strings={tuning.strings}
-                  currentTime={currentTime}
-                  onSeek={onSeek}
-                />
-              </div>
-            ) : (
-              <p className="mt-3 border-t border-border-dark pt-3 font-josefin text-[9px] leading-relaxed text-text-muted">
-                2 · Copy the isolated bass by ear. Bass tab will appear only after instrument-specific transcription is verified.
-              </p>
-            )}
-
-            <div className="mt-3 border-t border-border-dark pt-3">
-              <fieldset>
-                <legend className="font-josefin text-[8px] uppercase tracking-[0.16em] text-gold">
-                  3 · Loop it slowly
-                </legend>
-                <div className="mt-2 grid grid-cols-4 gap-1.5">
-                  {PRACTICE_SPEEDS.map((option) => {
-                    const selected = practiceSpeed === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => selectPracticeSpeed(option.value)}
-                        aria-pressed={selected}
-                        className={`min-h-11 cursor-pointer rounded-[2px] border px-1 font-josefin ${
-                          selected
-                            ? "border-gold bg-gold/10 text-gold"
-                            : "border-border-dark bg-transparent text-text-muted"
-                        }`}
-                      >
-                        <span className="block text-[9px]">
-                          {option.percent}%
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </fieldset>
 
               <button
                 type="button"
-                onClick={() =>
-                  playPhrase(practiceSpeed, instrumentAudioSource, true)
-                }
-                aria-pressed={practiceLoopActive}
-                className="mt-2 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
+                onClick={() => playPracticeSource(practiceAudioSource)}
+                aria-pressed={practicePlaybackActive}
+                className="mt-3 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold"
               >
-                {practiceLoopActive
-                  ? "Pause loop"
-                  : `Loop ${isolatedSourceLabel} · ${Math.round(practiceSpeed * 100)}%`}
+                {practicePlaybackActive ? "Pause" : "Play"}
               </button>
+              <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                Original tempo
+              </p>
+
+              {selectedInstrument === "rhythm" ? (
+                <div className="mt-4 space-y-4">
+                  <ChordShapeCoach
+                    chords={sectionChords}
+                    tuningOffset={profile.tuning_offset}
+                  />
+                  <RhythmTimeline
+                    notes={reliableLearningNotes}
+                    start={range.start}
+                    end={range.end}
+                    currentTime={currentTime}
+                    active={isCurrentRangePlaying}
+                    bpm={bpm}
+                  />
+                </div>
+              ) : (
+                <p className="mt-4 border-t border-border-dark pt-3 font-josefin text-[9px] leading-relaxed text-text-muted">
+                  Listen to the isolated bass and copy the line by ear.
+                </p>
+              )}
             </div>
+          )}
 
-          </div>
-        )}
-
-        {lesson.id === "play" && !range && (
+        {lesson.id === "practice" && !range && (
           <div className="mt-4 rounded-[2px] border border-border-dark p-3">
             <p className="font-josefin text-[10px] leading-relaxed text-text-muted">
               No reliable guitar notes were found in this part yet.
@@ -1187,23 +856,11 @@ export default function LearnMode({
                   }
                   className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
                 >
-                  {lesson.id === "phrase" && !selectionReady
-                    ? "Pass accuracy gate"
-                    : lesson.id === "phrase"
-                      ? `Learn ${formatTime(learningRange!.start)}–${formatTime(learningRange!.end)} · Next`
-                      : lesson.id === "setup" && !tunerComplete
-                        ? "Tune all strings to continue"
-                        : lesson.id === "chords" && selectedInstrument === "lead"
-                          ? "Next · learn the timing"
-                          : "I’m comfortable · Next"}
+                  {lesson.id === "phrase"
+                    ? "Next · Tune"
+                    : "Next · Practice"}
                 </button>
-              ) : (
-                <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
-                  {selectedInstrument === "lead"
-                    ? "Original tempo · replay when ready"
-                    : "Repeat slowly, then add 5%"}
-                </p>
-              )}
+              ) : null}
             </>
           )}
         </div>

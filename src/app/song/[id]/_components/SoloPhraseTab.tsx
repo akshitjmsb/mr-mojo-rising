@@ -63,7 +63,7 @@ export default function SoloPhraseTab({
       ),
     [notes, range.end, range.start],
   );
-  const contentWidth = expanded ? Math.max(640, duration * 58) : "100%";
+  const contentWidth = expanded ? Math.max(640, duration * 48) : "100%";
   const height = PAD_TOP * 2 + LANE_HEIGHT * 6;
   const stringLabels = [...strings].reverse();
   const playheadPercent =
