@@ -2,14 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TabNote } from "@/lib/database.types";
-import {
-  buildLearningRangeSuggestions,
-  type LearningRange,
-} from "@/lib/learning-range";
+import type { LearningRange } from "@/lib/learning-range";
 import SoloPhraseTab from "./SoloPhraseTab";
 
 type AudioSource = "guitar" | "backing" | "full";
-type PracticeSpeed = 0.5 | 0.65 | 0.8 | 1;
 
 interface Props {
   mode: "notes" | "play";
@@ -44,13 +40,6 @@ interface Props {
   onPause: () => void;
 }
 
-const SPEEDS: Array<{ value: PracticeSpeed; label: string }> = [
-  { value: 0.5, label: "50%" },
-  { value: 0.65, label: "65%" },
-  { value: 0.8, label: "80%" },
-  { value: 1, label: "100%" },
-];
-
 function formatTime(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
   const remainder = Math.floor(Math.max(0, seconds) % 60)
@@ -77,48 +66,28 @@ export default function LeadNotesTrainer({
   onSeek,
   onPause,
 }: Props) {
-  const windows = useMemo(
-    () =>
-      mode === "notes"
-        ? [selection]
-        : buildLearningRangeSuggestions(
-            notes,
-            selection.start,
-            selection.end,
-            bpm,
-          ),
-    [bpm, mode, notes, selection],
-  );
-  const [practiceSpeed, setPracticeSpeed] = useState<PracticeSpeed>(0.65);
-  const [countIn, setCountIn] = useState<number | null>(null);
-  const countInTimersRef = useRef<number[]>([]);
-  const countInAudioRef = useRef<AudioContext | null>(null);
-  const playingIndex = isPlaying
-    ? windows.findIndex(
-        (range) => currentTime >= range.start && currentTime < range.end,
-      )
-    : -1;
-  const safeIndex = playingIndex >= 0 ? playingIndex : 0;
-  const activeWindow = windows[safeIndex] ?? selection;
-  const activeWindowNotes = useMemo(
+  const selectionNotes = useMemo(
     () =>
       notes.filter(
         (note) =>
-          note.start_time >= activeWindow.start &&
-          note.start_time < activeWindow.end,
+          note.start_time >= selection.start &&
+          note.start_time < selection.end,
       ),
-    [activeWindow.end, activeWindow.start, notes],
+    [notes, selection.end, selection.start],
   );
-  const currentWindowPlaying =
+  const [countIn, setCountIn] = useState<number | null>(null);
+  const countInTimersRef = useRef<number[]>([]);
+  const countInAudioRef = useRef<AudioContext | null>(null);
+  const currentSelectionPlaying =
     isPlaying &&
-    Math.abs(loopStart - activeWindow.start) < 0.05 &&
-    Math.abs(loopEnd - activeWindow.end) < 0.05;
+    Math.abs(loopStart - selection.start) < 0.05 &&
+    Math.abs(loopEnd - selection.end) < 0.05;
 
-  function sourcePlaying(source: AudioSource, targetSpeed = practiceSpeed) {
+  function sourcePlaying(source: AudioSource) {
     return (
-      currentWindowPlaying &&
+      currentSelectionPlaying &&
       currentAudioSource === source &&
-      Math.abs(currentSpeed - targetSpeed) < 0.01
+      Math.abs(currentSpeed - 1) < 0.01
     );
   }
 
@@ -138,12 +107,12 @@ export default function LeadNotesTrainer({
     setCountIn(null);
   }
 
-  function toggleSource(source: AudioSource, targetSpeed = practiceSpeed) {
+  function toggleSource(source: AudioSource) {
     cancelCountIn();
-    if (sourcePlaying(source, targetSpeed)) {
-      onPractice(activeWindow, targetSpeed, source);
+    if (sourcePlaying(source)) {
+      onPractice(selection, 1, source);
     } else {
-      onReplay(activeWindow, targetSpeed, source);
+      onReplay(selection, 1, source);
     }
   }
 
@@ -166,12 +135,12 @@ export default function LeadNotesTrainer({
   function playWithCountIn() {
     if (!hasBackingTrack) return;
     if (sourcePlaying("backing")) {
-      onPractice(activeWindow, practiceSpeed, "backing");
+      onPractice(selection, 1, "backing");
       return;
     }
     cancelCountIn();
     onPause();
-    const beatMs = 60_000 / Math.max(40, (bpm ?? 120) * practiceSpeed);
+    const beatMs = 60_000 / Math.max(40, bpm ?? 120);
     const context = new AudioContext();
     countInAudioRef.current = context;
     void context.resume();
@@ -187,7 +156,7 @@ export default function LeadNotesTrainer({
       void context.close();
       countInAudioRef.current = null;
       countInTimersRef.current = [];
-      onReplay(activeWindow, practiceSpeed, "backing");
+      onReplay(selection, 1, "backing");
     }, beatMs * 4);
     countInTimersRef.current.push(startTimer);
   }
@@ -197,13 +166,11 @@ export default function LeadNotesTrainer({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="font-josefin text-[8px] uppercase tracking-[0.14em] text-gold">
-            {mode === "notes"
-              ? "Entire selected part"
-              : `Small step ${safeIndex + 1} of ${windows.length || 1}`}
+            Entire selected part
           </p>
         </div>
         <p className="font-josefin text-[8px] text-text-dark">
-          {activeWindowNotes.length} {activeWindowNotes.length === 1 ? "note" : "notes"} · {formatTime(activeWindow.start)}–{formatTime(activeWindow.end)}
+          {selectionNotes.length} {selectionNotes.length === 1 ? "note" : "notes"} · {formatTime(selection.start)}–{formatTime(selection.end)}
         </p>
       </div>
 
@@ -212,11 +179,11 @@ export default function LeadNotesTrainer({
           <section className="mt-3 rounded-[2px] border border-gold/35 bg-gold/[0.04] p-3">
             <button
               type="button"
-              onClick={() => toggleSource("guitar", 1)}
-              aria-pressed={sourcePlaying("guitar", 1)}
+              onClick={() => toggleSource("guitar")}
+              aria-pressed={sourcePlaying("guitar")}
               className="mt-2 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-3 font-josefin text-[9px] uppercase tracking-[0.13em] text-gold"
             >
-              {sourcePlaying("guitar", 1)
+              {sourcePlaying("guitar")
                 ? "Pause"
                 : "Play selected part"}
             </button>
@@ -242,58 +209,14 @@ export default function LeadNotesTrainer({
         </>
       ) : (
         <>
-          <div className="mt-3">
-            <SoloPhraseTab
-              notes={notes}
-              range={activeWindow}
-              strings={strings}
-              currentTime={currentTime}
-              expanded
-              onSeek={onSeek}
-            />
-          </div>
-
-          <fieldset className="mt-3 border-t border-border-dark pt-3">
-            <legend className="font-josefin text-[8px] uppercase tracking-[0.14em] text-text-dark">
-              Practice speed
-            </legend>
-            <div className="mt-2 grid grid-cols-4 gap-1.5">
-              {SPEEDS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setPracticeSpeed(option.value);
-                    if (currentWindowPlaying) {
-                      const source: AudioSource =
-                        currentAudioSource === "backing" ||
-                        currentAudioSource === "full"
-                          ? currentAudioSource
-                          : "guitar";
-                      onReplay(activeWindow, option.value, source);
-                    }
-                  }}
-                  aria-pressed={practiceSpeed === option.value}
-                  className={`min-h-10 cursor-pointer rounded-[2px] border font-josefin text-[9px] ${
-                    practiceSpeed === option.value
-                      ? "border-gold bg-gold/10 text-gold"
-                      : "border-border-dark bg-transparent text-text-muted"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
-          <div className="mt-3 grid grid-cols-3 gap-1.5">
+          <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-[2px] border border-gold/35 bg-gold/[0.04] p-2">
             <button
               type="button"
               onClick={() => toggleSource("guitar")}
               aria-pressed={sourcePlaying("guitar")}
-              className="min-h-14 cursor-pointer rounded-[2px] border border-gold/45 bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold"
+              className="min-h-14 cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-gold"
             >
-              {sourcePlaying("guitar") ? "Pause" : "Hear guitar"}
+              {sourcePlaying("guitar") ? "Pause" : "Isolated guitar"}
             </button>
             <button
               type="button"
@@ -301,7 +224,7 @@ export default function LeadNotesTrainer({
               aria-pressed={sourcePlaying("full")}
               className="min-h-14 cursor-pointer rounded-[2px] border border-border-dark bg-transparent px-1 font-josefin text-[8px] uppercase leading-relaxed tracking-[0.08em] text-text-muted"
             >
-              {sourcePlaying("full") ? "Pause" : "Hear in song"}
+              {sourcePlaying("full") ? "Pause" : "Full song"}
             </button>
             <button
               type="button"
@@ -318,8 +241,23 @@ export default function LeadNotesTrainer({
             </button>
           </div>
 
-          <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.09em] text-text-darkest">
-            Play along = vocals + drums + bass · guitar removed
+          <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+            Original tempo · play along removes the guitar
+          </p>
+
+          <div className="mt-3">
+            <SoloPhraseTab
+              notes={notes}
+              range={selection}
+              strings={strings}
+              currentTime={currentTime}
+              expanded
+              onSeek={onSeek}
+            />
+          </div>
+
+          <p className="mt-3 text-center font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
+            Follow the gold line from left to right
           </p>
         </>
       )}

@@ -145,6 +145,13 @@ const INSTRUMENT_LESSONS: Record<LearningInstrument, typeof LESSONS> = {
         description: "See where each attack lands before playing at speed.",
       };
     }
+    if (lesson.id === "play") {
+      return {
+        ...lesson,
+        title: "Play the whole selection",
+        description: "Follow the gold line from left to right at the original tempo.",
+      };
+    }
     return lesson;
   }),
   rhythm: LESSONS,
@@ -1192,7 +1199,9 @@ export default function LearnMode({
                 </button>
               ) : (
                 <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
-                  Repeat slowly, then add 5%
+                  {selectedInstrument === "lead"
+                    ? "Original tempo · replay when ready"
+                    : "Repeat slowly, then add 5%"}
                 </p>
               )}
             </>
