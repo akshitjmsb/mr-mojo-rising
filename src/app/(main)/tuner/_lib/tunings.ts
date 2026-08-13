@@ -121,6 +121,7 @@ export const TUNINGS: Tuning[] = [
       note("D4", 62),
     ],
   },
+  EB_BASS_TUNING,
 ];
 
 export function frequencyToMidi(freq: number) {
@@ -141,11 +142,7 @@ export function centsBetween(frequency: number, target: number) {
  */
 export function centsToTargetFolded(frequency: number, target: number) {
   const base = centsBetween(frequency, target);
-  let cents = base;
-  for (const folded of [base - 1200, base + 1200]) {
-    if (Math.abs(folded) < Math.abs(cents)) cents = folded;
-  }
-  return cents;
+  return base - Math.round(base / 1200) * 1200;
 }
 
 export interface MatchResult {
@@ -155,9 +152,10 @@ export interface MatchResult {
 }
 
 /**
- * Closest string in the tuning to `frequency`, picked by absolute cent
- * distance folded across ±1 octave — so a harmonic (or an octave-erred
- * detector frame) still maps to its own string with the right cent offset.
+ * Closest string in the tuning to `frequency`. Automatic identification only
+ * tolerates a one-octave detector error: folding every octave would make E2
+ * and E4 indistinguishable. A manually pinned string can use the broader
+ * `centsToTargetFolded` harmonic tolerance safely.
  */
 export function closestString(
   frequency: number,
@@ -168,10 +166,9 @@ export function closestString(
   for (let i = 0; i < tuning.strings.length; i++) {
     const s = tuning.strings[i];
     const base = centsBetween(frequency, s.frequency);
-    let cents = base;
-    for (const folded of [base - 1200, base + 1200]) {
-      if (Math.abs(folded) < Math.abs(cents)) cents = folded;
-    }
+    const cents = [base, base - 1200, base + 1200].reduce((closest, value) =>
+      Math.abs(value) < Math.abs(closest) ? value : closest,
+    );
     if (best === null || Math.abs(cents) < Math.abs(best.cents)) {
       best = { string: s, cents, index: i };
     }
