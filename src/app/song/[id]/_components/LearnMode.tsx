@@ -11,7 +11,6 @@ import type {
 import {
   getPracticeTuning,
   positionNotesForTuning,
-  transposeChord,
   type PracticeTuningId,
 } from "@/lib/guitar";
 import {
@@ -22,11 +21,11 @@ import {
   type LearningRange,
 } from "@/lib/learning-range";
 import { extractLeadNotes } from "@/lib/lead-notes";
+import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import InlineTuner from "./InlineTuner";
-import ChordShapeCoach from "./ChordShapeCoach";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
-import RhythmTimeline from "./RhythmTimeline";
+import RhythmChordFlow from "./RhythmChordFlow";
 
 type LessonId = "phrase" | "setup" | "practice";
 type LearningInstrument = "lead" | "rhythm" | "bass";
@@ -219,14 +218,10 @@ export default function LearnMode({
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song part";
-  const positionedNotes = useMemo(
-    () => positionNotesForTuning(notes, profile.tuning_offset),
-    [notes, profile.tuning_offset],
-  );
   const reliableSectionNotes = useMemo(
     () =>
       section
-        ? positionedNotes.filter(
+        ? notes.filter(
             (note) =>
               note.start_time >= section.start_time &&
               note.start_time < section.end_time &&
@@ -234,7 +229,7 @@ export default function LearnMode({
                 note.confidence >= profile.tab_confidence_threshold),
           )
         : [],
-    [positionedNotes, profile.tab_confidence_threshold, section],
+    [notes, profile.tab_confidence_threshold, section],
   );
   const validReferenceRange = Boolean(
     isReferenceLayer &&
@@ -275,30 +270,26 @@ export default function LearnMode({
         : [],
     [learningRange, reliableSectionNotes],
   );
-  const leadLearningNotes = useMemo(
-    () => extractLeadNotes(reliableLearningNotes),
-    [reliableLearningNotes],
-  );
+  const leadLearningNotes = useMemo(() => {
+    const confidenceGated = reliableLearningNotes.filter(
+      (note) =>
+        note.confidence === null ||
+        note.confidence >= Math.max(0.7, profile.tab_confidence_threshold),
+    );
+    return positionNotesForTuning(
+      extractLeadNotes(confidenceGated),
+      profile.tuning_offset,
+    );
+  }, [profile.tab_confidence_threshold, profile.tuning_offset, reliableLearningNotes]);
   const range = makePracticeRange(lesson.id, learningRange);
-  const sectionChords = useMemo(() => {
+  const rhythmChordChanges = useMemo(() => {
     if (!learningRange) return [];
-    const unique: string[] = [];
-    for (const chord of chords) {
-      if (
-        chord.start_time < learningRange.start ||
-        chord.start_time >= learningRange.end
-      ) {
-        continue;
-      }
-      const shape = transposeChord(
-        chord.chord_standard,
-        profile.chord_shape_shift,
-      );
-      if (/^(n|no chord|silence)$/i.test(shape)) continue;
-      if (!unique.includes(shape)) unique.push(shape);
-      if (unique.length === 6) break;
-    }
-    return unique;
+    return buildRhythmChordChanges(
+      chords,
+      learningRange.start,
+      learningRange.end,
+      profile.chord_shape_shift,
+    );
   }, [chords, learningRange, profile.chord_shape_shift]);
 
   const isCurrentRangePlaying =
@@ -803,20 +794,13 @@ export default function LearnMode({
               </p>
 
               {selectedInstrument === "rhythm" ? (
-                <div className="mt-4 space-y-4">
-                  <ChordShapeCoach
-                    chords={sectionChords}
-                    tuningOffset={profile.tuning_offset}
-                  />
-                  <RhythmTimeline
-                    notes={reliableLearningNotes}
-                    start={range.start}
-                    end={range.end}
-                    currentTime={currentTime}
-                    active={isCurrentRangePlaying}
-                    bpm={bpm}
-                  />
-                </div>
+                <RhythmChordFlow
+                  changes={rhythmChordChanges}
+                  start={range.start}
+                  end={range.end}
+                  currentTime={currentTime}
+                  onSeek={onSeek}
+                />
               ) : (
                 <p className="mt-4 border-t border-border-dark pt-3 font-josefin text-[9px] leading-relaxed text-text-muted">
                   Listen to the isolated bass and copy the line by ear.
