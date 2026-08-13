@@ -1,16 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
-import type { Section, TabNote } from "@/lib/database.types";
+import type { Section } from "@/lib/database.types";
 import type { LearningRange } from "@/lib/learning-range";
 
 interface Props {
   section: Section;
   sectionLabel: string;
-  notes: TabNote[];
   range: LearningRange;
-  accuracyPassed: boolean;
-  showWaveform: boolean;
+  selectionReady: boolean;
   readyLabel: string;
   previewPlaying: boolean;
   onChangeSection: () => void;
@@ -18,8 +15,6 @@ interface Props {
   onBoundaryCommit: () => void;
   onPreview: () => void;
 }
-
-const WAVEFORM_BINS = 42;
 
 function formatPreciseTime(seconds: number) {
   const safeSeconds = Math.max(0, seconds);
@@ -31,10 +26,8 @@ function formatPreciseTime(seconds: number) {
 export default function LearningRangePicker({
   section,
   sectionLabel,
-  notes,
   range,
-  accuracyPassed,
-  showWaveform,
+  selectionReady,
   readyLabel,
   previewPlaying,
   onChangeSection,
@@ -42,25 +35,6 @@ export default function LearningRangePicker({
   onBoundaryCommit,
   onPreview,
 }: Props) {
-  const sectionDuration = Math.max(0.1, section.end_time - section.start_time);
-  const waveform = useMemo(() => {
-    const bins = Array.from({ length: WAVEFORM_BINS }, () => 0);
-    for (const note of notes) {
-      const progress =
-        (note.start_time - section.start_time) / sectionDuration;
-      const index = Math.max(
-        0,
-        Math.min(WAVEFORM_BINS - 1, Math.floor(progress * WAVEFORM_BINS)),
-      );
-      bins[index] += Math.max(0.2, note.duration);
-    }
-    const maximum = Math.max(1, ...bins);
-    return bins.map((value) => 18 + (value / maximum) * 82);
-  }, [notes, section.start_time, sectionDuration]);
-  const selectionLeft =
-    ((range.start - section.start_time) / sectionDuration) * 100;
-  const selectionWidth = ((range.end - range.start) / sectionDuration) * 100;
-
   return (
     <div className="rounded-[2px] border border-gold/35 bg-bg/45 p-3">
       <div className="flex items-center justify-between gap-3">
@@ -80,22 +54,6 @@ export default function LearningRangePicker({
           Change part
         </button>
       </div>
-
-      {showWaveform && (
-        <div className="relative mt-3 flex h-14 items-center gap-[2px] overflow-hidden rounded-[2px] border border-border-dark bg-bg px-1.5" aria-label="Guitar activity waveform">
-          {waveform.map((height, index) => (
-            <span
-              key={index}
-              className="flex-1 bg-text-darkest/55"
-              style={{ height: `${height}%` }}
-            />
-          ))}
-          <span
-            className="pointer-events-none absolute bottom-0 top-0 border-x border-gold bg-gold/15"
-            style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }}
-          />
-        </div>
-      )}
 
       <div className="mt-3 space-y-3">
         {(["start", "end"] as const).map((boundary) => {
@@ -156,8 +114,8 @@ export default function LearningRangePicker({
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-border-dark pt-3">
-        <p className={`font-josefin text-[7px] uppercase tracking-[0.1em] ${accuracyPassed ? "text-gold" : "text-terracotta"}`}>
-          {accuracyPassed ? `✓ ${readyLabel}` : "Adjusting selection…"}
+        <p className={`font-josefin text-[7px] uppercase tracking-[0.1em] ${selectionReady ? "text-gold" : "text-terracotta"}`}>
+          {selectionReady ? `✓ ${readyLabel}` : "Adjusting selection…"}
         </p>
         <p className="font-josefin text-[8px] text-text-dark">
           {(range.end - range.start).toFixed(1)} sec
@@ -166,14 +124,14 @@ export default function LearningRangePicker({
 
       <button
         type="button"
-        onClick={accuracyPassed ? onPreview : onBoundaryCommit}
+        onClick={selectionReady ? onPreview : onBoundaryCommit}
         className="mt-3 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
       >
-        {accuracyPassed
+        {selectionReady
           ? previewPlaying
             ? "Pause selection"
             : `Hear ${formatPreciseTime(range.start)}–${formatPreciseTime(range.end)}`
-          : "Snap to guitar"}
+          : "Apply selection"}
       </button>
     </div>
   );

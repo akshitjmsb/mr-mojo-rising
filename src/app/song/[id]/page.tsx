@@ -10,14 +10,13 @@ import type {
   Song,
   Stem,
   StemLayer,
-  TabNote,
 } from "@/lib/database.types";
 import LearnMode from "./_components/LearnMode";
 import {
   getPracticeTuning,
   type PracticeTuningId,
 } from "@/lib/guitar";
-import { getVerifiedLeadTab } from "@/lib/verified-tabs";
+import { getLeadTabReference } from "@/lib/verified-tabs";
 
 type PracticeRange = {
   start: number;
@@ -54,7 +53,6 @@ export default function SongPlayerPage() {
   const [stemLayers, setStemLayers] = useState<StemLayer[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [chords, setChords] = useState<Chord[]>([]);
-  const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile>(() =>
     defaultPracticeProfile(songId),
   );
@@ -93,7 +91,6 @@ export default function SongPlayerPage() {
         setStemLayers(data.stem_layers || []);
         setSections(data.sections || []);
         setChords(data.chords || []);
-        setTabNotes(data.tab_notes || []);
         setPracticeProfile(
           data.practice_profile || defaultPracticeProfile(songId),
         );
@@ -418,11 +415,11 @@ export default function SongPlayerPage() {
         </div>
       )}
       <LearnMode
-        verifiedLeadTab={getVerifiedLeadTab(song.id)}
+        songId={song.id}
+        leadTabReference={getLeadTabReference(song.id)}
         stemLayers={stemLayers}
         sections={sections}
         chords={chords}
-        notes={tabNotes}
         bpm={song.bpm}
         hasGuitarStem={Boolean(stems?.guitar_url)}
         hasBassStem={Boolean(stems?.bass_url)}

@@ -2,12 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LearningRange } from "@/lib/learning-range";
-import type { VerifiedLeadTab } from "@/lib/verified-tabs";
+import { GENERATED_TAB_GATE } from "@/lib/tab-truth-gate";
+import type { LeadTabReference } from "@/lib/verified-tabs";
+import NativeTabViewer from "./NativeTabViewer";
 
 type AudioSource = "guitar" | "backing" | "full";
 
 interface Props {
-  verifiedTab: VerifiedLeadTab | null;
+  songId: string;
+  communityReference: LeadTabReference | null;
   selection: LearningRange;
   bpm: number | null;
   currentSpeed: number;
@@ -42,7 +45,8 @@ const SOURCES: Array<{ id: AudioSource; label: string }> = [
 ];
 
 export default function LeadNotesTrainer({
-  verifiedTab,
+  songId,
+  communityReference,
   selection,
   bpm,
   currentSpeed,
@@ -192,33 +196,23 @@ export default function LeadNotesTrainer({
         Original tempo
       </p>
 
-      <div className="mt-3 border-y border-border-dark py-3">
-        {verifiedTab ? (
+      <NativeTabViewer songId={songId} />
+
+      {communityReference && GENERATED_TAB_GATE.state === "withheld" && (
+        <p className="mt-3 text-center font-josefin text-[7px] leading-relaxed text-text-darkest">
+          Optional comparison: {communityReference.track} on{" "}
           <a
-            href={verifiedTab.url}
+            href={communityReference.url}
             target="_blank"
             rel="noreferrer"
             onClick={onPause}
-            className="flex min-h-14 items-center justify-between gap-3 rounded-[2px] border border-gold/50 bg-gold/[0.06] px-4"
+            className="text-text-dark underline decoration-border underline-offset-2"
           >
-            <span>
-              <span className="block font-josefin text-[9px] uppercase tracking-[0.14em] text-gold">
-                Slash tab · licensed source
-              </span>
-              <span className="mt-1 block font-josefin text-[8px] text-text-muted">
-                {verifiedTab.track} · {verifiedTab.provider}
-              </span>
-            </span>
-            <span className="shrink-0 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
-              Open ↗
-            </span>
+            {communityReference.provider}
           </a>
-        ) : (
-          <p className="py-2 text-center font-josefin text-[9px] leading-relaxed text-text-muted">
-            Verified lead tab is not available for this song yet.
-          </p>
-        )}
-      </div>
+          . Community reference, not Mojo-verified.
+        </p>
+      )}
     </div>
   );
 }
