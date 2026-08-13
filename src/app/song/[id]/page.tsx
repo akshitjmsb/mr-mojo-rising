@@ -13,8 +13,7 @@ import type {
 } from "@/lib/database.types";
 import LearnMode from "./_components/LearnMode";
 import {
-  getPracticeTuning,
-  type PracticeTuningId,
+  getSongPracticeTuning,
 } from "@/lib/guitar";
 import { getLeadTabReference } from "@/lib/verified-tabs";
 
@@ -32,7 +31,7 @@ type AudioSource =
   | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
-  const tuning = getPracticeTuning("standard");
+  const tuning = getSongPracticeTuning(songId, "standard");
   return {
     song_id: songId,
     tuning_id: tuning.id,
@@ -42,6 +41,21 @@ function defaultPracticeProfile(songId: string): PracticeProfile {
     tab_confidence_threshold: 0.6,
     source: "default",
     updated_at: 0,
+  };
+}
+
+function normalizePracticeProfile(
+  songId: string,
+  saved: PracticeProfile | null | undefined,
+): PracticeProfile {
+  const profile = saved ?? defaultPracticeProfile(songId);
+  const tuning = getSongPracticeTuning(songId, profile.tuning_id);
+  return {
+    ...profile,
+    tuning_id: tuning.id,
+    tuning_name: tuning.name,
+    tuning_offset: tuning.offset,
+    chord_shape_shift: tuning.chordShapeShift,
   };
 }
 
@@ -56,9 +70,6 @@ export default function SongPlayerPage() {
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile>(() =>
     defaultPracticeProfile(songId),
   );
-  const [profileSaveState, setProfileSaveState] = useState<
-    "idle" | "saving" | "error"
-  >("idle");
   const [loading, setLoading] = useState(true);
 
   const [stemMode, setStemMode] = useState<AudioSource>("guitar");
@@ -92,7 +103,7 @@ export default function SongPlayerPage() {
         setSections(data.sections || []);
         setChords(data.chords || []);
         setPracticeProfile(
-          data.practice_profile || defaultPracticeProfile(songId),
+          normalizePracticeProfile(songId, data.practice_profile),
         );
         if (data.sections?.length > 0) {
           setPracticeRange((current) =>
@@ -282,34 +293,6 @@ export default function SongPlayerPage() {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [isPlaying, updateTime]);
 
-  async function handleTuningChange(tuningId: PracticeTuningId) {
-    if (tuningId === practiceProfile.tuning_id) return;
-    const previous = practiceProfile;
-    const tuning = getPracticeTuning(tuningId);
-    setPracticeProfile({
-      ...previous,
-      tuning_id: tuning.id,
-      tuning_name: tuning.name,
-      tuning_offset: tuning.offset,
-      chord_shape_shift: tuning.chordShapeShift,
-      source: "manual",
-    });
-    setProfileSaveState("saving");
-    try {
-      const response = await fetch(`/api/songs/${songId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tuning_id: tuningId }),
-      });
-      if (!response.ok) throw new Error("Failed to save tuning");
-      setPracticeProfile((await response.json()) as PracticeProfile);
-      setProfileSaveState("idle");
-    } catch {
-      setPracticeProfile(previous);
-      setProfileSaveState("error");
-    }
-  }
-
   function resolveAudioSource(requestedSource: AudioSource): AudioSource {
     if (requestedSource === "guitar" && !stems?.guitar_url) return "full";
     if (requestedSource === "bass" && !stems?.bass_url) return "full";
@@ -433,14 +416,10 @@ export default function SongPlayerPage() {
         currentAudioSource={stemMode}
         loopStart={loopStart}
         loopEnd={loopEnd}
-        savingTuning={profileSaveState === "saving"}
-        tuningSaveError={profileSaveState === "error"}
-        onTuningChange={handleTuningChange}
         onPractice={handleLessonPractice}
         onReplay={playLessonRange}
         onSeek={seekTo}
         onPause={handleBeforeTunerStart}
-        onBeforeTunerStart={handleBeforeTunerStart}
       />
     </main>
   );

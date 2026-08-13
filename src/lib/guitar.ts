@@ -26,11 +26,19 @@ export const PRACTICE_TUNINGS = [
 
 export type PracticeTuningId = (typeof PRACTICE_TUNINGS)[number]["id"];
 
+const SONG_TUNING_IDS: Record<string, PracticeTuningId> = {
+  "345fde6a-1c25-4921-9db1-baf7e8d24ad2": "eb-standard",
+};
+
 export function getPracticeTuning(id: string) {
   return (
     PRACTICE_TUNINGS.find((tuning) => tuning.id === id) ??
     PRACTICE_TUNINGS[0]
   );
+}
+
+export function getSongPracticeTuning(songId: string, fallbackId: string) {
+  return getPracticeTuning(SONG_TUNING_IDS[songId] ?? fallbackId);
 }
 
 const NOTE_NAMES = [

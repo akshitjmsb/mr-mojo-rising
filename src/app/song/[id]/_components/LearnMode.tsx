@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type {
   Chord,
@@ -7,9 +8,7 @@ import type {
   Section,
   StemLayer,
 } from "@/lib/database.types";
-import {
-  type PracticeTuningId,
-} from "@/lib/guitar";
+import { getSongPracticeTuning } from "@/lib/guitar";
 import {
   clampLearningRange,
   defaultLearningRangeForSection,
@@ -17,12 +16,11 @@ import {
 } from "@/lib/learning-range";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import type { LeadTabReference } from "@/lib/verified-tabs";
-import InlineTuner from "./InlineTuner";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmChordFlow from "./RhythmChordFlow";
 
-type LessonId = "phrase" | "setup" | "practice";
+type LessonId = "phrase" | "practice";
 type LearningInstrument = "lead" | "rhythm" | "bass";
 
 type PracticeRange = {
@@ -55,9 +53,6 @@ interface Props {
   currentAudioSource: LessonAudioSource;
   loopStart: number;
   loopEnd: number;
-  savingTuning: boolean;
-  tuningSaveError: boolean;
-  onTuningChange: (id: PracticeTuningId) => void;
   onPractice: (
     range: PracticeRange,
     speed: number,
@@ -70,7 +65,6 @@ interface Props {
   ) => void;
   onSeek: (time: number) => void;
   onPause: () => void;
-  onBeforeTunerStart: () => void;
 }
 
 const LESSONS: Array<{
@@ -84,12 +78,6 @@ const LESSONS: Array<{
     shortLabel: "Choose",
     title: "Choose a separated layer",
     description: "Start with the sound you want to learn. Then choose the exact song part.",
-  },
-  {
-    id: "setup",
-    shortLabel: "Tune",
-    title: "Get the guitar ready",
-    description: "Tune down first. Everything becomes easier when your guitar matches the recording.",
   },
   {
     id: "practice",
@@ -113,11 +101,7 @@ function makePracticeRange(
   lesson: LessonId,
   learningRange: LearningRange | null,
 ): PracticeRange | null {
-  if (
-    !learningRange ||
-    lesson === "phrase" ||
-    lesson === "setup"
-  ) return null;
+  if (!learningRange || lesson === "phrase") return null;
   return learningRange;
 }
 
@@ -127,6 +111,39 @@ function formatTime(seconds: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function SongTuningNote({
+  songId,
+  profile,
+}: {
+  songId: string;
+  profile: PracticeProfile;
+}) {
+  const tuning = getSongPracticeTuning(songId, profile.tuning_id);
+  const detail =
+    tuning.offset === -1
+      ? "All strings down one semitone"
+      : tuning.offset === 0
+        ? "Standard pitch"
+        : `${Math.abs(tuning.offset)} semitones below standard`;
+
+  return (
+    <div className="mt-3 flex min-h-10 items-center justify-between gap-3 rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2">
+      <p className="font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted">
+        Song tuning · <span className="text-gold">{tuning.name}</span>
+        <span className="mt-0.5 block text-[7px] normal-case tracking-normal text-text-dark">
+          {detail}
+        </span>
+      </p>
+      <Link
+        href="/tuner"
+        className="shrink-0 font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark underline decoration-border underline-offset-2"
+      >
+        Open Tuner
+      </Link>
+    </div>
+  );
 }
 
 export default function LearnMode({
@@ -146,14 +163,10 @@ export default function LearnMode({
   currentAudioSource,
   loopStart,
   loopEnd,
-  savingTuning,
-  tuningSaveError,
-  onTuningChange,
   onPractice,
   onReplay,
   onSeek,
   onPause,
-  onBeforeTunerStart,
 }: Props) {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [selectedInstrument, setSelectedInstrument] =
@@ -162,7 +175,6 @@ export default function LearnMode({
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
   const [showSectionChoices, setShowSectionChoices] = useState(true);
-  const [tunerComplete, setTunerComplete] = useState(false);
   const [practiceMix, setPracticeMix] = useState<"isolated" | "full">(
     "isolated",
   );
@@ -278,7 +290,6 @@ export default function LearnMode({
     setSelectedSectionId(null);
     setLearningRange(null);
     setShowSectionChoices(true);
-    setTunerComplete(false);
     setPracticeMix("isolated");
     setLessonIndex(0);
   }
@@ -370,8 +381,7 @@ export default function LearnMode({
             key={item.id}
             onClick={() => selectLesson(index)}
             disabled={
-              (index > 0 && !selectionReady) ||
-              (index > 1 && !tunerComplete)
+              index > 0 && !selectionReady
             }
             aria-current={index === lessonIndex ? "step" : undefined}
             className={`min-h-8 cursor-pointer border-none bg-transparent px-1 font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-30 ${
@@ -390,22 +400,27 @@ export default function LearnMode({
 
       <div className="pt-4">
         {lesson.id !== "phrase" && section && (
-          <button
-            type="button"
-            onClick={() => selectLesson(0)}
-            className="mb-3 flex min-h-9 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
-          >
-            <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-              <span className="text-gold">{instrument?.label}</span>
-              {` · ${selectedSectionLabel}`}
-              {learningRange
-                ? ` · ${formatTime(learningRange.start)}–${formatTime(learningRange.end)}`
-                : ""}
-            </span>
-            <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-              Change
-            </span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => selectLesson(0)}
+              className="flex min-h-9 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
+            >
+              <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
+                <span className="text-gold">{instrument?.label}</span>
+                {` · ${selectedSectionLabel}`}
+                {learningRange
+                  ? ` · ${formatTime(learningRange.start)}–${formatTime(learningRange.end)}`
+                  : ""}
+              </span>
+              <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                Change
+              </span>
+            </button>
+            {selectedInstrument && (
+              <SongTuningNote songId={songId} profile={profile} />
+            )}
+          </>
         )}
 
         {lesson.id !== "practice" && (
@@ -496,7 +511,6 @@ export default function LearnMode({
                   setSelectedSectionId(null);
                   setLearningRange(null);
                   setShowSectionChoices(true);
-                  setTunerComplete(false);
                 }}
                 className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
               >
@@ -562,44 +576,49 @@ export default function LearnMode({
               !showSectionChoices &&
               section &&
               learningRange && (
-              <LearningRangePicker
-                section={section}
-                sectionLabel={selectedSectionLabel}
-                range={learningRange}
-                selectionReady={selectionRangeReady}
-                readyLabel={
-                  isReferenceLayer
-                    ? `${selectedLayer?.label} ready · original tempo`
-                    : selectedInstrument === "bass"
-                    ? "Bass stem ready"
-                    : selectedInstrument === "lead"
-                      ? "Lead audio ready · notation checked separately"
-                      : "Guitar audio ready"
-                }
-                previewPlaying={
-                  isSelectedRangePlaying &&
-                  currentAudioSource ===
-                    (isReferenceLayer
-                      ? selectedLayerAudioSource
-                      : instrumentAudioSource)
-                }
-                onChangeSection={() => setShowSectionChoices(true)}
-                onBoundaryChange={changeLearningBoundary}
-                onBoundaryCommit={commitLearningRange}
-                onPreview={() => {
-                  const source = isReferenceLayer
-                    ? selectedLayerAudioSource
-                    : instrumentAudioSource;
-                  if (
-                    isSelectedRangePlaying &&
-                    currentAudioSource === source
-                  ) {
-                    onPractice(learningRange, 1, source);
-                  } else {
-                    onReplay(learningRange, 1, source);
+              <>
+                <LearningRangePicker
+                  section={section}
+                  sectionLabel={selectedSectionLabel}
+                  range={learningRange}
+                  selectionReady={selectionRangeReady}
+                  readyLabel={
+                    isReferenceLayer
+                      ? `${selectedLayer?.label} ready · original tempo`
+                      : selectedInstrument === "bass"
+                      ? "Bass stem ready"
+                      : selectedInstrument === "lead"
+                        ? "Lead audio ready · notation checked separately"
+                        : "Guitar audio ready"
                   }
-                }}
-              />
+                  previewPlaying={
+                    isSelectedRangePlaying &&
+                    currentAudioSource ===
+                      (isReferenceLayer
+                        ? selectedLayerAudioSource
+                        : instrumentAudioSource)
+                  }
+                  onChangeSection={() => setShowSectionChoices(true)}
+                  onBoundaryChange={changeLearningBoundary}
+                  onBoundaryCommit={commitLearningRange}
+                  onPreview={() => {
+                    const source = isReferenceLayer
+                      ? selectedLayerAudioSource
+                      : instrumentAudioSource;
+                    if (
+                      isSelectedRangePlaying &&
+                      currentAudioSource === source
+                    ) {
+                      onPractice(learningRange, 1, source);
+                    } else {
+                      onReplay(learningRange, 1, source);
+                    }
+                  }}
+                />
+                {selectedInstrument && (
+                  <SongTuningNote songId={songId} profile={profile} />
+                )}
+              </>
             )}
 
             {selectedInstrument && !showSectionChoices && section && !learningRange && (
@@ -622,48 +641,6 @@ export default function LearnMode({
                 Song parts are still being detected.
               </p>
             )}
-          </div>
-        )}
-
-        {lesson.id === "setup" && (
-          <div className="mt-4 rounded-[2px] border border-border-dark bg-bg/50 p-3">
-            <p className="font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
-              Patience uses
-            </p>
-            <p className="mt-1 font-playfair text-[20px] italic text-gold">
-              E♭ Standard{selectedInstrument === "bass" ? " Bass" : ""}
-            </p>
-            <p className="mt-1 font-josefin text-[10px] leading-relaxed text-text-muted">
-              {selectedInstrument === "bass"
-                ? "From the thickest string: E♭ · A♭ · D♭ · G♭. Lower all four strings by one semitone."
-                : "From the thickest string: E♭ · A♭ · D♭ · G♭ · B♭ · E♭. Lower every string by one semitone."}
-            </p>
-            <button
-              onClick={() => onTuningChange("eb-standard")}
-              disabled={savingTuning || profile.tuning_id === "eb-standard"}
-              className="mt-3 min-h-10 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-3 font-josefin text-[9px] uppercase tracking-[0.13em] text-gold disabled:cursor-default disabled:opacity-60"
-            >
-              {savingTuning
-                ? "Saving…"
-                : profile.tuning_id === "eb-standard"
-                  ? "✓ App set to E♭ Standard"
-                  : "Use E♭ Standard"}
-            </button>
-            {tuningSaveError && (
-              <p role="alert" className="mt-2 text-center font-josefin text-[9px] text-terracotta">
-                Tuning could not be saved. Try once more.
-              </p>
-            )}
-            <InlineTuner
-              instrument={selectedInstrument === "bass" ? "bass" : "guitar"}
-              onBeforeStart={onBeforeTunerStart}
-              onComplete={() => {
-                if (profile.tuning_id !== "eb-standard") {
-                  onTuningChange("eb-standard");
-                }
-                setTunerComplete(true);
-              }}
-            />
           </div>
         )}
 
@@ -777,14 +754,11 @@ export default function LearnMode({
                 <button
                   onClick={goNext}
                   disabled={
-                    (lesson.id === "phrase" && !selectionReady) ||
-                    (lesson.id === "setup" && !tunerComplete)
+                    lesson.id === "phrase" && !selectionReady
                   }
                   className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
                 >
-                  {lesson.id === "phrase"
-                    ? "Next · Tune"
-                    : "Next · Practice"}
+                  Next · Practice
                 </button>
               ) : null}
             </>
