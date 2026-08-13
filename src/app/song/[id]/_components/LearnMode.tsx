@@ -9,8 +9,6 @@ import type {
   TabNote,
 } from "@/lib/database.types";
 import {
-  getPracticeTuning,
-  positionNotesForTuning,
   type PracticeTuningId,
 } from "@/lib/guitar";
 import {
@@ -20,8 +18,8 @@ import {
   snapLearningRange,
   type LearningRange,
 } from "@/lib/learning-range";
-import { extractLeadNotes } from "@/lib/lead-notes";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
+import type { VerifiedLeadTab } from "@/lib/verified-tabs";
 import InlineTuner from "./InlineTuner";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
@@ -44,6 +42,7 @@ type LessonAudioSource =
   | "full";
 
 interface Props {
+  verifiedLeadTab: VerifiedLeadTab | null;
   stemLayers: StemLayer[];
   sections: Section[];
   chords: Chord[];
@@ -108,7 +107,7 @@ const INSTRUMENTS: Array<{
   label: string;
   purpose: string;
 }> = [
-  { id: "lead", label: "Lead guitar", purpose: "Tab & lead-note focus" },
+  { id: "lead", label: "Lead guitar", purpose: "Licensed tab & lead focus" },
   { id: "rhythm", label: "Rhythm guitar", purpose: "Chord & strum focus" },
   { id: "bass", label: "Bass guitar", purpose: "Bass stem & groove" },
 ];
@@ -134,6 +133,7 @@ function formatTime(seconds: number) {
 }
 
 export default function LearnMode({
+  verifiedLeadTab,
   stemLayers,
   sections,
   chords,
@@ -192,7 +192,6 @@ export default function LearnMode({
         : "guitar";
   const instrumentAudioSource: LessonAudioSource =
     selectedInstrument === "bass" ? "bass" : "guitar";
-  const tuning = getPracticeTuning(profile.tuning_id);
   const section =
     sections.find((item) => item.id === selectedSectionId) ?? null;
   const sectionOptions = useMemo(
@@ -232,8 +231,7 @@ export default function LearnMode({
     [notes, profile.tab_confidence_threshold, section],
   );
   const validReferenceRange = Boolean(
-    isReferenceLayer &&
-      section &&
+    section &&
       learningRange &&
       learningRange.start >= section.start_time &&
       learningRange.end <= section.end_time &&
@@ -241,6 +239,8 @@ export default function LearnMode({
   );
   const accuracyPassed = isReferenceLayer
     ? validReferenceRange
+    : selectedInstrument === "lead" && verifiedLeadTab
+      ? validReferenceRange
     : selectedInstrument === "bass"
       ? Boolean(
           hasBassStem &&
@@ -259,28 +259,6 @@ export default function LearnMode({
         );
   const selectionReady =
     selectedInstrument !== null && accuracyPassed && !showSectionChoices;
-  const reliableLearningNotes = useMemo(
-    () =>
-      learningRange
-        ? reliableSectionNotes.filter(
-            (note) =>
-              note.start_time >= learningRange.start &&
-              note.start_time < learningRange.end,
-          )
-        : [],
-    [learningRange, reliableSectionNotes],
-  );
-  const leadLearningNotes = useMemo(() => {
-    const confidenceGated = reliableLearningNotes.filter(
-      (note) =>
-        note.confidence === null ||
-        note.confidence >= Math.max(0.7, profile.tab_confidence_threshold),
-    );
-    return positionNotesForTuning(
-      extractLeadNotes(confidenceGated),
-      profile.tuning_offset,
-    );
-  }, [profile.tab_confidence_threshold, profile.tuning_offset, reliableLearningNotes]);
   const range = makePracticeRange(lesson.id, learningRange);
   const rhythmChordChanges = useMemo(() => {
     if (!learningRange) return [];
@@ -619,7 +597,7 @@ export default function LearnMode({
               <LearningRangePicker
                 section={section}
                 sectionLabel={selectedSectionLabel}
-                notes={reliableSectionNotes}
+              notes={reliableSectionNotes}
                 range={learningRange}
                 accuracyPassed={accuracyPassed}
                 showWaveform={
@@ -728,11 +706,9 @@ export default function LearnMode({
           learningRange && (
             <LeadNotesTrainer
               key={`${learningRange.start}-${learningRange.end}`}
-              notes={leadLearningNotes}
+              verifiedTab={verifiedLeadTab}
               selection={learningRange}
-              strings={tuning.strings}
               bpm={bpm}
-              currentTime={currentTime}
               currentSpeed={currentSpeed}
               currentAudioSource={currentAudioSource}
               isPlaying={isPlaying}
@@ -741,7 +717,6 @@ export default function LearnMode({
               hasBackingTrack={hasBackingTrack}
               onPractice={onPractice}
               onReplay={onReplay}
-              onSeek={onSeek}
               onPause={onPause}
             />
           )}

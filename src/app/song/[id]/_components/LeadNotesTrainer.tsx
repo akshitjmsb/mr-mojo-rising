@@ -1,18 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { TabNote } from "@/lib/database.types";
 import type { LearningRange } from "@/lib/learning-range";
-import SoloPhraseTab from "./SoloPhraseTab";
+import type { VerifiedLeadTab } from "@/lib/verified-tabs";
 
 type AudioSource = "guitar" | "backing" | "full";
 
 interface Props {
-  notes: TabNote[];
+  verifiedTab: VerifiedLeadTab | null;
   selection: LearningRange;
-  strings: readonly string[];
   bpm: number | null;
-  currentTime: number;
   currentSpeed: number;
   currentAudioSource:
     | "guitar"
@@ -35,7 +32,6 @@ interface Props {
     speed: number,
     source?: AudioSource,
   ) => void;
-  onSeek: (time: number) => void;
   onPause: () => void;
 }
 
@@ -46,11 +42,9 @@ const SOURCES: Array<{ id: AudioSource; label: string }> = [
 ];
 
 export default function LeadNotesTrainer({
-  notes,
+  verifiedTab,
   selection,
-  strings,
   bpm,
-  currentTime,
   currentSpeed,
   currentAudioSource,
   isPlaying,
@@ -59,7 +53,6 @@ export default function LeadNotesTrainer({
   hasBackingTrack,
   onPractice,
   onReplay,
-  onSeek,
   onPause,
 }: Props) {
   const [selectedSource, setSelectedSource] = useState<AudioSource>("guitar");
@@ -199,15 +192,32 @@ export default function LeadNotesTrainer({
         Original tempo
       </p>
 
-      <div className="mt-3">
-        <SoloPhraseTab
-          notes={notes}
-          range={selection}
-          strings={strings}
-          currentTime={currentTime}
-          expanded
-          onSeek={onSeek}
-        />
+      <div className="mt-3 border-y border-border-dark py-3">
+        {verifiedTab ? (
+          <a
+            href={verifiedTab.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={onPause}
+            className="flex min-h-14 items-center justify-between gap-3 rounded-[2px] border border-gold/50 bg-gold/[0.06] px-4"
+          >
+            <span>
+              <span className="block font-josefin text-[9px] uppercase tracking-[0.14em] text-gold">
+                Slash tab · licensed source
+              </span>
+              <span className="mt-1 block font-josefin text-[8px] text-text-muted">
+                {verifiedTab.track} · {verifiedTab.provider}
+              </span>
+            </span>
+            <span className="shrink-0 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark">
+              Open ↗
+            </span>
+          </a>
+        ) : (
+          <p className="py-2 text-center font-josefin text-[9px] leading-relaxed text-text-muted">
+            Verified lead tab is not available for this song yet.
+          </p>
+        )}
       </div>
     </div>
   );

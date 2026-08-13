@@ -17,6 +17,7 @@ import {
   getPracticeTuning,
   type PracticeTuningId,
 } from "@/lib/guitar";
+import { getVerifiedLeadTab } from "@/lib/verified-tabs";
 
 type PracticeRange = {
   start: number;
@@ -417,6 +418,7 @@ export default function SongPlayerPage() {
         </div>
       )}
       <LearnMode
+        verifiedLeadTab={getVerifiedLeadTab(song.id)}
         stemLayers={stemLayers}
         sections={sections}
         chords={chords}
