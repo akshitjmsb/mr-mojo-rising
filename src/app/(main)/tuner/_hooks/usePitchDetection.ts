@@ -6,6 +6,7 @@ export interface PitchReading {
   frequency: number | null;
   clarity: number;
   rms: number;
+  stable: boolean;
 }
 
 interface Options {
@@ -33,6 +34,9 @@ const RETUNE_CENTS = 120;
 const HISTORY_SIZE = 5;
 // React state updates are throttled; TuningGauge interpolates between them.
 const UI_UPDATE_MS = 66;
+const ANALYSIS_INTERVAL_MS = 40;
+const STABLE_HISTORY_SIZE = 4;
+const STABLE_SPREAD_CENTS = 6;
 
 /**
  * YIN pitch detection (de Cheveigné & Kawahara 2002) with parabolic
@@ -44,7 +48,7 @@ const UI_UPDATE_MS = 66;
  *   pick the first τ below `threshold` that is also a local minimum.
  * Then refine τ with parabolic interpolation against its neighbours.
  */
-function yinDetect(
+export function yinDetect(
   samples: Float32Array,
   sampleRate: number,
   threshold: number,
@@ -139,6 +143,14 @@ function median(values: number[]): number {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function centsSpread(values: number[]) {
+  if (values.length < 2) return Number.POSITIVE_INFINITY;
+  const center = median(values);
+  return Math.max(
+    ...values.map((value) => Math.abs(1200 * Math.log2(value / center))),
+  );
+}
+
 /**
  * Manages AudioContext + getUserMedia and runs YIN on each audio frame.
  *
@@ -165,8 +177,10 @@ export function usePitchDetection(options: Options = {}) {
     frequency: null,
     clarity: 0,
     rms: 0,
+    stable: false,
   });
   const [running, setRunning] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const ctxRef = useRef<AudioContext | null>(null);
@@ -177,14 +191,22 @@ export function usePitchDetection(options: Options = {}) {
   const rafRef = useRef<number | null>(null);
   const bufferRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const runningRef = useRef(false);
+  const startingRef = useRef(false);
+  const startGenerationRef = useRef(0);
 
   // Smoothing state (refs — mutated every frame, no re-renders).
   const historyRef = useRef<number[]>([]);
   const stableFreqRef = useRef<number | null>(null);
   const lastAcceptedAtRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
+  const lastPublishedFrequencyRef = useRef<number | null>(null);
+  const lastAnalysisAtRef = useRef(0);
+  const noiseFloorRef = useRef(0.003);
 
   const stop = useCallback(() => {
+    startGenerationRef.current += 1;
+    runningRef.current = false;
+    startingRef.current = false;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -207,33 +229,79 @@ export function usePitchDetection(options: Options = {}) {
     bufferRef.current = null;
     historyRef.current = [];
     stableFreqRef.current = null;
-    runningRef.current = false;
+    lastPublishedFrequencyRef.current = null;
     setRunning(false);
-    setReading({ frequency: null, clarity: 0, rms: 0 });
+    setStarting(false);
+    setReading({ frequency: null, clarity: 0, rms: 0, stable: false });
   }, []);
 
   const start = useCallback(async () => {
     setError(null);
-    if (runningRef.current) return;
+    if (runningRef.current || startingRef.current) return;
+    const generation = startGenerationRef.current + 1;
+    startGenerationRef.current = generation;
+    startingRef.current = true;
+    setStarting(true);
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone access is unavailable in this browser.");
+      }
       // Safari requires the AudioContext to be created/resumed inside the
       // user-gesture callback that invoked `start`.
       const AnyAudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
+      if (!AnyAudioCtx) {
+        throw new Error("Audio input is unavailable in this browser.");
+      }
       const ctx = new AnyAudioCtx();
+      ctxRef.current = ctx;
       if (ctx.state === "suspended") await ctx.resume();
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+          },
+          video: false,
+        });
+      } catch (microphoneError) {
+        if (
+          microphoneError instanceof DOMException &&
+          (microphoneError.name === "OverconstrainedError" ||
+            microphoneError.name === "NotSupportedError")
+        ) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+        } else {
+          throw microphoneError;
+        }
+      }
+
+      if (startGenerationRef.current !== generation) {
+        stream.getTracks().forEach((track) => track.stop());
+        await ctx.close().catch(() => {});
+        return;
+      }
+      streamRef.current = stream;
+      const microphoneTrack = stream.getAudioTracks()[0];
+      microphoneTrack?.addEventListener(
+        "ended",
+        () => {
+          if (!runningRef.current) return;
+          setError("The microphone disconnected. Reconnect it and try again.");
+          stop();
         },
-        video: false,
-      });
+        { once: true },
+      );
 
       // iOS can re-suspend the context while the async mic prompt is up.
       if (ctx.state === "suspended") await ctx.resume();
@@ -244,7 +312,7 @@ export function usePitchDetection(options: Options = {}) {
       // harmonic-rich top end that makes YIN lock onto overtones.
       const highpass = ctx.createBiquadFilter();
       highpass.type = "highpass";
-      highpass.frequency.value = 45;
+      highpass.frequency.value = Math.max(20, minFrequency * 0.65);
       const lowpass = ctx.createBiquadFilter();
       lowpass.type = "lowpass";
       lowpass.frequency.value = 1500;
@@ -255,30 +323,33 @@ export function usePitchDetection(options: Options = {}) {
       highpass.connect(lowpass);
       lowpass.connect(analyser);
 
-      ctxRef.current = ctx;
-      streamRef.current = stream;
       sourceRef.current = source;
       filtersRef.current = [highpass, lowpass];
       analyserRef.current = analyser;
       bufferRef.current = new Float32Array(new ArrayBuffer(analyser.fftSize * 4));
 
       runningRef.current = true;
+      startingRef.current = false;
+      setStarting(false);
       setRunning(true);
 
       const publish = (
         frequency: number | null,
         clarity: number,
         rms: number,
+        stable: boolean,
         now: number,
       ) => {
         // Throttle React updates; always flush signal↔silence transitions so
         // the UI never lags a state change.
         const changedNullness =
-          (frequency === null) !== (stableFreqRef.current === null);
+          (frequency === null) !==
+          (lastPublishedFrequencyRef.current === null);
         if (!changedNullness && now - lastUiUpdateRef.current < UI_UPDATE_MS)
           return;
         lastUiUpdateRef.current = now;
-        setReading({ frequency, clarity, rms });
+        lastPublishedFrequencyRef.current = frequency;
+        setReading({ frequency, clarity, rms, stable });
       };
 
       const tick = () => {
@@ -287,17 +358,24 @@ export function usePitchDetection(options: Options = {}) {
         const audioCtx = ctxRef.current;
         if (!analyserNode || !buf || !audioCtx) return;
 
+        const now = performance.now();
+        if (now - lastAnalysisAtRef.current < ANALYSIS_INTERVAL_MS) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+        lastAnalysisAtRef.current = now;
+
         analyserNode.getFloatTimeDomainData(buf);
 
         let sumSquares = 0;
         for (let i = 0; i < buf.length; i++) sumSquares += buf[i] * buf[i];
         const rms = Math.sqrt(sumSquares / buf.length);
 
-        const now = performance.now();
         let frequency: number | null = null;
         let clarity = 0;
 
-        if (rms >= silenceRms) {
+        const adaptiveGate = Math.max(silenceRms, noiseFloorRef.current * 2.5);
+        if (rms >= adaptiveGate) {
           const result = yinDetect(
             buf,
             audioCtx.sampleRate,
@@ -330,22 +408,31 @@ export function usePitchDetection(options: Options = {}) {
           historyRef.current.length = 0;
           stableFreqRef.current = null;
         }
+        if (!accepted && rms < Math.max(silenceRms * 1.5, 0.02)) {
+          noiseFloorRef.current =
+            noiseFloorRef.current * 0.97 + Math.max(0.0005, rms) * 0.03;
+        }
         // else: within the hold window — keep the previous stable reading.
 
-        publish(stableFreqRef.current, clarity, rms, now);
+        const history = historyRef.current;
+        const stable =
+          stableFreqRef.current !== null &&
+          history.length >= STABLE_HISTORY_SIZE &&
+          centsSpread(history) <= STABLE_SPREAD_CENTS;
+        publish(stableFreqRef.current, clarity, rms, stable, now);
 
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
     } catch (e) {
-      const message =
-        e instanceof Error ? e.message : "Could not access the microphone.";
+      const name = e instanceof DOMException ? e.name : "";
+      const message = e instanceof Error ? e.message : "";
       setError(
-        message.includes("Permission") ||
-          message.includes("denied") ||
-          message.includes("NotAllowed")
-          ? "Microphone permission denied. Enable it in Safari settings and reload."
-          : message,
+        name === "NotAllowedError" || /permission|denied/i.test(message)
+          ? "Microphone is blocked. Allow access in browser settings, then try again."
+          : name === "NotFoundError"
+            ? "No microphone was found. Connect one and try again."
+            : message || "The microphone could not start. Try again.",
       );
       stop();
     }
@@ -365,7 +452,13 @@ export function usePitchDetection(options: Options = {}) {
     if (!running) return;
     const onVisible = () => {
       const ctx = ctxRef.current;
-      if (document.visibilityState === "visible" && ctx?.state === "suspended")
+      const state = ctx?.state as string | undefined;
+      if (
+        ctx &&
+        document.visibilityState === "visible" &&
+        state !== "running" &&
+        state !== "closed"
+      )
         ctx.resume().catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -376,5 +469,5 @@ export function usePitchDetection(options: Options = {}) {
     return () => stop();
   }, [stop]);
 
-  return { reading, running, error, start, stop };
+  return { reading, running, starting, error, start, stop };
 }

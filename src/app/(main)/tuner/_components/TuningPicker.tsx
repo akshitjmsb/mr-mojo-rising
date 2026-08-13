@@ -9,34 +9,24 @@ interface Props {
 
 export default function TuningPicker({ selected, onChange }: Props) {
   return (
-    <div className="flex flex-col gap-2">
-      <p className="font-josefin text-[9px] uppercase tracking-[0.2em] text-text-muted">
+    <label className="flex min-h-11 items-center justify-between gap-4 border-b border-border-dark pb-3">
+      <span className="font-josefin text-[8px] uppercase tracking-[0.14em] text-text-dark">
         Tuning
-      </p>
-      <div className="grid grid-cols-2 gap-1.5">
-        {TUNINGS.map((t) => {
-          const active = t.id === selected.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onPointerDown={() => onChange(t)}
-              className={`flex flex-col items-start gap-0.5 border px-3 py-2 text-left transition-colors duration-200 ${
-                active
-                  ? "border-gold bg-gold/5 text-gold"
-                  : "border-border-dark bg-transparent text-text-muted"
-              }`}
-            >
-              <span className="font-josefin text-[10px] uppercase tracking-[0.18em]">
-                {t.label}
-              </span>
-              <span className="font-josefin text-[10px] tracking-[0.12em] text-text-darkest">
-                {t.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+      </span>
+      <select
+        value={selected.id}
+        onChange={(event) => {
+          const tuning = TUNINGS.find((item) => item.id === event.target.value);
+          if (tuning) onChange(tuning);
+        }}
+        className="min-h-9 max-w-[72%] rounded-[2px] border border-border bg-bg px-2 font-josefin text-[9px] text-gold"
+      >
+        {TUNINGS.map((tuning) => (
+          <option key={tuning.id} value={tuning.id}>
+            {tuning.label} · {tuning.description}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

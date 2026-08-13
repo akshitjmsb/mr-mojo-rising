@@ -137,7 +137,7 @@ function SongTuningNote({
         </span>
       </p>
       <Link
-        href="/tuner"
+        href={`/tuner?tuning=${tuning.id}`}
         className="shrink-0 font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark underline decoration-border underline-offset-2"
       >
         Open Tuner
