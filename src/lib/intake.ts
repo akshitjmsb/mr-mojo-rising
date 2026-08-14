@@ -9,14 +9,11 @@ export type YouTubeSearchResult = {
 };
 
 export type ResolvedLink = {
-  source: "youtube" | "spotify";
+  source: "youtube";
   youtube_url: string;
   videoId: string;
   title: string;
   channel: string;
   thumbnail: string | null;
   durationLabel: string | null;
-  // For Spotify: the original Spotify track title we searched for, so the UI
-  // can show "matched from Spotify: ..."
-  spotifyTitle?: string;
 };

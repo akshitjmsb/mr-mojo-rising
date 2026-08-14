@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
 import type { ResolvedLink } from "@/lib/intake";
-import {
-  pickBestYouTubeMatch,
-  searchYouTube,
-} from "@/lib/youtube-search";
 
 const YT_HOSTS = new Set([
   "youtube.com",
@@ -11,13 +7,6 @@ const YT_HOSTS = new Set([
   "m.youtube.com",
   "music.youtube.com",
   "youtu.be",
-]);
-
-const SPOTIFY_HOSTS = new Set([
-  "open.spotify.com",
-  "play.spotify.com",
-  "spotify.link",
-  "spotify.app.link",
 ]);
 
 function extractFirstUrl(value: string) {
@@ -55,44 +44,6 @@ type YouTubeOEmbed = {
   thumbnail_url?: string;
 };
 
-type SpotifyOEmbed = {
-  title?: string;
-  thumbnail_url?: string;
-  iframe_url?: string;
-};
-
-function decodeJsonString(value: string) {
-  try {
-    return JSON.parse(`"${value}"`) as string;
-  } catch {
-    return value;
-  }
-}
-
-function extractSpotifyArtists(html: string) {
-  const artistsBlock = /"artists":\[([\s\S]*?)\]/.exec(html)?.[1] ?? "";
-  return Array.from(artistsBlock.matchAll(/"name":"((?:\\.|[^"\\])*)"/g))
-    .map((match) => decodeJsonString(match[1]).trim())
-    .filter(Boolean);
-}
-
-async function normalizeSpotifyTrackUrl(input: URL) {
-  if (input.hostname === "open.spotify.com" || input.hostname === "play.spotify.com") {
-    return input.toString();
-  }
-  const response = await fetch(input, {
-    method: "GET",
-    redirect: "follow",
-    cache: "no-store",
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
-  const redirected = new URL(response.url);
-  if (redirected.hostname !== "open.spotify.com") {
-    throw new Error("That Spotify share link did not resolve to a track.");
-  }
-  return redirected.toString();
-}
-
 async function resolveYouTube(videoId: string): Promise<ResolvedLink> {
   const youtube_url = `https://www.youtube.com/watch?v=${videoId}`;
 
@@ -122,55 +73,6 @@ async function resolveYouTube(videoId: string): Promise<ResolvedLink> {
     channel,
     thumbnail,
     durationLabel: null,
-  };
-}
-
-async function resolveSpotify(spotifyUrl: string): Promise<ResolvedLink> {
-  // 1) Get title + artist from Spotify oEmbed (no auth required).
-  const oembedRes = await fetch(
-    `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`,
-  );
-  if (!oembedRes.ok) {
-    throw new Error(
-      `Spotify did not return metadata (HTTP ${oembedRes.status}).`,
-    );
-  }
-  const oembed = (await oembedRes.json()) as SpotifyOEmbed;
-  const spotifyTitle = (oembed.title ?? "").trim();
-  if (!spotifyTitle) {
-    throw new Error("Could not read track title from Spotify.");
-  }
-
-  // Spotify oEmbed omits the artist. Its public embed payload contains it,
-  // which gives us a much safer YouTube match without Spotify credentials.
-  let artists: string[] = [];
-  try {
-    const embedUrl = oembed.iframe_url || spotifyUrl.replace("/track/", "/embed/track/");
-    const embedResponse = await fetch(embedUrl, {
-      cache: "no-store",
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    if (embedResponse.ok) artists = extractSpotifyArtists(await embedResponse.text());
-  } catch {
-    // Title-only matching still works; the confirmation card remains the gate.
-  }
-
-  const query = [spotifyTitle, ...artists, "official audio"].join(" ");
-  const results = await searchYouTube(query, 10);
-  const match = pickBestYouTubeMatch(results, spotifyTitle, artists);
-  if (!match) {
-    throw new Error("No matching YouTube video found for this Spotify track.");
-  }
-
-  return {
-    source: "spotify",
-    youtube_url: match.url,
-    videoId: match.videoId,
-    title: match.title,
-    channel: match.channel,
-    thumbnail: match.thumbnail || oembed.thumbnail_url || null,
-    durationLabel: match.durationLabel,
-    spotifyTitle,
   };
 }
 
@@ -206,31 +108,9 @@ export async function POST(request: Request) {
       return NextResponse.json(resolved satisfies ResolvedLink);
     }
 
-    if (SPOTIFY_HOSTS.has(host)) {
-      try {
-        const spotifyUrl = await normalizeSpotifyTrackUrl(parsed);
-        if (!new URL(spotifyUrl).pathname.includes("/track/")) {
-          return NextResponse.json(
-            {
-              error:
-                "Only Spotify track links are supported. Open the song in Spotify and choose Share → Copy link.",
-            },
-            { status: 400 },
-          );
-        }
-        const resolved = await resolveSpotify(spotifyUrl);
-        return NextResponse.json(resolved satisfies ResolvedLink);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to resolve Spotify link.";
-        return NextResponse.json({ error: message }, { status: 502 });
-      }
-    }
-
     return NextResponse.json(
       {
-        error:
-          "Unsupported link. Paste a YouTube or Spotify track URL.",
+        error: "Unsupported link. Paste a YouTube video URL.",
       },
       { status: 400 },
     );

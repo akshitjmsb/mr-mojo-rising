@@ -102,7 +102,7 @@ function ImportProgress({
 function looksLikeUrl(s: string) {
   const t = s.trim();
   if (!t) return false;
-  return /^https?:\/\//i.test(t) || /^(www\.)?(youtu|spotify|open\.spotify)/i.test(t);
+  return /^https?:\/\//i.test(t) || /^(www\.)?(youtube\.com|youtu\.be)/i.test(t);
 }
 
 function youtubeVideoId(url: string) {
@@ -304,13 +304,13 @@ function AddSongPageInner() {
     setSearching(true);
     setSearchResults([]);
     try {
-      const res = await fetch(
+      const response = await fetch(
         `/api/youtube/search?q=${encodeURIComponent(value)}`,
         { signal: ctrl.signal },
       );
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error || "Search failed.");
+      const data = await response.json();
+      if (!response.ok) {
+        setSearchError(data.error || "YouTube search failed.");
         return;
       }
       setSearchResults((data.results as YouTubeSearchResult[]) ?? []);
@@ -365,11 +365,7 @@ function AddSongPageInner() {
 
   function handleConfirmAdd() {
     if (!resolved) return;
-    const titleForUi =
-      resolved.source === "spotify" && resolved.spotifyTitle
-        ? resolved.spotifyTitle
-        : resolved.title;
-    submitForProcessing(resolved.youtube_url, titleForUi);
+    submitForProcessing(resolved.youtube_url, resolved.title);
     setResolved(null);
     setInput("");
   }
@@ -469,7 +465,9 @@ function AddSongPageInner() {
           id="add-song-hint"
           className="font-josefin text-[9px] font-thin leading-relaxed tracking-[0.06em] text-text-dark"
         >
-          We’ll detect whether you typed a search or pasted a YouTube or Spotify link.
+          {looksLikeUrl(input)
+            ? "YouTube links are detected automatically."
+            : "Searching YouTube."}
         </p>
         {resolveError && (
           <p className="font-josefin text-[11px] tracking-[0.06em] text-terracotta">
@@ -487,9 +485,7 @@ function AddSongPageInner() {
       {resolved && (
         <div className="flex flex-col gap-3 border border-gold bg-gold/5 p-4">
           <p className="font-josefin text-[10px] uppercase tracking-[0.22em] text-gold">
-            {resolved.source === "spotify"
-              ? "Matched from Spotify"
-              : "From YouTube"}
+            From YouTube
           </p>
           <div className="flex items-start gap-3">
             {resolved.thumbnail ? (
@@ -509,11 +505,6 @@ function AddSongPageInner() {
               {resolved.channel && (
                 <p className="mt-1 font-josefin text-[10px] uppercase tracking-[0.14em] text-text-dark">
                   {resolved.channel}
-                </p>
-              )}
-              {resolved.source === "spotify" && resolved.spotifyTitle && (
-                <p className="mt-1 font-josefin text-[10px] tracking-[0.06em] text-text-muted">
-                  Spotify: {resolved.spotifyTitle}
                 </p>
               )}
             </div>
@@ -567,7 +558,7 @@ function AddSongPageInner() {
 
       {/* Search results */}
       {searchResults.length > 0 && (
-        <div className="-mx-6">
+        <div className="-mx-6" aria-label="YouTube results">
           {searchResults.map((result) => {
             const existingSong = existingSongForUrl(result.url);
             return (
@@ -627,7 +618,10 @@ function AddSongPageInner() {
         </div>
       )}
 
-      {!searching && searchResults.length === 0 && !resolved && !input && (
+      {!searching &&
+        searchResults.length === 0 &&
+        !resolved &&
+        !input && (
         <div className="flex flex-col gap-2.5 border border-border-darkest bg-input-bg/40 p-4">
           <p className="font-josefin text-[10px] uppercase tracking-[0.2em] text-gold">
             Tip
