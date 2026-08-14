@@ -74,6 +74,12 @@ export type Chord = {
   chord_label: string;
   chord_standard: string;
   confidence: number | null;
+  verification_method?: string;
+  evidence_version?: string;
+  acoustic_score?: number;
+  score_margin?: number;
+  frame_stability?: number;
+  bass_support?: number | null;
 };
 
 // One transcribed note on the guitar stem, mapped to a fretboard position.

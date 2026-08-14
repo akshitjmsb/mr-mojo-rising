@@ -65,7 +65,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     importSteps: SHARED_STEPS,
     searchHero: {
       title: "Add a song.",
-      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
+      subtitle: "Type a song or artist, or paste a YouTube link.",
     },
     searchQuotes: [
       "Riders on the storm...",
@@ -76,7 +76,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
       "Touch me, babe...",
     ],
     shareTip:
-      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
+      'Share a song from YouTube on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
     errors: {
       mainTitle: "Something broke on through.",
       songTitle: "The music’s over.",
@@ -119,7 +119,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     importSteps: SHARED_STEPS,
     searchHero: {
       title: "Add a song.",
-      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
+      subtitle: "Type a song or artist, or paste a YouTube link.",
     },
     searchQuotes: [
       "Like a rolling stone...",
@@ -130,7 +130,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
       "Knockin' on heaven's door...",
     ],
     shareTip:
-      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
+      'Share a song from YouTube on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
     errors: {
       mainTitle: "Idiot wind, blowin' through us all.",
       songTitle: "It’s all over now, baby blue.",
@@ -173,7 +173,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
     importSteps: SHARED_STEPS,
     searchHero: {
       title: "Add a song.",
-      subtitle: "Type a song or artist, or paste a YouTube or Spotify link.",
+      subtitle: "Type a song or artist, or paste a YouTube link.",
     },
     searchQuotes: [
       "O sanam...",
@@ -184,7 +184,7 @@ export const THEME_CONTENT: Record<Theme, ThemeContent> = {
       "Ek pal...",
     ],
     shareTip:
-      'Share a song from YouTube or Spotify on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
+      'Share a song from YouTube on your iPhone and pick "Mr. Mojo Rising" to add it here automatically.',
     errors: {
       mainTitle: "Baarish ne rok diya.",
       songTitle: "Sur kho gaya raahon mein.",

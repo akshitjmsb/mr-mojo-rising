@@ -244,6 +244,81 @@ def ensure_stem_layers_table() -> None:
     )
 
 
+def ensure_chord_verifications_table() -> None:
+    """Create the additive evidence ledger used by the chord truth gate."""
+    client = get_client()
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS chord_verifications (
+           chord_id TEXT PRIMARY KEY REFERENCES chords(id) ON DELETE CASCADE,
+           song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+           state TEXT NOT NULL CHECK (state IN ('verified', 'withheld')),
+           reason TEXT NOT NULL,
+           method TEXT NOT NULL,
+           evidence_version TEXT NOT NULL,
+           candidate_confidence REAL NOT NULL,
+           acoustic_score REAL NOT NULL,
+           score_margin REAL NOT NULL,
+           frame_stability REAL NOT NULL,
+           bass_support REAL,
+           created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS chord_verifications_song_state_idx
+           ON chord_verifications (song_id, state)"""
+    )
+
+
+def write_chord_analysis(client: TursoClient, song_id: str, candidates: list[dict]) -> None:
+    """Atomically replace chord candidates and their independent evidence."""
+    statements: list[tuple[str, Iterable[Any]]] = [
+        ("DELETE FROM chord_verifications WHERE song_id = ?", [song_id]),
+        ("DELETE FROM chords WHERE song_id = ?", [song_id]),
+    ]
+    for candidate in candidates:
+        chord_id = new_id()
+        verification = candidate["verification"]
+        statements.extend(
+            [
+                (
+                    """INSERT INTO chords
+                       (id, song_id, start_time, end_time, chord_label, chord_standard, confidence)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        chord_id,
+                        song_id,
+                        candidate["start"],
+                        candidate["end"],
+                        candidate["label"],
+                        candidate["standard"],
+                        candidate.get("confidence"),
+                    ],
+                ),
+                (
+                    """INSERT INTO chord_verifications
+                       (chord_id, song_id, state, reason, method, evidence_version,
+                        candidate_confidence, acoustic_score, score_margin,
+                        frame_stability, bass_support)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        chord_id,
+                        song_id,
+                        verification["state"],
+                        verification["reason"],
+                        verification["method"],
+                        verification["evidence_version"],
+                        verification["candidate_confidence"],
+                        verification["acoustic_score"],
+                        verification["score_margin"],
+                        verification["frame_stability"],
+                        verification.get("bass_support"),
+                    ],
+                ),
+            ]
+        )
+    client.execute_batch(statements)
+
+
 def update_worker_status(
     worker_id: str,
     status: str,

@@ -43,7 +43,7 @@ owner's machine and reaches the same Turso database directly.
 
 ### Request lifecycle for an import
 
-1. User pastes a YouTube/Spotify link or searches → `POST /api/songs/import`
+1. User pastes a YouTube link or searches → `POST /api/songs/import`
    inserts a `songs` row with `status='queued'` and a sibling
    `processing_jobs` row. Returns `{ id }`.
 2. The Mac worker polls `claim_next_job(worker_id)` (libSQL write transaction
@@ -97,7 +97,7 @@ src/
       songs/[id]/download/route.ts    # GET stream a stem with attachment headers
       songs/import/route.ts           # POST import (insert song + job)
       youtube/search/route.ts         # GET search results
-      resolve-link/route.ts           # POST resolve YouTube/Spotify link
+      resolve-link/route.ts           # POST resolve YouTube link
       worker/route.ts                 # GET worker status, POST restart command
   components/               # AppShell, Header, TabNav, Footer, ThemeToggle, …
   lib/

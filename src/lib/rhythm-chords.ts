@@ -46,17 +46,13 @@ export function buildRhythmChordChanges(
     if (end <= start) continue;
 
     const previous = changes.at(-1);
-    if (previous?.label === label) {
+    if (previous?.label === label && start <= previous.end + 0.05) {
       previous.end = Math.max(previous.end, end);
       continue;
     }
 
     changes.push({ id: chord.id, label, start, end });
   }
-
-  changes.forEach((change, index) => {
-    change.end = changes[index + 1]?.start ?? rangeEnd;
-  });
 
   return changes;
 }
