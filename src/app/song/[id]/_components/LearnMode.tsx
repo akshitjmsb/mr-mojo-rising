@@ -21,7 +21,7 @@ import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmChordFlow from "./RhythmChordFlow";
 
 type LessonId = "phrase" | "practice";
-type LearningInstrument = "lead" | "rhythm" | "bass";
+type LearningInstrument = "lead" | "rhythm";
 
 type PracticeRange = {
   start: number;
@@ -44,7 +44,6 @@ interface Props {
   chords: Chord[];
   bpm: number | null;
   hasGuitarStem: boolean;
-  hasBassStem: boolean;
   hasBackingTrack: boolean;
   profile: PracticeProfile;
   currentTime: number;
@@ -94,7 +93,6 @@ const INSTRUMENTS: Array<{
 }> = [
   { id: "lead", label: "Lead guitar", purpose: "Isolated audio · truth-gated tab" },
   { id: "rhythm", label: "Rhythm guitar", purpose: "Chord & strum focus" },
-  { id: "bass", label: "Bass guitar", purpose: "Bass stem & groove" },
 ];
 
 function makePracticeRange(
@@ -154,7 +152,6 @@ export default function LearnMode({
   chords,
   bpm,
   hasGuitarStem,
-  hasBassStem,
   hasBackingTrack,
   profile,
   currentTime,
@@ -187,10 +184,9 @@ export default function LearnMode({
     (layer) => layer.layer_key === selectedLayerKey,
   );
   const selectedLayerInstrument = selectedLayer?.instrument ?? null;
-  const isReferenceLayer =
-    selectedLayerInstrument === "vocals" ||
-    selectedLayerInstrument === "drums" ||
-    selectedLayerInstrument === "full";
+  const isReferenceLayer = Boolean(
+    selectedLayer && selectedLayerInstrument !== "guitar",
+  );
   const selectedLayerAudioSource: LessonAudioSource =
     selectedLayerInstrument === "vocals" ||
     selectedLayerInstrument === "drums" ||
@@ -198,9 +194,10 @@ export default function LearnMode({
       ? selectedLayerInstrument
       : selectedLayerInstrument === "bass"
         ? "bass"
-        : "guitar";
-  const instrumentAudioSource: LessonAudioSource =
-    selectedInstrument === "bass" ? "bass" : "guitar";
+        : selectedLayerInstrument === "guitar"
+          ? "guitar"
+          : "full";
+  const instrumentAudioSource: LessonAudioSource = "guitar";
   const section =
     sections.find((item) => item.id === selectedSectionId) ?? null;
   const sectionOptions = useMemo(
@@ -226,25 +223,14 @@ export default function LearnMode({
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song part";
-  const validReferenceRange = Boolean(
+  const validLearningRange = Boolean(
     section &&
       learningRange &&
       learningRange.start >= section.start_time &&
       learningRange.end <= section.end_time &&
       learningRange.end - learningRange.start >= 2,
   );
-  const selectionRangeReady = isReferenceLayer
-    ? validReferenceRange
-    : selectedInstrument === "bass"
-      ? Boolean(
-          hasBassStem &&
-            section &&
-            learningRange &&
-            learningRange.start >= section.start_time &&
-            learningRange.end <= section.end_time &&
-            learningRange.end - learningRange.start >= 2,
-        )
-      : Boolean(hasGuitarStem && validReferenceRange);
+  const selectionRangeReady = Boolean(hasGuitarStem && validLearningRange);
   const selectionReady =
     selectedInstrument !== null && selectionRangeReady && !showSectionChoices;
   const range = makePracticeRange(lesson.id, learningRange);
@@ -268,6 +254,21 @@ export default function LearnMode({
     isPlaying &&
     Math.abs(loopStart - learningRange.start) < 0.05 &&
     Math.abs(loopEnd - learningRange.end) < 0.05;
+  const referenceRange = useMemo<PracticeRange | null>(() => {
+    if (sections.length === 0) return null;
+    return {
+      start: Math.min(...sections.map((item) => item.start_time)),
+      end: Math.max(...sections.map((item) => item.end_time)),
+    };
+  }, [sections]);
+  const referencePlaybackActive = Boolean(
+    referenceRange &&
+      isPlaying &&
+      Math.abs(loopStart - referenceRange.start) < 0.05 &&
+      Math.abs(loopEnd - referenceRange.end) < 0.05 &&
+      currentAudioSource === selectedLayerAudioSource &&
+      Math.abs(currentSpeed - 1) < 0.01,
+  );
   const practiceAudioSource: LessonAudioSource =
     practiceMix === "full" ? "full" : instrumentAudioSource;
   const practicePlaybackActive =
@@ -280,12 +281,7 @@ export default function LearnMode({
   }
 
   function selectInstrument(nextInstrument: LearningInstrument) {
-    if (
-      (nextInstrument === "bass" && !hasBassStem) ||
-      (nextInstrument !== "bass" && !hasGuitarStem)
-    ) {
-      return;
-    }
+    if (!hasGuitarStem) return;
     setSelectedInstrument(nextInstrument);
     setSelectedSectionId(null);
     setLearningRange(null);
@@ -298,13 +294,11 @@ export default function LearnMode({
     setSelectedLayerKey(layer.layer_key);
     setSelectedSectionId(null);
     setLearningRange(null);
-    setShowSectionChoices(true);
+    setShowSectionChoices(layer.instrument === "guitar");
     setLessonIndex(0);
+    setSelectedInstrument(null);
     if (layer.instrument === "guitar") {
       return;
-    }
-    if (layer.instrument === "bass") {
-      selectInstrument("bass");
     }
   }
 
@@ -344,11 +338,7 @@ export default function LearnMode({
     );
     setLearningRange(committedRange);
     if (isPlaying) {
-      onReplay(
-        committedRange,
-        1,
-        isReferenceLayer ? selectedLayerAudioSource : instrumentAudioSource,
-      );
+      onReplay(committedRange, 1, instrumentAudioSource);
     }
   }
 
@@ -372,31 +362,31 @@ export default function LearnMode({
 
   return (
     <section className="mx-5 mt-3 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
-      <nav
-        className="flex items-center justify-center gap-3 border-b border-border-dark pb-3"
-        aria-label="Learning path"
-      >
-        {lessons.map((item, index) => (
-          <button
-            key={item.id}
-            onClick={() => selectLesson(index)}
-            disabled={
-              index > 0 && !selectionReady
-            }
-            aria-current={index === lessonIndex ? "step" : undefined}
-            className={`min-h-8 cursor-pointer border-none bg-transparent px-1 font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-30 ${
-              index === lessonIndex
-                ? "text-gold"
-                : index < lessonIndex
-                  ? "text-text-muted"
-                  : "text-text-dark"
-            }`}
-          >
-            {index < lessonIndex ? "✓ " : `${index + 1} `}
-            {item.shortLabel}
-          </button>
-        ))}
-      </nav>
+      {!isReferenceLayer && (
+        <nav
+          className="flex items-center justify-center gap-3 border-b border-border-dark pb-3"
+          aria-label="Guitar learning path"
+        >
+          {lessons.map((item, index) => (
+            <button
+              key={item.id}
+              onClick={() => selectLesson(index)}
+              disabled={index > 0 && !selectionReady}
+              aria-current={index === lessonIndex ? "step" : undefined}
+              className={`min-h-8 cursor-pointer border-none bg-transparent px-1 font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-30 ${
+                index === lessonIndex
+                  ? "text-gold"
+                  : index < lessonIndex
+                    ? "text-text-muted"
+                    : "text-text-dark"
+              }`}
+            >
+              {index < lessonIndex ? "✓ " : `${index + 1} `}
+              {item.shortLabel}
+            </button>
+          ))}
+        </nav>
+      )}
 
       <div className="pt-4">
         {lesson.id !== "phrase" && section && (
@@ -423,7 +413,7 @@ export default function LearnMode({
           </>
         )}
 
-        {lesson.id !== "practice" && (
+        {lesson.id !== "practice" && !isReferenceLayer && (
           <>
             <p className="font-playfair text-[22px] italic leading-tight text-text">
               {lesson.title}
@@ -453,9 +443,9 @@ export default function LearnMode({
                         {layer.label}
                       </span>
                       <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.08em] text-text-dark">
-                        {layer.instrument === "guitar" || layer.instrument === "bass"
+                        {layer.instrument === "guitar"
                           ? "Choose to learn"
-                          : "Choose to listen"}
+                          : "Listen only"}
                       </span>
                       <span className="mt-2 block font-josefin text-[7px] uppercase tracking-[0.08em] text-gold/70">
                         {layer.quality_status === "ready" ? "Ready" : "Preview"}
@@ -483,7 +473,7 @@ export default function LearnMode({
                   All Guitars · What do you want to practise?
                 </p>
                 <div className="grid grid-cols-2 gap-2" aria-label="Guitar learning focus">
-                  {INSTRUMENTS.filter((option) => option.id !== "bass").map((option) => (
+                  {INSTRUMENTS.map((option) => (
                     <button
                       key={option.id}
                       type="button"
@@ -524,27 +514,46 @@ export default function LearnMode({
             )}
 
             {isReferenceLayer && (
-              <button
-                type="button"
-                onClick={() => {
-                  onPause();
-                  setSelectedLayerKey(null);
-                  setSelectedSectionId(null);
-                  setLearningRange(null);
-                  setShowSectionChoices(true);
-                }}
-                className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
-              >
-                <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-                  Listening · <span className="text-gold">{selectedLayer?.label}</span>
-                </span>
-                <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                  Change
-                </span>
-              </button>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPause();
+                    setSelectedLayerKey(null);
+                    setSelectedSectionId(null);
+                    setLearningRange(null);
+                    setShowSectionChoices(true);
+                  }}
+                  className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
+                >
+                  <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
+                    Listening · <span className="text-gold">{selectedLayer?.label}</span>
+                  </span>
+                  <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                    Change
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!referenceRange) return;
+                    onPractice(referenceRange, 1, selectedLayerAudioSource);
+                  }}
+                  disabled={!referenceRange}
+                  aria-pressed={referencePlaybackActive}
+                  className="min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold disabled:cursor-default disabled:opacity-40"
+                >
+                  {referencePlaybackActive
+                    ? "Pause"
+                    : `Play ${selectedLayer?.label ?? "track"}`}
+                </button>
+                <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                  Original tempo · full track
+                </p>
+              </div>
             )}
 
-            {(selectedInstrument || isReferenceLayer) && showSectionChoices && (
+            {selectedInstrument && showSectionChoices && (
               <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
                 {sectionOptions.map((option) => {
                   const selected = option.section.id === section?.id;
@@ -572,7 +581,7 @@ export default function LearnMode({
               </div>
             )}
 
-            {(selectedInstrument || isReferenceLayer) &&
+            {selectedInstrument &&
               !showSectionChoices &&
               section &&
               learningRange && (
@@ -583,28 +592,19 @@ export default function LearnMode({
                   range={learningRange}
                   selectionReady={selectionRangeReady}
                   readyLabel={
-                    isReferenceLayer
-                      ? `${selectedLayer?.label} ready · original tempo`
-                      : selectedInstrument === "bass"
-                      ? "Bass stem ready"
-                      : selectedInstrument === "lead"
-                        ? "Lead audio ready · notation checked separately"
-                        : "Guitar audio ready"
+                    selectedInstrument === "lead"
+                      ? "Lead audio ready · notation checked separately"
+                      : "Guitar audio ready"
                   }
                   previewPlaying={
                     isSelectedRangePlaying &&
-                    currentAudioSource ===
-                      (isReferenceLayer
-                        ? selectedLayerAudioSource
-                        : instrumentAudioSource)
+                    currentAudioSource === instrumentAudioSource
                   }
                   onChangeSection={() => setShowSectionChoices(true)}
                   onBoundaryChange={changeLearningBoundary}
                   onBoundaryCommit={commitLearningRange}
                   onPreview={() => {
-                    const source = isReferenceLayer
-                      ? selectedLayerAudioSource
-                      : instrumentAudioSource;
+                    const source = instrumentAudioSource;
                     if (
                       isSelectedRangePlaying &&
                       currentAudioSource === source
@@ -691,11 +691,7 @@ export default function LearnMode({
                         : "border-border-dark text-text-dark"
                     }`}
                   >
-                    {mix === "full"
-                      ? "Song"
-                      : selectedInstrument === "bass"
-                        ? "Bass"
-                        : "Guitar"}
+                    {mix === "full" ? "Song" : "Guitar"}
                   </button>
                 ))}
               </div>
@@ -712,19 +708,13 @@ export default function LearnMode({
                 Original tempo
               </p>
 
-              {selectedInstrument === "rhythm" ? (
-                <RhythmChordFlow
-                  changes={rhythmChordChanges}
-                  start={range.start}
-                  end={range.end}
-                  currentTime={currentTime}
-                  onSeek={onSeek}
-                />
-              ) : (
-                <p className="mt-4 border-t border-border-dark pt-3 font-josefin text-[9px] leading-relaxed text-text-muted">
-                  Listen to the isolated bass and copy the line by ear.
-                </p>
-              )}
+              <RhythmChordFlow
+                changes={rhythmChordChanges}
+                start={range.start}
+                end={range.end}
+                currentTime={currentTime}
+                onSeek={onSeek}
+              />
             </div>
           )}
 
@@ -736,13 +726,8 @@ export default function LearnMode({
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-dark pt-3">
-          {isReferenceLayer ? (
-            <p className="ml-auto font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
-              Listen above · original tempo
-            </p>
-          ) : (
-            <>
+        {!isReferenceLayer && (
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-dark pt-3">
               <button
                 onClick={() => selectLesson(Math.max(0, lessonIndex - 1))}
                 disabled={lessonIndex === 0}
@@ -761,9 +746,8 @@ export default function LearnMode({
                   Next · Practice
                 </button>
               ) : null}
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );
