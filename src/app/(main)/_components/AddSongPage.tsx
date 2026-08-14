@@ -3,8 +3,101 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Song } from "@/lib/database.types";
+import {
+  IMPORT_PROGRESS_STEPS,
+  importProgressIndex,
+} from "@/lib/import-progress";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
 import { useTheme } from "@/lib/theme/ThemeProvider";
+
+type ImportStatus = Pick<
+  Song,
+  "id" | "status" | "last_error" | "processing_stage"
+> & {
+  job_status?: string | null;
+  attempt_count?: number | null;
+  max_attempts?: number | null;
+  queue_position?: number | null;
+  worker_online_count?: number;
+  preview_ready?: number;
+};
+
+function ImportProgress({
+  status,
+  detail,
+}: {
+  status: ImportStatus | null;
+  detail: string;
+}) {
+  const currentIndex = importProgressIndex(
+    status ?? { status: "queued", processing_stage: "queued" },
+  );
+  const current = IMPORT_PROGRESS_STEPS[currentIndex];
+
+  return (
+    <section
+      aria-label="Song processing progress"
+      className="w-full max-w-[310px] border-y border-border-dark py-4 text-left"
+    >
+      <p
+        aria-live="polite"
+        className="mb-4 font-josefin text-[9px] uppercase tracking-[0.18em] text-gold"
+      >
+        Step {currentIndex + 1} of {IMPORT_PROGRESS_STEPS.length} · {current.label}
+      </p>
+      <ol>
+        {IMPORT_PROGRESS_STEPS.map((step, index) => {
+          const complete = index < currentIndex;
+          const active = index === currentIndex;
+          return (
+            <li
+              key={step.label}
+              aria-current={active ? "step" : undefined}
+              className="grid grid-cols-[22px_1fr] gap-3"
+            >
+              <div className="flex flex-col items-center">
+                <span
+                  className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border font-josefin text-[8px] ${
+                    complete
+                      ? "border-gold bg-gold text-bg"
+                      : active
+                        ? "border-gold text-gold"
+                        : "border-border-dark text-text-darkest"
+                  }`}
+                >
+                  {complete ? "✓" : index + 1}
+                </span>
+                {index < IMPORT_PROGRESS_STEPS.length - 1 ? (
+                  <span
+                    className={`h-5 w-px ${complete ? "bg-gold" : "bg-border-dark"}`}
+                    aria-hidden
+                  />
+                ) : null}
+              </div>
+              <div className="pb-3">
+                <p
+                  className={`font-josefin text-[10px] uppercase tracking-[0.12em] ${
+                    complete || active ? "text-text" : "text-text-darkest"
+                  }`}
+                >
+                  {step.label}
+                </p>
+                {active ? (
+                  <p className="mt-1 font-josefin text-[9px] leading-relaxed tracking-[0.04em] text-text-muted">
+                    {step.description}
+                  </p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-1 font-josefin text-[9px] leading-relaxed tracking-[0.05em] text-text-muted">
+        {detail}
+      </p>
+    </section>
+  );
+}
 
 function looksLikeUrl(s: string) {
   const t = s.trim();
@@ -26,7 +119,6 @@ function AddSongPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { content } = useTheme();
-  const QUOTES = content.searchQuotes;
 
   const [input, setInput] = useState("");
   const [librarySongs, setLibrarySongs] = useState<Song[]>([]);
@@ -47,7 +139,7 @@ function AddSongPageInner() {
   const [importStatusText, setImportStatusText] = useState(
     "Hang tight — the player will open when it's ready.",
   );
-  const [quoteIndex, setQuoteIndex] = useState(0);
+  const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const importingSongIdRef = useRef<string | null>(null);
 
   const handledShareUrlRef = useRef<string | null>(null);
@@ -66,15 +158,6 @@ function AddSongPageInner() {
       cancelled = true;
     };
   }, []);
-
-  type ImportStatus = Pick<Song, "id" | "status" | "last_error" | "processing_stage"> & {
-    job_status?: string | null;
-    attempt_count?: number | null;
-    max_attempts?: number | null;
-    queue_position?: number | null;
-    worker_online_count?: number;
-    preview_ready?: number;
-  };
 
   const resolveUrl = useCallback(async (raw: string): Promise<ResolvedLink | null> => {
     setResolveError("");
@@ -147,6 +230,7 @@ function AddSongPageInner() {
         if (!res.ok) return;
         const next = (await res.json()) as ImportStatus;
         if (cancelled) return;
+        setImportStatus(next);
         if (next.status === "ready") {
           importingSongIdRef.current = null;
           router.push(`/song/${next.id}`);
@@ -174,9 +258,13 @@ function AddSongPageInner() {
           );
         } else if (next.status === "processing") {
           setImportStatusText(
-            next.processing_stage
-              ? `Processing: ${next.processing_stage}. The player will open when it's ready.`
-              : "Processing. The player will open when it's ready.",
+            next.processing_stage === "download"
+              ? "The source audio is being downloaded."
+              : next.processing_stage === "separate"
+                ? "This is the intensive step; each instrument is being separated."
+                : next.processing_stage === "preview_upload"
+                  ? "The separated tracks are ready and being prepared for playback."
+                  : "The player will open automatically when it is ready.",
           );
         }
       } catch {
@@ -191,16 +279,6 @@ function AddSongPageInner() {
       clearInterval(interval);
     };
   }, [importingSongId, router]);
-
-  // Rotate quote while submitting.
-  useEffect(() => {
-    if (!submitting) return;
-    const id = setInterval(
-      () => setQuoteIndex((i) => (i + 1) % QUOTES.length),
-      4000,
-    );
-    return () => clearInterval(id);
-  }, [submitting, QUOTES.length]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,7 +327,7 @@ function AddSongPageInner() {
     setSubmitting(true);
     setImportingTitle(title);
     setImportStatusText("Queued for processing.");
-    setQuoteIndex(0);
+    setImportStatus(null);
     try {
       const res = await fetch("/api/songs/import", {
         method: "POST",
@@ -263,6 +341,20 @@ function AddSongPageInner() {
         return;
       }
       const songId = data.id as string;
+      const initialStatus: Song["status"] =
+        data.status === "ready"
+          ? "ready"
+          : data.status === "processing"
+            ? "processing"
+            : "queued";
+      setImportStatus({
+        id: songId,
+        status: initialStatus,
+        processing_stage:
+          initialStatus === "ready" ? "complete" : "queued",
+        last_error: null,
+        job_status: initialStatus === "ready" ? "succeeded" : "queued",
+      });
       importingSongIdRef.current = songId;
       setImportingSongId(songId);
     } catch {
@@ -301,6 +393,7 @@ function AddSongPageInner() {
     importingSongIdRef.current = null;
     setSubmitting(false);
     setImportingSongId(null);
+    setImportStatus(null);
     if (songId) {
       fetch(`/api/songs/${songId}`, { method: "DELETE" }).catch(() => {});
     }
@@ -316,17 +409,6 @@ function AddSongPageInner() {
     return (
       <main className="flex flex-1 flex-col gap-6 p-6">
         <div className="flex flex-col items-center gap-5 text-center">
-          <svg
-            className="spinning"
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-gold)"
-            strokeWidth="2"
-          >
-            <path d="M21 12a9 9 0 11-6.219-8.56" />
-          </svg>
           <p className="font-playfair text-[20px] font-bold italic leading-[1.3] text-gold">
             Adding your song...
           </p>
@@ -335,15 +417,7 @@ function AddSongPageInner() {
               {importingTitle}
             </p>
           )}
-          <p
-            key={quoteIndex}
-            className="fade-up min-h-5 font-playfair text-[14px] italic text-text-muted opacity-75"
-          >
-            &ldquo;{QUOTES[quoteIndex]}&rdquo;
-          </p>
-          <p className="font-josefin text-[10px] uppercase tracking-[0.2em] text-text-dark">
-            {importStatusText}
-          </p>
+          <ImportProgress status={importStatus} detail={importStatusText} />
           <button
             type="button"
             onClick={handleCancelSubmit}
