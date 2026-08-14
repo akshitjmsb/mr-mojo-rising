@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import type { ResolvedLink } from "@/lib/intake";
+import {
+  pickBestYouTubeMatch,
+  searchYouTube,
+} from "@/lib/youtube-search";
 
 const YT_HOSTS = new Set([
   "youtube.com",
@@ -9,7 +13,18 @@ const YT_HOSTS = new Set([
   "youtu.be",
 ]);
 
-const SPOTIFY_HOSTS = new Set(["open.spotify.com", "play.spotify.com"]);
+const SPOTIFY_HOSTS = new Set([
+  "open.spotify.com",
+  "play.spotify.com",
+  "spotify.link",
+  "spotify.app.link",
+]);
+
+function extractFirstUrl(value: string) {
+  const match = value.match(/https?:\/\/[^\s<>"']+/i);
+  const candidate = (match?.[0] ?? value).trim().replace(/[),.;]+$/, "");
+  return /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+}
 
 function extractYouTubeId(input: URL): string | null {
   if (input.hostname === "youtu.be") {
@@ -27,6 +42,10 @@ function extractYouTubeId(input: URL): string | null {
     const id = input.pathname.split("/")[2];
     return id || null;
   }
+  if (input.pathname.startsWith("/live/")) {
+    const id = input.pathname.split("/")[2];
+    return id || null;
+  }
   return null;
 }
 
@@ -39,7 +58,40 @@ type YouTubeOEmbed = {
 type SpotifyOEmbed = {
   title?: string;
   thumbnail_url?: string;
+  iframe_url?: string;
 };
+
+function decodeJsonString(value: string) {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return value;
+  }
+}
+
+function extractSpotifyArtists(html: string) {
+  const artistsBlock = /"artists":\[([\s\S]*?)\]/.exec(html)?.[1] ?? "";
+  return Array.from(artistsBlock.matchAll(/"name":"((?:\\.|[^"\\])*)"/g))
+    .map((match) => decodeJsonString(match[1]).trim())
+    .filter(Boolean);
+}
+
+async function normalizeSpotifyTrackUrl(input: URL) {
+  if (input.hostname === "open.spotify.com" || input.hostname === "play.spotify.com") {
+    return input.toString();
+  }
+  const response = await fetch(input, {
+    method: "GET",
+    redirect: "follow",
+    cache: "no-store",
+    headers: { "User-Agent": "Mozilla/5.0" },
+  });
+  const redirected = new URL(response.url);
+  if (redirected.hostname !== "open.spotify.com") {
+    throw new Error("That Spotify share link did not resolve to a track.");
+  }
+  return redirected.toString();
+}
 
 async function resolveYouTube(videoId: string): Promise<ResolvedLink> {
   const youtube_url = `https://www.youtube.com/watch?v=${videoId}`;
@@ -89,59 +141,35 @@ async function resolveSpotify(spotifyUrl: string): Promise<ResolvedLink> {
     throw new Error("Could not read track title from Spotify.");
   }
 
-  // 2) Search YouTube for the matching video using our own search route.
-  // Internal fetch to keep the API key server-side. We construct the absolute
-  // URL using the request's origin.
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "YouTube search is not configured. Set YOUTUBE_API_KEY to resolve Spotify links.",
-    );
+  // Spotify oEmbed omits the artist. Its public embed payload contains it,
+  // which gives us a much safer YouTube match without Spotify credentials.
+  let artists: string[] = [];
+  try {
+    const embedUrl = oembed.iframe_url || spotifyUrl.replace("/track/", "/embed/track/");
+    const embedResponse = await fetch(embedUrl, {
+      cache: "no-store",
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (embedResponse.ok) artists = extractSpotifyArtists(await embedResponse.text());
+  } catch {
+    // Title-only matching still works; the confirmation card remains the gate.
   }
 
-  const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
-  searchUrl.searchParams.set("part", "snippet");
-  searchUrl.searchParams.set("type", "video");
-  searchUrl.searchParams.set("q", spotifyTitle);
-  searchUrl.searchParams.set("maxResults", "1");
-  searchUrl.searchParams.set("videoCategoryId", "10");
-  searchUrl.searchParams.set("key", apiKey);
-
-  const searchRes = await fetch(searchUrl.toString());
-  if (!searchRes.ok) {
-    throw new Error(`YouTube search failed (HTTP ${searchRes.status}).`);
-  }
-  type YouTubeSearchResponse = {
-    items?: Array<{
-      id?: { videoId?: string };
-      snippet?: {
-        title?: string;
-        channelTitle?: string;
-        thumbnails?: {
-          medium?: { url?: string };
-          default?: { url?: string };
-        };
-      };
-    }>;
-  };
-  const data = (await searchRes.json()) as YouTubeSearchResponse;
-  const top = data.items?.[0];
-  const videoId = top?.id?.videoId;
-  if (!videoId) {
+  const query = [spotifyTitle, ...artists, "official audio"].join(" ");
+  const results = await searchYouTube(query, 10);
+  const match = pickBestYouTubeMatch(results, spotifyTitle, artists);
+  if (!match) {
     throw new Error("No matching YouTube video found for this Spotify track.");
   }
 
   return {
     source: "spotify",
-    youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
-    videoId,
-    title: top?.snippet?.title ?? spotifyTitle,
-    channel: top?.snippet?.channelTitle ?? "",
-    thumbnail:
-      top?.snippet?.thumbnails?.medium?.url ??
-      top?.snippet?.thumbnails?.default?.url ??
-      null,
-    durationLabel: null,
+    youtube_url: match.url,
+    videoId: match.videoId,
+    title: match.title,
+    channel: match.channel,
+    thumbnail: match.thumbnail || oembed.thumbnail_url || null,
+    durationLabel: match.durationLabel,
     spotifyTitle,
   };
 }
@@ -156,7 +184,7 @@ export async function POST(request: Request) {
 
     let parsed: URL;
     try {
-      parsed = new URL(raw);
+      parsed = new URL(extractFirstUrl(raw));
     } catch {
       return NextResponse.json(
         { error: "That doesn't look like a valid URL." },
@@ -179,17 +207,18 @@ export async function POST(request: Request) {
     }
 
     if (SPOTIFY_HOSTS.has(host)) {
-      if (!parsed.pathname.includes("/track/")) {
-        return NextResponse.json(
-          {
-            error:
-              "Only Spotify track links are supported (open.spotify.com/track/...).",
-          },
-          { status: 400 },
-        );
-      }
       try {
-        const resolved = await resolveSpotify(parsed.toString());
+        const spotifyUrl = await normalizeSpotifyTrackUrl(parsed);
+        if (!new URL(spotifyUrl).pathname.includes("/track/")) {
+          return NextResponse.json(
+            {
+              error:
+                "Only Spotify track links are supported. Open the song in Spotify and choose Share → Copy link.",
+            },
+            { status: 400 },
+          );
+        }
+        const resolved = await resolveSpotify(spotifyUrl);
         return NextResponse.json(resolved satisfies ResolvedLink);
       } catch (err) {
         const message =
@@ -212,4 +241,3 @@ export async function POST(request: Request) {
     );
   }
 }
-
