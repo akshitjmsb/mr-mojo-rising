@@ -42,11 +42,11 @@ test("keeps only chord changes inside the selected time range", () => {
   );
 });
 
-test("merges repeated detections without compressing time", () => {
+test("merges only contiguous repeated detections and preserves unknown gaps", () => {
   const result = buildRhythmChordChanges(
     [
       chord("one", 0, 2, "C"),
-      chord("repeat", 3, 4, "C"),
+      chord("repeat", 2, 4, "C"),
       chord("change", 4, 6, "G"),
     ],
     0,
@@ -63,7 +63,7 @@ test("merges repeated detections without compressing time", () => {
   );
 });
 
-test("withholds uncertain guesses and holds the last confirmed chord", () => {
+test("withholds uncertain guesses without stretching nearby verified chords", () => {
   const uncertain = chord("guess", 2, 3, "A7");
   uncertain.confidence = 0.4;
 
@@ -77,8 +77,8 @@ test("withholds uncertain guesses and holds the last confirmed chord", () => {
   assert.deepEqual(
     result.map(({ label, start, end }) => ({ label, start, end })),
     [
-      { label: "C", start: 0, end: 4 },
-      { label: "G", start: 4, end: 8 },
+      { label: "C", start: 0, end: 2 },
+      { label: "G", start: 4, end: 5 },
     ],
   );
 });

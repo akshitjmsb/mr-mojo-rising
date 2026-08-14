@@ -60,6 +60,21 @@ export const SCHEMA_STATEMENTS: string[] = [
     confidence REAL
   )`,
 
+  `CREATE TABLE IF NOT EXISTS chord_verifications (
+    chord_id TEXT PRIMARY KEY REFERENCES chords(id) ON DELETE CASCADE,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    state TEXT NOT NULL CHECK (state IN ('verified', 'withheld')),
+    reason TEXT NOT NULL,
+    method TEXT NOT NULL,
+    evidence_version TEXT NOT NULL,
+    candidate_confidence REAL NOT NULL,
+    acoustic_score REAL NOT NULL,
+    score_margin REAL NOT NULL,
+    frame_stability REAL NOT NULL,
+    bass_support REAL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+
   `CREATE TABLE IF NOT EXISTS tab_notes (
     id TEXT PRIMARY KEY,
     song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
@@ -147,6 +162,9 @@ export const SCHEMA_STATEMENTS: string[] = [
 
   `CREATE INDEX IF NOT EXISTS chords_song_start_idx
     ON chords (song_id, start_time)`,
+
+  `CREATE INDEX IF NOT EXISTS chord_verifications_song_state_idx
+    ON chord_verifications (song_id, state)`,
 
   `CREATE INDEX IF NOT EXISTS tab_notes_song_start_idx
     ON tab_notes (song_id, start_time)`,

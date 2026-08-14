@@ -93,10 +93,27 @@ export async function GET(
     [id],
   );
 
-  const chords = await queryAll<Chord>(
-    `SELECT * FROM chords WHERE song_id = ? ORDER BY start_time ASC`,
-    [id],
-  );
+  // Strict-by-default: legacy/model-only rows are not learner-facing. A chord
+  // exists in the product only after the separated-audio truth gate verifies it.
+  let chords: Chord[] = [];
+  try {
+    chords = await queryAll<Chord>(
+      `SELECT c.*,
+              v.method AS verification_method,
+              v.evidence_version,
+              v.acoustic_score,
+              v.score_margin,
+              v.frame_stability,
+              v.bass_support
+       FROM chords c
+       INNER JOIN chord_verifications v ON v.chord_id = c.id
+       WHERE c.song_id = ? AND v.state = 'verified'
+       ORDER BY c.start_time ASC`,
+      [id],
+    );
+  } catch {
+    // Until the additive migration and audio re-analysis run, publish nothing.
+  }
 
   const lyrics = await queryOne<Lyrics>(
     `SELECT * FROM lyrics WHERE song_id = ?`,

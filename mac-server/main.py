@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from blob_storage import upload_file as blob_upload_file
 from btc.inference import predict_chords as btc_predict_chords
+from chord_truth_gate import verify_chord_candidates, verified_count
 from chord_reanalyze import (
     AudioNotFound,
     SongNotFound,
@@ -42,6 +43,7 @@ from turso_db import (
     claim_worker_command,
     claim_next_job,
     complete_worker_command,
+    ensure_chord_verifications_table,
     ensure_stem_layers_table,
     ensure_worker_status_table,
     get_client as get_turso_client,
@@ -49,6 +51,7 @@ from turso_db import (
     requeue_stale_jobs,
     touch_worker_status,
     update_worker_status,
+    write_chord_analysis,
 )
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
@@ -232,6 +235,7 @@ async def startup_workers():
     await asyncio.gather(
         asyncio.to_thread(ensure_worker_status_table),
         asyncio.to_thread(ensure_stem_layers_table),
+        asyncio.to_thread(ensure_chord_verifications_table),
     )
     await asyncio.to_thread(update_worker_status, WORKER_ID, "starting")
 
@@ -1535,8 +1539,14 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             )
 
         try:
+            bass_stem_path = stems_dir / "bass.wav" if stems_dir else None
             chords, bpm = await run_stage_with_timeout(
-                asyncio.to_thread(detect_chords, str(audio_path)),
+                asyncio.to_thread(
+                    detect_chords,
+                    str(audio_path),
+                    str(guitar_stem_path),
+                    str(bass_stem_path) if bass_stem_path and bass_stem_path.exists() else None,
+                ),
                 timeout_seconds=ANALYZE_TIMEOUT_SECONDS,
                 label="chord detection",
                 song_id=song_id,
@@ -1547,22 +1557,15 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 [bpm, song_id],
             )
             log_event("pipeline.bpm_detected", song_id=song_id, job_id=job_id, bpm=bpm)
-            db.execute("DELETE FROM chords WHERE song_id = ?", [song_id])
-            for chord in chords or []:
-                db.execute(
-                    """INSERT INTO chords
-                       (id, song_id, start_time, end_time, chord_label, chord_standard, confidence)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    [
-                        new_id(),
-                        song_id,
-                        chord["start"],
-                        chord["end"],
-                        chord["label"],
-                        chord["standard"],
-                        chord["confidence"],
-                    ],
-                )
+            await asyncio.to_thread(write_chord_analysis, db, song_id, chords or [])
+            log_event(
+                "pipeline.chords_truth_gated",
+                song_id=song_id,
+                job_id=job_id,
+                candidate_count=len(chords or []),
+                verified_count=verified_count(chords or []),
+                withheld_count=len(chords or []) - verified_count(chords or []),
+            )
         except Exception as exc:
             error_text = f"chord_detection_failed: {exc}"
             log_event(
@@ -1650,14 +1653,24 @@ def classify_error(exc: Exception) -> str:
     return "pipeline_error"
 
 
-def detect_chords(audio_path: str) -> tuple[list[dict], float]:
+def detect_chords(
+    audio_path: str,
+    guitar_audio_path: str,
+    bass_audio_path: str | None = None,
+) -> tuple[list[dict], float]:
     """
     Run chord recognition with the BTC (Bi-directional Transformer for Chord
     Recognition) model from BTC-ISMIR19, plus librosa beat tracking for BPM.
 
-    Returns ([{start, end, label, standard, confidence}, ...], bpm).
+    BTC proposes labels from the full mix. The isolated guitar and bass then
+    independently verify or withhold every proposal.
     """
-    chords = btc_predict_chords(audio_path)
+    candidates = btc_predict_chords(audio_path)
+    chords = verify_chord_candidates(
+        candidates,
+        guitar_audio_path=guitar_audio_path,
+        bass_audio_path=bass_audio_path,
+    )
 
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
     tempo_raw, _ = librosa.beat.beat_track(y=y, sr=sr)
