@@ -40,13 +40,16 @@ export default function RhythmChordFlow({
   if (changes.length === 0) {
     return (
       <p className="mt-4 border-y border-border-dark py-5 text-center font-josefin text-[9px] text-text-muted">
-        No reliable chord changes were detected here.
+        No chord passed audio verification here. Nothing guessed.
       </p>
     );
   }
 
   return (
     <div className="mt-4">
+      <p className="mb-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-dark">
+        Verified from this recording · no web tabs
+      </p>
       <div
         ref={scrollerRef}
         className="overflow-x-auto rounded-[2px] border border-border-dark bg-bg/55 [scrollbar-width:thin]"
