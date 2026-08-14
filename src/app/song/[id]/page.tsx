@@ -405,7 +405,6 @@ export default function SongPlayerPage() {
         chords={chords}
         bpm={song.bpm}
         hasGuitarStem={Boolean(stems?.guitar_url)}
-        hasBassStem={Boolean(stems?.bass_url)}
         hasBackingTrack={Boolean(
           stems?.vocals_url && stems?.drums_url && stems?.bass_url,
         )}
