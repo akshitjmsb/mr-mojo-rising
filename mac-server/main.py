@@ -26,7 +26,11 @@ from pydantic import BaseModel
 
 from blob_storage import upload_file as blob_upload_file
 from btc.inference import predict_chords as btc_predict_chords
-from chord_truth_gate import verify_chord_candidates, verified_count
+from chord_truth_gate import (
+    verify_chord_candidates,
+    verified_count,
+    verified_coverage,
+)
 from chord_reanalyze import (
     AudioNotFound,
     SongNotFound,
@@ -1565,6 +1569,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 candidate_count=len(chords or []),
                 verified_count=verified_count(chords or []),
                 withheld_count=len(chords or []) - verified_count(chords or []),
+                verified_coverage=verified_coverage(chords or []),
             )
         except Exception as exc:
             error_text = f"chord_detection_failed: {exc}"

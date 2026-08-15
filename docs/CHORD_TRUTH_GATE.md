@@ -32,14 +32,19 @@ This document is an engineering boundary and not legal advice.
 ## Evidence pipeline
 
 1. BTC listens to the full mix and proposes time-aligned concert-pitch chords.
-2. The truth gate calculates fresh chroma evidence from the isolated guitar.
-3. The candidate must be the best-supported core harmony, clear its acoustic
+2. Adjacent extension fragments such as `G#` → `G#7` are collapsed to the
+   core harmony the recording can actually prove.
+3. The truth gate calculates fresh chroma evidence from the isolated guitar.
+4. The candidate must be the best-supported core harmony, clear its acoustic
    score and ambiguity margin, and remain stable across the interval. The gate
    deliberately collapses unproven 6th/7th extensions to the verified
    major/minor core instead of inventing precision from melody notes.
-4. When an active bass stem exists, its strongest pitch and chord-tone support
+5. Strong intervals become anchors. Repeated occurrences can pass only when
+   pooled evidence elsewhere in the same recording supports the same harmony.
+6. Chord transitions snap to nearby isolated-guitar attacks.
+7. When an active bass stem exists, its strongest pitch and chord-tone support
    must not contradict the candidate.
-5. Every candidate and its evidence are recorded. The song API exposes only
+8. Every candidate and its evidence are recorded. The song API exposes only
    rows whose verification state is `verified`.
 
 The model and verifier are deliberately different: the candidate comes from a
