@@ -37,7 +37,11 @@ from chord_reanalyze import (
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
 )
-from guitar_quality import build_guitar_focus_mix, combine_guitar_candidates
+from guitar_quality import (
+    build_guitar_focus_mix,
+    build_non_vocal_bed,
+    combine_guitar_candidates,
+)
 from guitar_roles import (
     ROLE_MASK_VERSION,
     classify_guitar_roles,
@@ -1588,7 +1592,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     isolated_guitar_path = stems_dir / "other.wav"
     focus_guitar_path = stems_dir / "guitar-focus.wav"
     if not (
-        checkpoint.compute_done("guitar_focus")
+        checkpoint.compute_done("guitar_focus_v2_no_vocals")
         and valid_wav(isolated_guitar_path)
         and valid_wav(focus_guitar_path)
     ):
@@ -1617,14 +1621,35 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         else:
             shutil.copyfile(stems_dir / "guitar.wav", isolated_guitar_path)
 
-        await asyncio.to_thread(
-            build_guitar_focus_mix,
+        non_vocal_bed_path = stems_dir / "non-vocal-bed.wav"
+        vocal_removal_report = await asyncio.to_thread(
+            build_non_vocal_bed,
             audio_path,
+            primary_vocals_path,
+            non_vocal_bed_path,
+        )
+        log_event(
+            "guitar.non_vocal_bed_built",
+            song_id=song_id,
+            job_id=job_id,
+            **vocal_removal_report,
+        )
+        focus_report = await asyncio.to_thread(
+            build_guitar_focus_mix,
+            non_vocal_bed_path,
             isolated_guitar_path,
             focus_guitar_path,
             background_gain=GUITAR_FOCUS_BACKGROUND_GAIN,
         )
-        checkpoint.mark_compute("guitar_focus")
+        log_event(
+            "guitar.focus_mix_built",
+            song_id=song_id,
+            job_id=job_id,
+            **focus_report,
+        )
+        if not focus_report["passed"]:
+            raise RuntimeError("guitar focus failed foreground quality gate")
+        checkpoint.mark_compute("guitar_focus_v2_no_vocals")
     stage_done(stage="refine", song_id=song_id, job_id=job_id, started=refine_started)
 
     assert_job_active(db, job_id, song_id)
@@ -1638,7 +1663,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         [song_id],
     )
     if (
-        checkpoint.upload_done(song_id, "final")
+        checkpoint.upload_done(song_id, "final_v3_content_addressed")
         and final_row
         and all(final_row.values())
         and all("/preview/" not in str(value) for value in final_row.values())
@@ -1688,9 +1713,9 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "instrument": "guitar",
                     "url": final_urls["guitar_url"],
                     "source_model": (
-                        f"focus:{separation_source_model}+{GUITAR_REFINE_MODEL}"
+                        f"focus-no-vocals:{separation_source_model}+{GUITAR_REFINE_MODEL}"
                         if checkpoint.compute_done("guitar_refine_direct")
-                        else f"focus:{separation_source_model}"
+                        else f"focus-no-vocals:{separation_source_model}"
                     ),
                     "quality_status": "ready",
                     "is_learnable": True,
@@ -1698,7 +1723,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 },
             ],
         )
-        checkpoint.mark_upload(song_id, "final")
+        checkpoint.mark_upload(song_id, "final_v3_content_addressed")
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
 
     # Stage: transcribe (guitar stem → tab notes). Non-fatal — the song is

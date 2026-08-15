@@ -107,20 +107,89 @@ def combine_guitar_candidates(
     }
 
 
-def build_guitar_focus_mix(
+def build_non_vocal_bed(
     original_path: Path,
+    primary_vocals_path: Path,
+    output_path: Path,
+) -> dict[str, float]:
+    """Remove the coherent primary vocal stem before building a focus mix."""
+    original, sample_rate = sf.read(
+        original_path,
+        always_2d=True,
+        dtype="float32",
+    )
+    vocals, vocal_rate = sf.read(
+        primary_vocals_path,
+        always_2d=True,
+        dtype="float32",
+    )
+    if vocal_rate != sample_rate:
+        common = gcd(vocal_rate, sample_rate)
+        vocals = resample_poly(
+            vocals,
+            sample_rate // common,
+            vocal_rate // common,
+            axis=0,
+        ).astype(np.float32)
+    if abs(len(original) - len(vocals)) > sample_rate * 0.25:
+        raise ValueError("primary vocal stem does not cover the full song")
+
+    channels = min(original.shape[1], vocals.shape[1])
+    original = original[:, :channels]
+    aligned_vocals = np.zeros_like(original)
+    shared_length = min(len(original), len(vocals))
+    aligned_vocals[:shared_length] = vocals[:shared_length, :channels]
+    bed = original - aligned_vocals
+    peak = float(np.max(np.abs(bed)))
+    if peak > 0.99:
+        bed *= 0.99 / peak
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(output_path, bed, sample_rate, subtype="PCM_24")
+
+    original_rms = float(np.sqrt(np.mean(original**2) + 1e-12))
+    vocal_rms = float(np.sqrt(np.mean(aligned_vocals**2) + 1e-12))
+    bed_rms = float(np.sqrt(np.mean(bed**2) + 1e-12))
+    return {
+        "removed_vocal_rms_ratio": round(vocal_rms / original_rms, 4),
+        "non_vocal_bed_rms_ratio": round(bed_rms / original_rms, 4),
+    }
+
+
+def build_guitar_focus_mix(
+    background_path: Path,
     isolated_path: Path,
     output_path: Path,
     *,
     background_gain: float = 0.24,
-) -> None:
-    """Blend the original quietly under guitar to mask separation artifacts."""
+) -> dict[str, float | bool]:
+    """Blend a non-vocal background quietly under the isolated guitar."""
     if not 0.0 <= background_gain <= 1.0:
         raise ValueError("background_gain must be between zero and one")
-    (original, isolated), sample_rate = _aligned_audio(original_path, isolated_path)
-    focus = original * background_gain + isolated * (1.0 - background_gain)
+    (background, isolated), sample_rate = _aligned_audio(
+        background_path,
+        isolated_path,
+    )
+    background_rms = float(np.sqrt(np.mean(background**2) + 1e-12))
+    isolated_rms = float(np.sqrt(np.mean(isolated**2) + 1e-12))
+    isolated_gain = float(
+        np.clip(background_rms / max(isolated_rms, 1e-8), 0.65, 8.0)
+    )
+    background_component = background * background_gain
+    guitar_component = isolated * isolated_gain * (1.0 - background_gain)
+    background_energy = float(np.mean(background_component**2))
+    guitar_energy = float(np.mean(guitar_component**2))
+    foreground_energy_ratio = guitar_energy / max(
+        background_energy + guitar_energy,
+        1e-12,
+    )
+    focus = background_component + guitar_component
     peak = float(np.max(np.abs(focus)))
     if peak > 0.99:
         focus *= 0.99 / peak
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(output_path, focus, sample_rate, subtype="PCM_24")
+    return {
+        "passed": foreground_energy_ratio >= 0.65,
+        "isolated_gain": round(isolated_gain, 3),
+        "foreground_energy_ratio": round(foreground_energy_ratio, 4),
+    }

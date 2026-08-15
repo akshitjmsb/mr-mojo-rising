@@ -5,7 +5,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from guitar_quality import build_guitar_focus_mix, combine_guitar_candidates
+from guitar_quality import (
+    build_guitar_focus_mix,
+    build_non_vocal_bed,
+    combine_guitar_candidates,
+)
 
 
 class GuitarQualityTests(unittest.TestCase):
@@ -53,7 +57,7 @@ class GuitarQualityTests(unittest.TestCase):
             sf.write(original_path, original, sample_rate)
             sf.write(guitar_path, guitar, sample_rate)
 
-            build_guitar_focus_mix(
+            report = build_guitar_focus_mix(
                 original_path,
                 guitar_path,
                 output_path,
@@ -61,8 +65,51 @@ class GuitarQualityTests(unittest.TestCase):
             )
             focus, _ = sf.read(output_path, dtype="float32")
 
-            expected = guitar + accompaniment * 0.24
-            self.assertTrue(np.allclose(focus, expected, atol=2e-4))
+            self.assertTrue(report["passed"])
+            self.assertGreater(report["foreground_energy_ratio"], 0.85)
+            self.assertGreater(float(np.sqrt(np.mean(focus**2))), 0.1)
+
+    def test_non_vocal_bed_removes_primary_vocal_signal(self):
+        sample_rate = 4000
+        time = np.arange(sample_rate * 2) / sample_rate
+        guitar = (0.18 * np.sin(2 * np.pi * 180 * time)).astype(np.float32)
+        vocals = (0.12 * np.sin(2 * np.pi * 440 * time)).astype(np.float32)
+        original = guitar + vocals
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            original_path = root / "original.wav"
+            vocals_path = root / "vocals.wav"
+            bed_path = root / "non-vocal-bed.wav"
+            sf.write(original_path, original, sample_rate)
+            sf.write(vocals_path, vocals, sample_rate)
+
+            report = build_non_vocal_bed(
+                original_path,
+                vocals_path,
+                bed_path,
+            )
+            bed, _ = sf.read(bed_path, dtype="float32")
+
+            self.assertTrue(np.allclose(bed, guitar, atol=2e-4))
+            self.assertEqual(len(bed), len(original))
+            self.assertGreater(report["removed_vocal_rms_ratio"], 0.5)
+
+    def test_non_vocal_bed_rejects_incomplete_vocal_coverage(self):
+        sample_rate = 1000
+        original = np.zeros(sample_rate * 2, dtype=np.float32)
+        short_vocals = np.zeros(sample_rate, dtype=np.float32)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            original_path = root / "original.wav"
+            vocals_path = root / "vocals.wav"
+            bed_path = root / "non-vocal-bed.wav"
+            sf.write(original_path, original, sample_rate)
+            sf.write(vocals_path, short_vocals, sample_rate)
+
+            with self.assertRaisesRegex(ValueError, "cover the full song"):
+                build_non_vocal_bed(original_path, vocals_path, bed_path)
 
     def test_focus_mix_rejects_invalid_background_gain(self):
         with self.assertRaises(ValueError):
@@ -72,6 +119,29 @@ class GuitarQualityTests(unittest.TestCase):
                 Path("focus.wav"),
                 background_gain=1.1,
             )
+
+    def test_focus_mix_rejects_background_dominated_output(self):
+        sample_rate = 1000
+        time = np.arange(sample_rate * 2) / sample_rate
+        background = (0.2 * np.sin(2 * np.pi * 90 * time)).astype(np.float32)
+        silent_guitar = np.zeros_like(background)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            background_path = root / "background.wav"
+            guitar_path = root / "guitar.wav"
+            output_path = root / "focus.wav"
+            sf.write(background_path, background, sample_rate)
+            sf.write(guitar_path, silent_guitar, sample_rate)
+
+            report = build_guitar_focus_mix(
+                background_path,
+                guitar_path,
+                output_path,
+            )
+
+            self.assertFalse(report["passed"])
+            self.assertEqual(report["foreground_energy_ratio"], 0.0)
 
     def test_focus_mix_aligns_model_audio_to_source_sample_rate(self):
         source_rate = 48000

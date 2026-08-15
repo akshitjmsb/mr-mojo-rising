@@ -10,13 +10,25 @@ Mirrors the wire format of the @vercel/blob v0.27 Node SDK:
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import hashlib
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlencode
 
 import requests
 
 BLOB_API_BASE = "https://blob.vercel-storage.com"
 BLOB_API_VERSION = "9"
+
+
+def content_addressed_pathname(local_path: Path, blob_pathname: str) -> str:
+    """Give immutable audio bytes an immutable public pathname."""
+    digest = hashlib.sha256()
+    with open(local_path, "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    requested = PurePosixPath(blob_pathname.lstrip("/"))
+    filename = f"{requested.stem}-{digest.hexdigest()[:12]}{requested.suffix}"
+    return str(requested.with_name(filename))
 
 
 def get_token() -> str:
@@ -32,13 +44,14 @@ def upload_file(local_path: Path, blob_pathname: str, content_type: str) -> str:
     Returns the public URL.
     """
     token = get_token()
-    pathname = blob_pathname.lstrip("/")
+    pathname = content_addressed_pathname(local_path, blob_pathname)
     url = f"{BLOB_API_BASE}/?{urlencode({'pathname': pathname})}"
     headers = {
         "authorization": f"Bearer {token}",
         "x-api-version": BLOB_API_VERSION,
         "x-content-type": content_type,
-        # Stable URLs: same pathname → same canonical URL across uploads.
+        # The content hash changes the pathname when bytes change; identical
+        # bytes keep the same immutable URL.
         "x-add-random-suffix": "0",
     }
     with open(local_path, "rb") as f:
