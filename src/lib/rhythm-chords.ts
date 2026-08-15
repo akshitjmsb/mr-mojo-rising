@@ -6,6 +6,8 @@ export type RhythmChordChange = {
   label: string;
   start: number;
   end: number;
+  confidence: number;
+  verified: boolean;
 };
 
 const NON_CHORD = /^(n|n\.c\.|no chord|silence)$/i;
@@ -19,7 +21,7 @@ export function buildRhythmChordChanges(
   rangeStart: number,
   rangeEnd: number,
   chordShapeShift: number,
-  minimumConfidence = 0.7,
+  minimumConfidence = 0.45,
 ): RhythmChordChange[] {
   const changes: RhythmChordChange[] = [];
   const ordered = [...chords].sort(
@@ -48,10 +50,23 @@ export function buildRhythmChordChanges(
     const previous = changes.at(-1);
     if (previous?.label === label && start <= previous.end + 0.05) {
       previous.end = Math.max(previous.end, end);
+      previous.confidence = Math.max(
+        previous.confidence,
+        chord.confidence ?? 0.5,
+      );
+      previous.verified =
+        previous.verified || chord.verification_state === "verified";
       continue;
     }
 
-    changes.push({ id: chord.id, label, start, end });
+    changes.push({
+      id: chord.id,
+      label,
+      start,
+      end,
+      confidence: chord.confidence ?? 0.5,
+      verified: chord.verification_state === "verified",
+    });
   }
 
   return changes;

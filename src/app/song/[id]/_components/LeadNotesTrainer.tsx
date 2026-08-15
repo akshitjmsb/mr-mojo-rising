@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LearningRange } from "@/lib/learning-range";
-import { GENERATED_TAB_GATE } from "@/lib/tab-truth-gate";
-import type { LeadTabReference } from "@/lib/verified-tabs";
-import NativeTabViewer from "./NativeTabViewer";
+import type { PracticeProfile, TabNote } from "@/lib/database.types";
+import { getSongPracticeTuning, positionNotesForTuning } from "@/lib/guitar";
+import { extractLeadNotes } from "@/lib/lead-notes";
+import SoloPhraseTab from "./SoloPhraseTab";
 
 type AudioSource = "guitar" | "backing" | "full";
 
 interface Props {
-  songId: string;
-  communityReference: LeadTabReference | null;
+  notes: TabNote[];
   selection: LearningRange;
   bpm: number | null;
+  profile: PracticeProfile;
+  currentTime: number;
   currentSpeed: number;
   currentAudioSource:
     | "guitar"
@@ -35,20 +37,22 @@ interface Props {
     speed: number,
     source?: AudioSource,
   ) => void;
+  onSeek: (time: number) => void;
   onPause: () => void;
 }
 
 const SOURCES: Array<{ id: AudioSource; label: string }> = [
   { id: "guitar", label: "Guitar" },
   { id: "full", label: "Song" },
-  { id: "backing", label: "Backing" },
+  { id: "backing", label: "Play along" },
 ];
 
 export default function LeadNotesTrainer({
-  songId,
-  communityReference,
+  notes,
   selection,
   bpm,
+  profile,
+  currentTime,
   currentSpeed,
   currentAudioSource,
   isPlaying,
@@ -57,12 +61,28 @@ export default function LeadNotesTrainer({
   hasBackingTrack,
   onPractice,
   onReplay,
+  onSeek,
   onPause,
 }: Props) {
   const [selectedSource, setSelectedSource] = useState<AudioSource>("guitar");
   const [countIn, setCountIn] = useState<number | null>(null);
   const countInTimersRef = useRef<number[]>([]);
   const countInAudioRef = useRef<AudioContext | null>(null);
+  const tuning = getSongPracticeTuning(profile.song_id, profile.tuning_id);
+  const bestNotes = useMemo(() => {
+    const inRange = notes.filter(
+      (note) =>
+        note.start_time >= selection.start && note.start_time < selection.end,
+    );
+    const stronger = inRange.filter(
+      (note) => note.confidence === null || note.confidence >= 0.4,
+    );
+    const candidates = stronger.length >= 3 ? stronger : inRange;
+    return positionNotesForTuning(
+      extractLeadNotes(candidates),
+      profile.tuning_offset,
+    );
+  }, [notes, profile.tuning_offset, selection.end, selection.start]);
   const selectionPlaying =
     isPlaying &&
     Math.abs(loopStart - selection.start) < 0.05 &&
@@ -125,37 +145,34 @@ export default function LeadNotesTrainer({
         context.currentTime + beat * (beatMs / 1000),
         beat === 0,
       );
-      const timer = window.setTimeout(
-        () => setCountIn(4 - beat),
-        beat * beatMs,
+      countInTimersRef.current.push(
+        window.setTimeout(() => setCountIn(4 - beat), beat * beatMs),
       );
-      countInTimersRef.current.push(timer);
     }
-    const startTimer = window.setTimeout(() => {
-      setCountIn(null);
-      void context.close();
-      countInAudioRef.current = null;
-      countInTimersRef.current = [];
-      onReplay(selection, 1, "backing");
-    }, beatMs * 4);
-    countInTimersRef.current.push(startTimer);
+    countInTimersRef.current.push(
+      window.setTimeout(() => {
+        setCountIn(null);
+        void context.close();
+        countInAudioRef.current = null;
+        countInTimersRef.current = [];
+        onReplay(selection, 1, "backing");
+      }, beatMs * 4),
+    );
   }
 
   function togglePlayback() {
     if (selectedSourcePlaying) {
       onPractice(selection, 1, selectedSource);
-      return;
-    }
-    if (selectedSource === "backing") {
+    } else if (selectedSource === "backing") {
       startWithCountIn();
-      return;
+    } else {
+      cancelCountIn();
+      onReplay(selection, 1, selectedSource);
     }
-    cancelCountIn();
-    onReplay(selection, 1, selectedSource);
   }
 
   return (
-    <div className="mt-3">
+    <div className="mt-4 border-t border-border-dark pt-4">
       <div className="grid grid-cols-3 gap-1" aria-label="Practice audio">
         {SOURCES.map((source) => {
           const selected = selectedSource === source.id;
@@ -189,30 +206,37 @@ export default function LeadNotesTrainer({
           ? `Count in · ${countIn}`
           : selectedSourcePlaying
             ? "Pause"
-            : "Play"}
+            : "Play at original tempo"}
       </button>
 
-      <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-        Original tempo
-      </p>
-
-      <NativeTabViewer songId={songId} />
-
-      {communityReference && GENERATED_TAB_GATE.state === "withheld" && (
-        <p className="mt-3 text-center font-josefin text-[7px] leading-relaxed text-text-darkest">
-          Optional comparison: {communityReference.track} on{" "}
-          <a
-            href={communityReference.url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={onPause}
-            className="text-text-dark underline decoration-border underline-offset-2"
-          >
-            {communityReference.provider}
-          </a>
-          . Community reference, not Mojo-verified.
+      <div className="mt-5">
+        <div className="mb-2 flex items-end justify-between gap-3">
+          <p className="font-playfair text-[18px] italic text-text">
+            AI best take
+          </p>
+          <p className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+            {bestNotes.length} detected notes
+          </p>
+        </div>
+        {bestNotes.length > 0 ? (
+          <SoloPhraseTab
+            notes={bestNotes}
+            range={selection}
+            strings={tuning.strings}
+            currentTime={currentTime}
+            expanded
+            onSeek={onSeek}
+          />
+        ) : (
+          <p className="border-y border-border-dark py-4 text-center font-josefin text-[9px] text-text-muted">
+            No playable notes were detected in this selection.
+          </p>
+        )}
+        <p className="mt-2 font-josefin text-[7px] leading-relaxed tracking-[0.07em] text-text-darkest">
+          Generated from the isolated guitar. Use it as the strongest available
+          starting point and trust your ear where the mix is ambiguous.
         </p>
-      )}
+      </div>
     </div>
   );
 }

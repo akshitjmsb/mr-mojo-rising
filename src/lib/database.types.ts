@@ -80,6 +80,8 @@ export type Chord = {
   score_margin?: number;
   frame_stability?: number;
   bass_support?: number | null;
+  verification_state?: "verified" | "withheld";
+  verification_reason?: string;
 };
 
 // One transcribed note on the guitar stem, mapped to a fretboard position.

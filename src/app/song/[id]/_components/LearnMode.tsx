@@ -7,6 +7,7 @@ import type {
   PracticeProfile,
   Section,
   StemLayer,
+  TabNote,
 } from "@/lib/database.types";
 import { getSongPracticeTuning } from "@/lib/guitar";
 import {
@@ -15,12 +16,10 @@ import {
   type LearningRange,
 } from "@/lib/learning-range";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
-import type { LeadTabReference } from "@/lib/verified-tabs";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmChordFlow from "./RhythmChordFlow";
 
-type LessonId = "phrase" | "practice";
 type LearningInstrument = "lead" | "rhythm";
 
 type PracticeRange = {
@@ -38,10 +37,10 @@ type LessonAudioSource =
 
 interface Props {
   songId: string;
-  leadTabReference: LeadTabReference | null;
   stemLayers: StemLayer[];
   sections: Section[];
   chords: Chord[];
+  tabNotes: TabNote[];
   bpm: number | null;
   hasGuitarStem: boolean;
   hasBackingTrack: boolean;
@@ -66,42 +65,14 @@ interface Props {
   onPause: () => void;
 }
 
-const LESSONS: Array<{
-  id: LessonId;
-  shortLabel: string;
-  title: string;
-  description: string;
-}> = [
-  {
-    id: "phrase",
-    shortLabel: "Choose",
-    title: "Choose a separated layer",
-    description: "Start with the sound you want to learn. Then choose the exact song part.",
-  },
-  {
-    id: "practice",
-    shortLabel: "Practice",
-    title: "Practice",
-    description: "Press play, follow the music, and copy what you hear.",
-  },
-];
-
 const INSTRUMENTS: Array<{
   id: LearningInstrument;
   label: string;
   purpose: string;
 }> = [
-  { id: "lead", label: "Lead guitar", purpose: "Isolated audio · truth-gated tab" },
-  { id: "rhythm", label: "Rhythm guitar", purpose: "Chord & strum focus" },
+  { id: "lead", label: "Lead guitar", purpose: "Follow the detected notes" },
+  { id: "rhythm", label: "Rhythm guitar", purpose: "Follow the chord changes" },
 ];
-
-function makePracticeRange(
-  lesson: LessonId,
-  learningRange: LearningRange | null,
-): PracticeRange | null {
-  if (!learningRange || lesson === "phrase") return null;
-  return learningRange;
-}
 
 function formatTime(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
@@ -119,26 +90,16 @@ function SongTuningNote({
   profile: PracticeProfile;
 }) {
   const tuning = getSongPracticeTuning(songId, profile.tuning_id);
-  const detail =
-    tuning.offset === -1
-      ? "All strings down one semitone"
-      : tuning.offset === 0
-        ? "Standard pitch"
-        : `${Math.abs(tuning.offset)} semitones below standard`;
-
   return (
     <div className="mt-3 flex min-h-10 items-center justify-between gap-3 rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2">
       <p className="font-josefin text-[8px] uppercase tracking-[0.1em] text-text-muted">
-        Song tuning · <span className="text-gold">{tuning.name}</span>
-        <span className="mt-0.5 block text-[7px] normal-case tracking-normal text-text-dark">
-          {detail}
-        </span>
+        Tuning · <span className="text-gold">{tuning.name}</span>
       </p>
       <Link
         href={`/tuner?tuning=${tuning.id}`}
         className="shrink-0 font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark underline decoration-border underline-offset-2"
       >
-        Open Tuner
+        Tuner
       </Link>
     </div>
   );
@@ -146,10 +107,10 @@ function SongTuningNote({
 
 export default function LearnMode({
   songId,
-  leadTabReference,
   stemLayers,
   sections,
   chords,
+  tabNotes,
   bpm,
   hasGuitarStem,
   hasBackingTrack,
@@ -165,21 +126,15 @@ export default function LearnMode({
   onSeek,
   onPause,
 }: Props) {
-  const [lessonIndex, setLessonIndex] = useState(0);
+  const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null);
   const [selectedInstrument, setSelectedInstrument] =
     useState<LearningInstrument | null>(null);
-  const [selectedLayerKey, setSelectedLayerKey] = useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [learningRange, setLearningRange] = useState<LearningRange | null>(null);
-  const [showSectionChoices, setShowSectionChoices] = useState(true);
   const [practiceMix, setPracticeMix] = useState<"isolated" | "full">(
     "isolated",
   );
-  const lessons = LESSONS;
-  const lesson = lessons[lessonIndex];
-  const instrument = INSTRUMENTS.find(
-    (option) => option.id === selectedInstrument,
-  );
+
   const selectedLayer = stemLayers.find(
     (layer) => layer.layer_key === selectedLayerKey,
   );
@@ -194,26 +149,22 @@ export default function LearnMode({
       ? selectedLayerInstrument
       : selectedLayerInstrument === "bass"
         ? "bass"
-        : selectedLayerInstrument === "guitar"
-          ? "guitar"
-          : "full";
-  const instrumentAudioSource: LessonAudioSource = "guitar";
+        : "guitar";
   const section =
     sections.find((item) => item.id === selectedSectionId) ?? null;
   const sectionOptions = useMemo(
     () =>
       sections.map((item, index) => {
-        const matchingSections = sections.filter(
+        const sameLabel = sections.filter(
           (candidate) => candidate.label === item.label,
         );
-        const occurrence =
-          sections
-            .slice(0, index + 1)
-            .filter((candidate) => candidate.label === item.label).length;
+        const occurrence = sections
+          .slice(0, index + 1)
+          .filter((candidate) => candidate.label === item.label).length;
         return {
           section: item,
           label:
-            matchingSections.length > 1
+            sameLabel.length > 1
               ? `${item.label} ${occurrence}`
               : item.label,
         };
@@ -223,37 +174,6 @@ export default function LearnMode({
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song part";
-  const validLearningRange = Boolean(
-    section &&
-      learningRange &&
-      learningRange.start >= section.start_time &&
-      learningRange.end <= section.end_time &&
-      learningRange.end - learningRange.start >= 2,
-  );
-  const selectionRangeReady = Boolean(hasGuitarStem && validLearningRange);
-  const selectionReady =
-    selectedInstrument !== null && selectionRangeReady && !showSectionChoices;
-  const range = makePracticeRange(lesson.id, learningRange);
-  const rhythmChordChanges = useMemo(() => {
-    if (!learningRange) return [];
-    return buildRhythmChordChanges(
-      chords,
-      learningRange.start,
-      learningRange.end,
-      profile.chord_shape_shift,
-    );
-  }, [chords, learningRange, profile.chord_shape_shift]);
-
-  const isCurrentRangePlaying =
-    range !== null &&
-    isPlaying &&
-    Math.abs(loopStart - range.start) < 0.05 &&
-    Math.abs(loopEnd - range.end) < 0.05;
-  const isSelectedRangePlaying =
-    learningRange !== null &&
-    isPlaying &&
-    Math.abs(loopStart - learningRange.start) < 0.05 &&
-    Math.abs(loopEnd - learningRange.end) < 0.05;
   const referenceRange = useMemo<PracticeRange | null>(() => {
     if (sections.length === 0) return null;
     return {
@@ -266,40 +186,50 @@ export default function LearnMode({
       isPlaying &&
       Math.abs(loopStart - referenceRange.start) < 0.05 &&
       Math.abs(loopEnd - referenceRange.end) < 0.05 &&
-      currentAudioSource === selectedLayerAudioSource &&
-      Math.abs(currentSpeed - 1) < 0.01,
+      currentAudioSource === selectedLayerAudioSource,
   );
-  const practiceAudioSource: LessonAudioSource =
-    practiceMix === "full" ? "full" : instrumentAudioSource;
-  const practicePlaybackActive =
-    isCurrentRangePlaying &&
-    currentAudioSource === practiceAudioSource &&
-    Math.abs(currentSpeed - 1) < 0.01;
+  const rhythmChordChanges = useMemo(() => {
+    if (!learningRange) return [];
+    return buildRhythmChordChanges(
+      chords,
+      learningRange.start,
+      learningRange.end,
+      profile.chord_shape_shift,
+    );
+  }, [chords, learningRange, profile.chord_shape_shift]);
+  const rhythmSource: LessonAudioSource =
+    practiceMix === "full" ? "full" : "guitar";
+  const rhythmPlaybackActive = Boolean(
+    learningRange &&
+      isPlaying &&
+      Math.abs(loopStart - learningRange.start) < 0.05 &&
+      Math.abs(loopEnd - learningRange.end) < 0.05 &&
+      currentAudioSource === rhythmSource,
+  );
 
-  function selectLesson(index: number) {
-    setLessonIndex(index);
-  }
-
-  function selectInstrument(nextInstrument: LearningInstrument) {
-    if (!hasGuitarStem) return;
-    setSelectedInstrument(nextInstrument);
-    setSelectedSectionId(null);
-    setLearningRange(null);
-    setShowSectionChoices(true);
-    setPracticeMix("isolated");
-    setLessonIndex(0);
-  }
-
-  function selectLearningLayer(layer: StemLayer) {
-    setSelectedLayerKey(layer.layer_key);
-    setSelectedSectionId(null);
-    setLearningRange(null);
-    setShowSectionChoices(layer.instrument === "guitar");
-    setLessonIndex(0);
+  function resetSelection() {
+    onPause();
+    setSelectedLayerKey(null);
     setSelectedInstrument(null);
-    if (layer.instrument === "guitar") {
-      return;
-    }
+    setSelectedSectionId(null);
+    setLearningRange(null);
+    setPracticeMix("isolated");
+  }
+
+  function selectLayer(layer: StemLayer) {
+    onPause();
+    setSelectedLayerKey(layer.layer_key);
+    setSelectedInstrument(null);
+    setSelectedSectionId(null);
+    setLearningRange(null);
+  }
+
+  function selectInstrument(instrument: LearningInstrument) {
+    if (!hasGuitarStem) return;
+    setSelectedInstrument(instrument);
+    setSelectedSectionId(null);
+    setLearningRange(null);
+    setPracticeMix("isolated");
   }
 
   function selectSection(nextSection: Section) {
@@ -310,7 +240,6 @@ export default function LearnMode({
         nextSection.end_time,
       ),
     );
-    setShowSectionChoices(false);
   }
 
   function changeLearningBoundary(
@@ -330,425 +259,245 @@ export default function LearnMode({
 
   function commitLearningRange() {
     if (!section || !learningRange) return;
-    const committedRange = clampLearningRange(
+    const nextRange = clampLearningRange(
       learningRange,
       section.start_time,
       section.end_time,
       "end",
     );
-    setLearningRange(committedRange);
-    if (isPlaying) {
-      onReplay(committedRange, 1, instrumentAudioSource);
+    setLearningRange(nextRange);
+    if (isPlaying) onReplay(nextRange, 1, currentAudioSource);
+  }
+
+  function toggleReference() {
+    if (!referenceRange) return;
+    if (referencePlaybackActive) {
+      onPractice(referenceRange, 1, selectedLayerAudioSource);
+    } else {
+      onReplay(referenceRange, 1, selectedLayerAudioSource);
     }
   }
 
-  function goNext() {
-    if (lessonIndex < lessons.length - 1) selectLesson(lessonIndex + 1);
-  }
-
-  function playPracticeSource(source: LessonAudioSource) {
-    if (!range) return;
-    const samePlayback =
-      isCurrentRangePlaying &&
-      currentAudioSource === source &&
-      Math.abs(currentSpeed - 1) < 0.01;
-
-    if (samePlayback) {
-      onPractice(range, 1, source);
+  function toggleRhythm() {
+    if (!learningRange) return;
+    if (rhythmPlaybackActive) {
+      onPractice(learningRange, 1, rhythmSource);
     } else {
-      onReplay(range, 1, source);
+      onReplay(learningRange, 1, rhythmSource);
     }
   }
 
   return (
-    <section className="mx-5 mt-3 mb-4 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
-      {!isReferenceLayer && (
-        <nav
-          className="flex items-center justify-center gap-3 border-b border-border-dark pb-3"
-          aria-label="Guitar learning path"
-        >
-          {lessons.map((item, index) => (
-            <button
-              key={item.id}
-              onClick={() => selectLesson(index)}
-              disabled={index > 0 && !selectionReady}
-              aria-current={index === lessonIndex ? "step" : undefined}
-              className={`min-h-8 cursor-pointer border-none bg-transparent px-1 font-josefin text-[8px] uppercase tracking-[0.1em] disabled:cursor-default disabled:opacity-30 ${
-                index === lessonIndex
-                  ? "text-gold"
-                  : index < lessonIndex
-                    ? "text-text-muted"
-                    : "text-text-dark"
-              }`}
-            >
-              {index < lessonIndex ? "✓ " : `${index + 1} `}
-              {item.shortLabel}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      <div className="pt-4">
-        {lesson.id !== "phrase" && section && (
-          <>
-            <button
-              type="button"
-              onClick={() => selectLesson(0)}
-              className="flex min-h-9 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
-            >
-              <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-                <span className="text-gold">{instrument?.label}</span>
-                {` · ${selectedSectionLabel}`}
-                {learningRange
-                  ? ` · ${formatTime(learningRange.start)}–${formatTime(learningRange.end)}`
-                  : ""}
-              </span>
-              <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                Change
-              </span>
-            </button>
-            {selectedInstrument && (
-              <SongTuningNote songId={songId} profile={profile} />
-            )}
-          </>
-        )}
-
-        {lesson.id !== "practice" && !isReferenceLayer && (
-          <>
-            <p className="font-playfair text-[22px] italic leading-tight text-text">
-              {lesson.title}
-            </p>
-            <p className="mt-1.5 font-josefin text-[10px] font-thin leading-relaxed text-text-muted">
-              {lesson.description}
-            </p>
-          </>
-        )}
-
-        {lesson.id === "phrase" && (
-          <div className="mt-4">
-            {!selectedLayer && (
-              stemLayers.length > 0 ? (
-                <div
-                  className="grid grid-cols-2 gap-2"
-                  aria-label="Separated audio layers"
-                >
-                  {stemLayers.map((layer) => (
-                    <button
-                      key={layer.layer_key}
-                      type="button"
-                      onClick={() => selectLearningLayer(layer)}
-                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
-                    >
-                      <span className="block font-playfair text-[16px] italic leading-tight text-text">
-                        {layer.label}
-                      </span>
-                      <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.08em] text-text-dark">
-                        {layer.instrument === "guitar"
-                          ? "Choose to learn"
-                          : "Listen only"}
-                      </span>
-                      <span className="mt-2 block font-josefin text-[7px] uppercase tracking-[0.08em] text-gold/70">
-                        {layer.quality_status === "ready" ? "Ready" : "Preview"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-[2px] border border-border-dark p-3 font-josefin text-[9px] text-text-muted">
-                  Audio layers are still being prepared.
-                </p>
-              )
-            )}
-
-            {selectedLayerInstrument === "guitar" && !selectedInstrument && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedLayerKey(null)}
-                  className="mb-3 min-h-9 font-josefin text-[8px] uppercase tracking-[0.1em] text-text-dark"
-                >
-                  ← All layers
-                </button>
-                <p className="mb-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-gold">
-                  All Guitars · What do you want to practise?
-                </p>
-                <div className="grid grid-cols-2 gap-2" aria-label="Guitar learning focus">
-                  {INSTRUMENTS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => selectInstrument(option.id)}
-                      className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
-                    >
-                      <span className="block font-playfair text-[16px] italic leading-tight text-text">
-                        {option.label}
-                      </span>
-                      <span className="mt-1.5 block font-josefin text-[7px] leading-relaxed text-text-dark">
-                        {option.purpose}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {selectedInstrument && (
+    <section className="mx-5 mb-4 mt-3 rounded-[3px] border border-gold/35 bg-gold/[0.035] p-4">
+      {!selectedLayer ? (
+        <div>
+          <p className="font-playfair text-[23px] italic leading-tight text-text">
+            Choose a sound
+          </p>
+          <div
+            className="mt-4 grid grid-cols-2 gap-2"
+            aria-label="Separated audio layers"
+          >
+            {stemLayers.map((layer) => (
               <button
+                key={layer.layer_key}
                 type="button"
-                onClick={() => {
-                  setSelectedInstrument(null);
-                  setSelectedLayerKey(null);
-                  setSelectedSectionId(null);
-                  setLearningRange(null);
-                  setShowSectionChoices(true);
-                }}
-                className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
+                onClick={() => selectLayer(layer)}
+                className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
               >
-                <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-                  Learning · <span className="text-gold">{selectedLayer?.label} / {instrument?.label}</span>
+                <span className="block font-playfair text-[16px] italic leading-tight text-text">
+                  {layer.label}
                 </span>
-                <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                  Change
+                <span className="mt-2 block font-josefin text-[7px] uppercase tracking-[0.1em] text-gold/75">
+                  {layer.instrument === "guitar" ? "Learn" : "Listen"}
                 </span>
               </button>
-            )}
-
-            {isReferenceLayer && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPause();
-                    setSelectedLayerKey(null);
-                    setSelectedSectionId(null);
-                    setLearningRange(null);
-                    setShowSectionChoices(true);
-                  }}
-                  className="mb-3 flex min-h-10 w-full cursor-pointer items-center justify-between rounded-[2px] border border-gold/25 bg-gold/[0.04] px-3 text-left"
-                >
-                  <span className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-                    Listening · <span className="text-gold">{selectedLayer?.label}</span>
-                  </span>
-                  <span className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                    Change
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!referenceRange) return;
-                    onPractice(referenceRange, 1, selectedLayerAudioSource);
-                  }}
-                  disabled={!referenceRange}
-                  aria-pressed={referencePlaybackActive}
-                  className="min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold disabled:cursor-default disabled:opacity-40"
-                >
-                  {referencePlaybackActive
-                    ? "Pause"
-                    : `Play ${selectedLayer?.label ?? "track"}`}
-                </button>
-                <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                  Original tempo · full track
-                </p>
-              </div>
-            )}
-
-            {selectedInstrument && showSectionChoices && (
-              <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
-                {sectionOptions.map((option) => {
-                  const selected = option.section.id === section?.id;
-                  return (
-                    <button
-                      key={option.section.id}
-                      type="button"
-                      onClick={() => selectSection(option.section)}
-                      aria-pressed={selected}
-                      className={`min-h-16 cursor-pointer rounded-[2px] border px-3 py-2 text-left ${
-                        selected
-                          ? "border-gold bg-gold/10"
-                          : "border-border-dark bg-bg/30"
-                      }`}
-                    >
-                      <span className={`block font-playfair text-[17px] italic ${selected ? "text-gold" : "text-text"}`}>
-                        {option.label}
-                      </span>
-                      <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
-                        {formatTime(option.section.start_time)}–{formatTime(option.section.end_time)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {selectedInstrument &&
-              !showSectionChoices &&
-              section &&
-              learningRange && (
-              <>
-                <LearningRangePicker
-                  section={section}
-                  sectionLabel={selectedSectionLabel}
-                  range={learningRange}
-                  selectionReady={selectionRangeReady}
-                  readyLabel={
-                    selectedInstrument === "lead"
-                      ? "Lead audio ready · notation checked separately"
-                      : "Guitar audio ready"
-                  }
-                  previewPlaying={
-                    isSelectedRangePlaying &&
-                    currentAudioSource === instrumentAudioSource
-                  }
-                  onChangeSection={() => setShowSectionChoices(true)}
-                  onBoundaryChange={changeLearningBoundary}
-                  onBoundaryCommit={commitLearningRange}
-                  onPreview={() => {
-                    const source = instrumentAudioSource;
-                    if (
-                      isSelectedRangePlaying &&
-                      currentAudioSource === source
-                    ) {
-                      onPractice(learningRange, 1, source);
-                    } else {
-                      onReplay(learningRange, 1, source);
-                    }
-                  }}
-                />
-                {selectedInstrument && (
-                  <SongTuningNote songId={songId} profile={profile} />
-                )}
-              </>
-            )}
-
-            {selectedInstrument && !showSectionChoices && section && !learningRange && (
-              <div className="rounded-[2px] border border-terracotta/40 p-3">
-                <p className="font-josefin text-[9px] leading-relaxed text-text-muted">
-                  No reliable guitar was detected in this part.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowSectionChoices(true)}
-                  className="mt-3 min-h-9 w-full cursor-pointer rounded-[2px] border border-border bg-transparent font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted"
-                >
-                  Choose another part
-                </button>
-              </div>
-            )}
-
-            {sectionOptions.length === 0 && (
-              <p className="rounded-[2px] border border-border-dark p-3 font-josefin text-[10px] text-text-muted">
-                Song parts are still being detected.
-              </p>
-            )}
+            ))}
           </div>
-        )}
+        </div>
+      ) : isReferenceLayer ? (
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-playfair text-[22px] italic text-text">
+              {selectedLayer.label}
+            </p>
+            <button
+              type="button"
+              onClick={resetSelection}
+              className="min-h-9 px-2 font-josefin text-[7px] uppercase tracking-[0.12em] text-text-muted"
+            >
+              Change
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={toggleReference}
+            disabled={!referenceRange}
+            aria-pressed={referencePlaybackActive}
+            className="mt-4 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold disabled:cursor-default disabled:opacity-40"
+          >
+            {referencePlaybackActive
+              ? "Pause"
+              : `Play full ${selectedLayer.label.toLowerCase()}`}
+          </button>
+          <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+            Full track · original tempo
+          </p>
+        </div>
+      ) : !selectedInstrument ? (
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-playfair text-[22px] italic text-text">
+              How do you want to play it?
+            </p>
+            <button
+              type="button"
+              onClick={resetSelection}
+              className="min-h-9 px-2 font-josefin text-[7px] uppercase tracking-[0.12em] text-text-muted"
+            >
+              Change
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {INSTRUMENTS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => selectInstrument(option.id)}
+                className="min-h-20 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-3 text-left"
+              >
+                <span className="block font-playfair text-[16px] italic leading-tight text-text">
+                  {option.label}
+                </span>
+                <span className="mt-1.5 block font-josefin text-[7px] leading-relaxed text-text-dark">
+                  {option.purpose}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-3 border-b border-border-dark pb-3">
+            <p className="font-josefin text-[9px] uppercase tracking-[0.12em] text-gold">
+              {selectedInstrument === "lead" ? "Lead guitar" : "Rhythm guitar"}
+            </p>
+            <button
+              type="button"
+              onClick={resetSelection}
+              className="min-h-9 px-2 font-josefin text-[7px] uppercase tracking-[0.12em] text-text-muted"
+            >
+              Start over
+            </button>
+          </div>
 
-        {lesson.id === "practice" &&
-          selectedInstrument === "lead" &&
-          learningRange && (
-            <LeadNotesTrainer
-              key={`${learningRange.start}-${learningRange.end}`}
-              songId={songId}
-              communityReference={leadTabReference}
-              selection={learningRange}
-              bpm={bpm}
-              currentSpeed={currentSpeed}
-              currentAudioSource={currentAudioSource}
-              isPlaying={isPlaying}
-              loopStart={loopStart}
-              loopEnd={loopEnd}
-              hasBackingTrack={hasBackingTrack}
-              onPractice={onPractice}
-              onReplay={onReplay}
-              onPause={onPause}
-            />
-          )}
-
-        {lesson.id === "practice" &&
-          selectedInstrument !== "lead" &&
-          range && (
-            <div className="mt-3">
-              <div className="grid grid-cols-2 gap-1" aria-label="Practice audio">
-                {(["isolated", "full"] as const).map((mix) => (
+          {!section || !learningRange ? (
+            <div>
+              <p className="mb-3 font-playfair text-[21px] italic text-text">
+                Choose a part
+              </p>
+              <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
+                {sectionOptions.map((option) => (
                   <button
-                    key={mix}
+                    key={option.section.id}
                     type="button"
-                    onClick={() => {
-                      setPracticeMix(mix);
-                      if (isCurrentRangePlaying) {
-                        onReplay(
-                          range,
-                          1,
-                          mix === "full" ? "full" : instrumentAudioSource,
-                        );
-                      }
-                    }}
-                    aria-pressed={practiceMix === mix}
-                    className={`min-h-9 cursor-pointer border-b bg-transparent font-josefin text-[8px] uppercase tracking-[0.1em] ${
-                      practiceMix === mix
-                        ? "border-gold text-gold"
-                        : "border-border-dark text-text-dark"
-                    }`}
+                    onClick={() => selectSection(option.section)}
+                    className="min-h-16 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2 text-left"
                   >
-                    {mix === "full" ? "Song" : "Guitar"}
+                    <span className="block font-playfair text-[17px] italic text-text">
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                      {formatTime(option.section.start_time)}–
+                      {formatTime(option.section.end_time)}
+                    </span>
                   </button>
                 ))}
               </div>
-
-              <button
-                type="button"
-                onClick={() => playPracticeSource(practiceAudioSource)}
-                aria-pressed={practicePlaybackActive}
-                className="mt-3 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold"
-              >
-                {practicePlaybackActive ? "Pause" : "Play"}
-              </button>
-              <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                Original tempo
-              </p>
-
-              <RhythmChordFlow
-                changes={rhythmChordChanges}
-                start={range.start}
-                end={range.end}
-                currentTime={currentTime}
-                onSeek={onSeek}
+            </div>
+          ) : (
+            <div>
+              <LearningRangePicker
+                section={section}
+                sectionLabel={selectedSectionLabel}
+                range={learningRange}
+                onChangeSection={() => {
+                  onPause();
+                  setSelectedSectionId(null);
+                  setLearningRange(null);
+                }}
+                onBoundaryChange={changeLearningBoundary}
+                onBoundaryCommit={commitLearningRange}
               />
+              <SongTuningNote songId={songId} profile={profile} />
+
+              {selectedInstrument === "lead" ? (
+                <LeadNotesTrainer
+                  notes={tabNotes}
+                  selection={learningRange}
+                  bpm={bpm}
+                  profile={profile}
+                  currentTime={currentTime}
+                  currentSpeed={currentSpeed}
+                  currentAudioSource={currentAudioSource}
+                  isPlaying={isPlaying}
+                  loopStart={loopStart}
+                  loopEnd={loopEnd}
+                  hasBackingTrack={hasBackingTrack}
+                  onPractice={onPractice}
+                  onReplay={onReplay}
+                  onSeek={onSeek}
+                  onPause={onPause}
+                />
+              ) : (
+                <div className="mt-4 border-t border-border-dark pt-4">
+                  <div className="grid grid-cols-2 gap-1" aria-label="Practice audio">
+                    {(["isolated", "full"] as const).map((mix) => (
+                      <button
+                        key={mix}
+                        type="button"
+                        onClick={() => {
+                          setPracticeMix(mix);
+                          if (rhythmPlaybackActive) {
+                            onReplay(
+                              learningRange,
+                              1,
+                              mix === "full" ? "full" : "guitar",
+                            );
+                          }
+                        }}
+                        aria-pressed={practiceMix === mix}
+                        className={`min-h-9 cursor-pointer border-b font-josefin text-[8px] uppercase tracking-[0.1em] ${
+                          practiceMix === mix
+                            ? "border-gold text-gold"
+                            : "border-border-dark text-text-dark"
+                        }`}
+                      >
+                        {mix === "full" ? "Song" : "Guitar"}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleRhythm}
+                    aria-pressed={rhythmPlaybackActive}
+                    className="mt-3 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold"
+                  >
+                    {rhythmPlaybackActive ? "Pause" : "Play at original tempo"}
+                  </button>
+                  <RhythmChordFlow
+                    changes={rhythmChordChanges}
+                    start={learningRange.start}
+                    end={learningRange.end}
+                    currentTime={currentTime}
+                    onSeek={onSeek}
+                  />
+                </div>
+              )}
             </div>
           )}
-
-        {lesson.id === "practice" && !range && (
-          <div className="mt-4 rounded-[2px] border border-border-dark p-3">
-            <p className="font-josefin text-[10px] leading-relaxed text-text-muted">
-              No reliable guitar notes were found in this part yet.
-            </p>
-          </div>
-        )}
-
-        {!isReferenceLayer && (
-          <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-dark pt-3">
-              <button
-                onClick={() => selectLesson(Math.max(0, lessonIndex - 1))}
-                disabled={lessonIndex === 0}
-                className="min-h-9 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-30"
-              >
-                Back
-              </button>
-              {lessonIndex < lessons.length - 1 ? (
-                <button
-                  onClick={goNext}
-                  disabled={
-                    lesson.id === "phrase" && !selectionReady
-                  }
-                  className="min-h-9 cursor-pointer rounded-[2px] border border-border px-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted disabled:cursor-default disabled:opacity-40"
-                >
-                  Next · Practice
-                </button>
-              ) : null}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
