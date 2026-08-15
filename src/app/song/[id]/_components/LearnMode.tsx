@@ -35,6 +35,8 @@ type LessonAudioSource =
   | "backing"
   | "full";
 
+const FULL_TRACK_PART_ID = "__full_track__";
+
 interface Props {
   songId: string;
   stemLayers: StemLayer[];
@@ -174,18 +176,36 @@ export default function LearnMode({
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song part";
-  const referenceRange = useMemo<PracticeRange | null>(() => {
+  const fullReferenceRange = useMemo<PracticeRange | null>(() => {
     if (sections.length === 0) return null;
     return {
       start: Math.min(...sections.map((item) => item.start_time)),
       end: Math.max(...sections.map((item) => item.end_time)),
     };
   }, [sections]);
+  const activeReferenceRange = useMemo<PracticeRange | null>(() => {
+    if (!selectedSectionId) return null;
+    if (selectedSectionId === FULL_TRACK_PART_ID) return fullReferenceRange;
+    const selectedPart = sections.find(
+      (item) => item.id === selectedSectionId,
+    );
+    if (!selectedPart) return null;
+    return {
+      start: selectedPart.start_time,
+      end: selectedPart.end_time,
+    };
+  }, [fullReferenceRange, sections, selectedSectionId]);
+  const selectedReferenceLabel =
+    selectedSectionId === FULL_TRACK_PART_ID
+      ? "Full song"
+      : sectionOptions.find(
+            (option) => option.section.id === selectedSectionId,
+          )?.label ?? "Song part";
   const referencePlaybackActive = Boolean(
-    referenceRange &&
+    activeReferenceRange &&
       isPlaying &&
-      Math.abs(loopStart - referenceRange.start) < 0.05 &&
-      Math.abs(loopEnd - referenceRange.end) < 0.05 &&
+      Math.abs(loopStart - activeReferenceRange.start) < 0.05 &&
+      Math.abs(loopEnd - activeReferenceRange.end) < 0.05 &&
       currentAudioSource === selectedLayerAudioSource,
   );
   const rhythmChordChanges = useMemo(() => {
@@ -270,11 +290,11 @@ export default function LearnMode({
   }
 
   function toggleReference() {
-    if (!referenceRange) return;
+    if (!activeReferenceRange) return;
     if (referencePlaybackActive) {
-      onPractice(referenceRange, 1, selectedLayerAudioSource);
+      onPractice(activeReferenceRange, 1, selectedLayerAudioSource);
     } else {
-      onReplay(referenceRange, 1, selectedLayerAudioSource);
+      onReplay(activeReferenceRange, 1, selectedLayerAudioSource);
     }
   }
 
@@ -329,20 +349,83 @@ export default function LearnMode({
               Change
             </button>
           </div>
-          <button
-            type="button"
-            onClick={toggleReference}
-            disabled={!referenceRange}
-            aria-pressed={referencePlaybackActive}
-            className="mt-4 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold disabled:cursor-default disabled:opacity-40"
-          >
-            {referencePlaybackActive
-              ? "Pause"
-              : `Play full ${selectedLayer.label.toLowerCase()}`}
-          </button>
-          <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-            Full track · original tempo
-          </p>
+          {!activeReferenceRange ? (
+            <div className="mt-4">
+              <p className="mb-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
+                Choose a part
+              </p>
+              <div className="grid grid-cols-2 gap-2" aria-label="Song parts">
+                {fullReferenceRange && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSectionId(FULL_TRACK_PART_ID)}
+                    className="min-h-16 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2 text-left"
+                  >
+                    <span className="block font-playfair text-[17px] italic text-text">
+                      Full song
+                    </span>
+                    <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                      {formatTime(fullReferenceRange.start)}–
+                      {formatTime(fullReferenceRange.end)}
+                    </span>
+                  </button>
+                )}
+                {sectionOptions.map((option) => (
+                  <button
+                    key={option.section.id}
+                    type="button"
+                    onClick={() => setSelectedSectionId(option.section.id)}
+                    className="min-h-16 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2 text-left"
+                  >
+                    <span className="block font-playfair text-[17px] italic text-text">
+                      {option.label}
+                    </span>
+                    <span className="mt-1 block font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                      {formatTime(option.section.start_time)}–
+                      {formatTime(option.section.end_time)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4">
+              <div className="flex min-h-12 items-center justify-between gap-3 border-y border-border-dark py-2">
+                <div>
+                  <p className="font-playfair text-[17px] italic text-text">
+                    {selectedReferenceLabel}
+                  </p>
+                  <p className="mt-1 font-josefin text-[8px] tracking-[0.08em] text-text-dark">
+                    {formatTime(activeReferenceRange.start)}–
+                    {formatTime(activeReferenceRange.end)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPause();
+                    setSelectedSectionId(null);
+                  }}
+                  className="min-h-9 px-2 font-josefin text-[7px] uppercase tracking-[0.12em] text-text-muted"
+                >
+                  Change part
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={toggleReference}
+                aria-pressed={referencePlaybackActive}
+                className="mt-3 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold"
+              >
+                {referencePlaybackActive
+                  ? "Pause"
+                  : `Play ${selectedReferenceLabel}`}
+              </button>
+              <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                {selectedLayer.label} · original tempo
+              </p>
+            </div>
+          )}
         </div>
       ) : !selectedInstrument ? (
         <div>
