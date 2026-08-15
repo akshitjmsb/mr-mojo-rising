@@ -95,6 +95,8 @@ export type TabNote = {
   string_num: number;
   fret: number;
   confidence: number | null;
+  role?: "lead" | "rhythm" | "unknown";
+  role_confidence?: number | null;
 };
 
 export type Lyrics = {

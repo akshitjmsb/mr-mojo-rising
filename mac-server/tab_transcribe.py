@@ -236,22 +236,38 @@ ENSURE_TAB_NOTES_SQL = [
         midi_pitch INTEGER NOT NULL,
         string_num INTEGER NOT NULL CHECK (string_num BETWEEN 1 AND 6),
         fret INTEGER NOT NULL CHECK (fret BETWEEN 0 AND 24),
-        confidence REAL
+        confidence REAL,
+        role TEXT NOT NULL DEFAULT 'unknown',
+        role_confidence REAL
     )""",
     """CREATE INDEX IF NOT EXISTS tab_notes_song_start_idx
         ON tab_notes (song_id, start_time)""",
 ]
 
 
-def write_tab_notes(db: TursoClient, song_id: str, notes: list[dict]) -> None:
-    """Replace all tab_notes rows for a song (idempotent re-runs)."""
+def ensure_tab_note_role_schema(db: TursoClient) -> None:
     for stmt in ENSURE_TAB_NOTES_SQL:
         db.execute(stmt)
+    columns = {
+        str(row.get("name")) for row in db.execute("PRAGMA table_info(tab_notes)")
+    }
+    if "role" not in columns:
+        db.execute(
+            "ALTER TABLE tab_notes ADD COLUMN role TEXT NOT NULL DEFAULT 'unknown'"
+        )
+    if "role_confidence" not in columns:
+        db.execute("ALTER TABLE tab_notes ADD COLUMN role_confidence REAL")
+
+
+def write_tab_notes(db: TursoClient, song_id: str, notes: list[dict]) -> None:
+    """Replace all tab_notes rows for a song (idempotent re-runs)."""
+    ensure_tab_note_role_schema(db)
     db.execute("DELETE FROM tab_notes WHERE song_id = ?", [song_id])
 
     insert_sql = """INSERT INTO tab_notes
-        (id, song_id, start_time, duration, midi_pitch, string_num, fret, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+        (id, song_id, start_time, duration, midi_pitch, string_num, fret,
+         confidence, role, role_confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
     batch: list[tuple[str, list]] = []
     for n in notes:
         batch.append(
@@ -266,6 +282,8 @@ def write_tab_notes(db: TursoClient, song_id: str, notes: list[dict]) -> None:
                     n["string_num"],
                     n["fret"],
                     n["confidence"],
+                    n.get("role", "unknown"),
+                    n.get("role_confidence"),
                 ],
             )
         )
