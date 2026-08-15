@@ -2,11 +2,9 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import SongProcessingProgress from "@/components/SongProcessingProgress";
 import type { Song } from "@/lib/database.types";
-import {
-  IMPORT_PROGRESS_STEPS,
-  importProgressIndex,
-} from "@/lib/import-progress";
+import { isLessonReady } from "@/lib/import-progress";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 
@@ -21,83 +19,6 @@ type ImportStatus = Pick<
   worker_online_count?: number;
   preview_ready?: number;
 };
-
-function ImportProgress({
-  status,
-  detail,
-}: {
-  status: ImportStatus | null;
-  detail: string;
-}) {
-  const currentIndex = importProgressIndex(
-    status ?? { status: "queued", processing_stage: "queued" },
-  );
-  const current = IMPORT_PROGRESS_STEPS[currentIndex];
-
-  return (
-    <section
-      aria-label="Song processing progress"
-      className="w-full max-w-[310px] border-y border-border-dark py-4 text-left"
-    >
-      <p
-        aria-live="polite"
-        className="mb-4 font-josefin text-[9px] uppercase tracking-[0.18em] text-gold"
-      >
-        Step {currentIndex + 1} of {IMPORT_PROGRESS_STEPS.length} · {current.label}
-      </p>
-      <ol>
-        {IMPORT_PROGRESS_STEPS.map((step, index) => {
-          const complete = index < currentIndex;
-          const active = index === currentIndex;
-          return (
-            <li
-              key={step.label}
-              aria-current={active ? "step" : undefined}
-              className="grid grid-cols-[22px_1fr] gap-3"
-            >
-              <div className="flex flex-col items-center">
-                <span
-                  className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border font-josefin text-[8px] ${
-                    complete
-                      ? "border-gold bg-gold text-bg"
-                      : active
-                        ? "border-gold text-gold"
-                        : "border-border-dark text-text-darkest"
-                  }`}
-                >
-                  {complete ? "✓" : index + 1}
-                </span>
-                {index < IMPORT_PROGRESS_STEPS.length - 1 ? (
-                  <span
-                    className={`h-5 w-px ${complete ? "bg-gold" : "bg-border-dark"}`}
-                    aria-hidden
-                  />
-                ) : null}
-              </div>
-              <div className="pb-3">
-                <p
-                  className={`font-josefin text-[10px] uppercase tracking-[0.12em] ${
-                    complete || active ? "text-text" : "text-text-darkest"
-                  }`}
-                >
-                  {step.label}
-                </p>
-                {active ? (
-                  <p className="mt-1 font-josefin text-[9px] leading-relaxed tracking-[0.04em] text-text-muted">
-                    {step.description}
-                  </p>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-      <p className="mt-1 font-josefin text-[9px] leading-relaxed tracking-[0.05em] text-text-muted">
-        {detail}
-      </p>
-    </section>
-  );
-}
 
 function looksLikeUrl(s: string) {
   const t = s.trim();
@@ -231,10 +152,7 @@ function AddSongPageInner() {
         const next = (await res.json()) as ImportStatus;
         if (cancelled) return;
         setImportStatus(next);
-        if (next.status === "ready") {
-          importingSongIdRef.current = null;
-          router.push(`/song/${next.id}`);
-        } else if (next.status === "processing" && next.preview_ready) {
+        if (isLessonReady(next)) {
           importingSongIdRef.current = null;
           router.push(`/song/${next.id}`);
         } else if (next.status === "failed") {
@@ -263,8 +181,10 @@ function AddSongPageInner() {
               : next.processing_stage === "separate"
                 ? "This is the intensive step; each instrument is being separated."
                 : next.processing_stage === "preview_upload"
-                  ? "The separated tracks are ready and being prepared for playback."
-                  : "The player will open automatically when it is ready.",
+                  ? "The first separation is saved. Learn Mode stays closed until every step is complete."
+                  : next.processing_stage === "refine"
+                    ? "The separated instrument layers are being cleaned and refined."
+                    : "Song parts, timing, notes, and chords are being checked before Learn Mode opens.",
           );
         }
       } catch {
@@ -399,6 +319,7 @@ function AddSongPageInner() {
   const resolvedExistingSong = resolved
     ? existingSongForUrl(resolved.youtube_url)
     : null;
+  const resolvedExistingSongReady = isLessonReady(resolvedExistingSong);
 
   // Submitting state — block input, show shared progress card.
   if (submitting) {
@@ -413,7 +334,10 @@ function AddSongPageInner() {
               {importingTitle}
             </p>
           )}
-          <ImportProgress status={importStatus} detail={importStatusText} />
+          <SongProcessingProgress
+            status={importStatus}
+            detail={importStatusText}
+          />
           <button
             type="button"
             onClick={handleCancelSubmit}
@@ -511,7 +435,9 @@ function AddSongPageInner() {
           </div>
           <p className="font-josefin text-[12px] tracking-[0.06em] text-text-secondary">
             {resolvedExistingSong
-              ? "This song is already available to learn."
+              ? resolvedExistingSongReady
+                ? "This song is already available to learn."
+                : "This song is already being prepared."
               : "Add this song?"}
           </p>
           <div className="flex gap-2">
@@ -520,7 +446,7 @@ function AddSongPageInner() {
               onClick={() => {
                 if (resolvedExistingSong) {
                   router.push(
-                    resolvedExistingSong.status === "ready"
+                    resolvedExistingSongReady
                       ? `/song/${resolvedExistingSong.id}`
                       : "/practice",
                   );
@@ -531,7 +457,7 @@ function AddSongPageInner() {
               className="flex-1 cursor-pointer border border-gold bg-gold/10 px-4 py-3 font-josefin text-[10px] uppercase tracking-[0.2em] text-gold"
             >
               {resolvedExistingSong
-                ? resolvedExistingSong.status === "ready"
+                ? resolvedExistingSongReady
                   ? "Open song"
                   : "View in Learn"
                 : "Add song"}
@@ -561,6 +487,7 @@ function AddSongPageInner() {
         <div className="-mx-6" aria-label="YouTube results">
           {searchResults.map((result) => {
             const existingSong = existingSongForUrl(result.url);
+            const existingSongReady = isLessonReady(existingSong);
             return (
               <button
                 key={result.videoId}
@@ -568,7 +495,7 @@ function AddSongPageInner() {
                 onClick={() => {
                   if (existingSong) {
                     router.push(
-                      existingSong.status === "ready"
+                      existingSongReady
                         ? `/song/${existingSong.id}`
                         : "/practice",
                     );
@@ -609,7 +536,11 @@ function AddSongPageInner() {
                       existingSong ? "text-text-muted" : "text-gold"
                     }`}
                   >
-                    {existingSong ? "Already added · Open" : "Add song"}
+                    {existingSong
+                      ? existingSongReady
+                        ? "Already added · Open"
+                        : "Already added · Processing"
+                      : "Add song"}
                   </p>
                 </div>
               </button>
