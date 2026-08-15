@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from main import extract_title_artist, preserve_vocal_coverage
+from main import extract_title_artist, find_separator_stems, preserve_vocal_coverage
 
 
 class MainQualityHelperTests(unittest.TestCase):
@@ -73,6 +73,20 @@ class MainQualityHelperTests(unittest.TestCase):
             self.assertGreater(
                 float(np.sqrt(np.mean(combined[sample_rate : sample_rate * 3] ** 2))),
                 0.08,
+            )
+
+    def test_six_stem_separator_outputs_are_found_by_label(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            samples = np.zeros(1000, dtype=np.float32)
+            for stem in ("vocals", "drums", "bass", "guitar", "piano", "other"):
+                sf.write(root / f"song_({stem.title()})_model.wav", samples, 1000)
+
+            found = find_separator_stems(root)
+
+            self.assertEqual(
+                set(found),
+                {"vocals", "drums", "bass", "guitar", "piano", "other"},
             )
 
 
