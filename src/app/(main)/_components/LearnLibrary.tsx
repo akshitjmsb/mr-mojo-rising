@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
+import { isLessonReady } from "@/lib/import-progress";
 
 type LearnSong = Song & {
   worker_online_count?: number;
@@ -41,7 +42,7 @@ export default function LearnLibrary() {
   }, [fetchSongs]);
 
   const hasActiveSongs = songs.some(
-    (song) => song.status === "queued" || song.status === "processing",
+    (song) => song.status !== "failed" && !isLessonReady(song),
   );
 
   // Poll only while work is active, and schedule the next request after the
@@ -150,7 +151,7 @@ export default function LearnLibrary() {
       <div>
         {songs.map((song) => {
           const workerOnline = (song.worker_online_count ?? 0) > 0;
-          const playable = song.status === "ready" || Boolean(song.preview_ready);
+          const playable = isLessonReady(song);
           return (
           <div
             key={song.id}
@@ -169,7 +170,7 @@ export default function LearnLibrary() {
               }`}
             >
               <div className="flex h-[38px] w-[38px] shrink-0 items-center justify-center border border-border">
-                {song.status === "processing" ? (
+                {!playable && song.status !== "failed" ? (
                   <svg
                     className="spinning"
                     width="14"
@@ -181,7 +182,7 @@ export default function LearnLibrary() {
                   >
                     <path d="M21 12a9 9 0 11-6.219-8.56" />
                   </svg>
-                ) : song.status === "ready" ? (
+                ) : playable ? (
                   <svg
                     width="12"
                     height="14"
@@ -217,7 +218,12 @@ export default function LearnLibrary() {
               <div className="shrink-0 text-right">
                 {song.status === "processing" && (
                   <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                    {song.preview_ready ? "Preview Ready" : "Processing"}
+                    Processing
+                  </p>
+                )}
+                {song.status === "ready" && !playable && (
+                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
+                    Finalizing
                   </p>
                 )}
                 {song.status === "queued" && (

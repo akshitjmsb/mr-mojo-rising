@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import SongProcessingProgress from "@/components/SongProcessingProgress";
 import Spinner from "@/components/Spinner";
 import type {
   Chord,
@@ -15,6 +16,7 @@ import LearnMode from "./_components/LearnMode";
 import {
   getSongPracticeTuning,
 } from "@/lib/guitar";
+import { isLessonReady } from "@/lib/import-progress";
 import { getLeadTabReference } from "@/lib/verified-tabs";
 
 type PracticeRange = {
@@ -113,7 +115,7 @@ export default function SongPlayerPage() {
             },
           );
         }
-        return (data.song?.status as string | undefined) ?? null;
+        return (data.song as Song | null | undefined) ?? null;
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -143,11 +145,11 @@ export default function SongPlayerPage() {
         );
 
         lastStage = status.processing_stage;
-        if (stageChanged || status.status === "ready") {
+        if (stageChanged || isLessonReady(status)) {
           await fetchBundle();
         }
 
-        if (status.status === "ready" || status.status === "failed") {
+        if (isLessonReady(status) || status.status === "failed") {
           keepPolling = false;
         }
       } finally {
@@ -156,10 +158,11 @@ export default function SongPlayerPage() {
     }
 
     void (async () => {
-      const initialStatus = await fetchBundle();
+      const initialSong = await fetchBundle();
       if (
         !cancelled &&
-        (initialStatus === "queued" || initialStatus === "processing")
+        initialSong?.status !== "failed" &&
+        !isLessonReady(initialSong)
       ) {
         timer = setTimeout(pollStatus, 3000);
       }
@@ -170,7 +173,10 @@ export default function SongPlayerPage() {
     };
   }, [songId]);
 
+  const lessonReady = isLessonReady(song);
+
   const audioUrls = useMemo(() => {
+    if (!lessonReady) return [];
     if (stemMode === "guitar") return stems?.guitar_url ? [stems.guitar_url] : [];
     if (stemMode === "bass") return stems?.bass_url ? [stems.bass_url] : [];
     if (stemMode === "vocals") return stems?.vocals_url ? [stems.vocals_url] : [];
@@ -179,7 +185,7 @@ export default function SongPlayerPage() {
     return [stems?.vocals_url, stems?.drums_url, stems?.bass_url].filter(
       (url): url is string => Boolean(url),
     );
-  }, [stemMode, stems]);
+  }, [lessonReady, stemMode, stems]);
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
@@ -390,13 +396,47 @@ export default function SongPlayerPage() {
     );
   }
 
+  if (song.status === "failed") {
+    return (
+      <main className="flex flex-1 flex-col items-center px-6 py-12 text-center">
+        <p className="font-playfair text-[22px] font-bold italic text-text">
+          Song processing stopped
+        </p>
+        <p className="mt-3 max-w-[320px] font-josefin text-[11px] leading-relaxed tracking-[0.06em] text-text-muted">
+          {song.last_error ||
+            "The song could not be prepared. Return to Add Song and try again."}
+        </p>
+      </main>
+    );
+  }
+
+  if (!lessonReady) {
+    const processingDetail =
+      song.processing_stage === "download"
+        ? "Downloading the original recording."
+        : song.processing_stage === "separate"
+          ? "Separating the recording into individual instrument layers."
+          : song.processing_stage === "preview_upload"
+            ? "The first separation is saved. Learn Mode remains closed until every step is complete."
+            : song.processing_stage === "refine"
+              ? "Cleaning and refining every separated instrument layer."
+              : "Checking song parts, timing, notes, and chords before Learn Mode opens.";
+
+    return (
+      <main className="flex flex-1 flex-col items-center px-6 py-10 text-center">
+        <p className="font-playfair text-[22px] font-bold italic text-gold">
+          Preparing your lesson...
+        </p>
+        <p className="mb-6 mt-2 max-w-[320px] font-josefin text-[10px] leading-relaxed tracking-[0.08em] text-text-muted">
+          Learn Mode will open automatically when the entire song is ready.
+        </p>
+        <SongProcessingProgress status={song} detail={processingDetail} />
+      </main>
+    );
+  }
+
   return (
     <main className="flex-1 overflow-hidden">
-      {song.status !== "ready" && (
-        <div className="border-b border-border-darkest px-5 py-2 font-josefin text-[9px] uppercase tracking-[0.14em] text-orange">
-          Preview playing · refining high-quality stems
-        </div>
-      )}
       <LearnMode
         songId={song.id}
         leadTabReference={getLeadTabReference(song.id)}
