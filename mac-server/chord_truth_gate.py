@@ -18,8 +18,10 @@ import librosa
 import numpy as np
 
 
-EVIDENCE_VERSION = "audio-chroma-v1"
-VERIFICATION_METHOD = "btc-candidate+isolated-guitar-chroma+bass-contradiction"
+EVIDENCE_VERSION = "audio-sequence-v2"
+VERIFICATION_METHOD = (
+    "btc-candidate+isolated-guitar-chroma+bass+self-repetition"
+)
 
 SAMPLE_RATE = 22_050
 HOP_LENGTH = 2_048
@@ -28,6 +30,9 @@ MIN_CANDIDATE_CONFIDENCE = 0.70
 MIN_ACOUSTIC_SCORE = 0.62
 MIN_SCORE_MARGIN = 0.02
 MIN_FRAME_STABILITY = 0.50
+MAX_CORE_MERGE_GAP_SECONDS = 0.12
+MAX_ATTACK_SNAP_SECONDS = 0.18
+MIN_REPETITIONS_WITHOUT_ANCHORS = 4
 
 _ROOT_TO_PITCH_CLASS = {
     "C": 0,
@@ -113,6 +118,7 @@ class AudioEvidence:
     rms: np.ndarray
     frames_per_second: float
     energy_floor: float
+    onset_times: np.ndarray | None = None
 
 
 def _template_vector(root: int, intervals: Iterable[int]) -> tuple[np.ndarray, tuple[int, ...]]:
@@ -182,6 +188,92 @@ def core_chord(label: str) -> ChordTemplate | None:
     if core_quality is None:
         return None
     return parse_chord(f"{root_name}{core_quality}")
+
+
+def merge_core_candidates(candidates: list[dict]) -> list[dict]:
+    """Merge adjacent model fragments that describe the same core harmony.
+
+    BTC often emits ``G#`` → ``G#7`` → ``G#`` across one strum. The extension
+    is not independently provable, but splitting it into sub-second rows makes
+    the otherwise stable core impossible to verify. Confidence is combined by
+    duration so tiny transition fragments cannot dominate the merged interval.
+    """
+    merged: list[dict] = []
+    for original in sorted(candidates, key=lambda item: float(item["start"])):
+        item = dict(original)
+        chord = core_chord(str(item.get("standard") or ""))
+        if chord is None:
+            merged.append(item)
+            continue
+
+        item["standard"] = chord.label
+        item["_confidence_weight"] = max(
+            0.001, float(item["end"]) - float(item["start"])
+        )
+        previous = merged[-1] if merged else None
+        previous_chord = (
+            core_chord(str(previous.get("standard") or "")) if previous else None
+        )
+        gap = (
+            float(item["start"]) - float(previous["end"])
+            if previous is not None
+            else float("inf")
+        )
+        if (
+            previous is not None
+            and previous_chord is not None
+            and _same_harmony(chord, previous_chord)
+            and gap <= MAX_CORE_MERGE_GAP_SECONDS
+        ):
+            previous_weight = float(previous.get("_confidence_weight") or 0.001)
+            item_weight = float(item["_confidence_weight"])
+            previous["confidence"] = round(
+                (
+                    float(previous.get("confidence") or 0.0) * previous_weight
+                    + float(item.get("confidence") or 0.0) * item_weight
+                )
+                / (previous_weight + item_weight),
+                4,
+            )
+            previous["end"] = max(float(previous["end"]), float(item["end"]))
+            previous["_confidence_weight"] = previous_weight + item_weight
+            continue
+        merged.append(item)
+
+    for item in merged:
+        item.pop("_confidence_weight", None)
+    return merged
+
+
+def snap_boundaries_to_attacks(
+    candidates: list[dict], onset_times: np.ndarray | None
+) -> list[dict]:
+    """Snap continuous model transitions to the nearest isolated-guitar attack."""
+    if onset_times is None or len(onset_times) == 0 or not candidates:
+        return candidates
+    snapped = [dict(candidate) for candidate in candidates]
+    onsets = np.asarray(onset_times, dtype=np.float64)
+
+    for index in range(1, len(snapped)):
+        previous = snapped[index - 1]
+        current = snapped[index]
+        if abs(float(current["start"]) - float(previous["end"])) > 0.15:
+            continue
+        boundary = (float(previous["end"]) + float(current["start"])) / 2
+        insertion = int(np.searchsorted(onsets, boundary))
+        nearby = onsets[max(0, insertion - 1) : min(len(onsets), insertion + 2)]
+        if len(nearby) == 0:
+            continue
+        attack = float(min(nearby, key=lambda value: abs(float(value) - boundary)))
+        if abs(attack - boundary) > MAX_ATTACK_SNAP_SECONDS:
+            continue
+        if attack - float(previous["start"]) < MIN_DURATION_SECONDS / 2:
+            continue
+        if float(current["end"]) - attack < MIN_DURATION_SECONDS / 2:
+            continue
+        previous["end"] = round(attack, 3)
+        current["start"] = round(attack, 3)
+    return snapped
 
 
 def _normalize_chroma(chroma: np.ndarray) -> np.ndarray:
@@ -291,11 +383,24 @@ def extract_audio_evidence(audio_path: str) -> AudioEvidence:
     rms = rms[:frame_count]
     active_reference = float(np.percentile(rms, 75)) if rms.size else 0.0
     energy_floor = max(5e-4, active_reference * 0.10)
+    onset_envelope = librosa.onset.onset_strength(
+        y=y,
+        sr=sr,
+        hop_length=512,
+    )
+    onset_times = librosa.onset.onset_detect(
+        onset_envelope=onset_envelope,
+        sr=sr,
+        hop_length=512,
+        units="time",
+        backtrack=True,
+    )
     return AudioEvidence(
         chroma=chroma,
         rms=rms,
         frames_per_second=sr / HOP_LENGTH,
         energy_floor=energy_floor,
+        onset_times=onset_times,
     )
 
 
@@ -360,17 +465,29 @@ def _bass_assessment(
     )
 
 
-def verify_chord_candidates(
+def _same_label_harmony(left: str, right: str | None) -> bool:
+    if right is None:
+        return False
+    left_chord = core_chord(left)
+    right_chord = core_chord(right)
+    return bool(
+        left_chord
+        and right_chord
+        and _same_harmony(left_chord, right_chord)
+    )
+
+
+def verify_candidates_with_evidence(
     candidates: list[dict],
-    guitar_audio_path: str,
-    bass_audio_path: str | None = None,
+    guitar: AudioEvidence,
+    bass: AudioEvidence | None = None,
 ) -> list[dict]:
-    """Return every candidate with a verified/withheld evidence record."""
-    guitar = extract_audio_evidence(guitar_audio_path)
-    bass = extract_audio_evidence(bass_audio_path) if bass_audio_path else None
+    """Verify a complete song as anchored, self-repeating harmonic sequence."""
+    prepared = merge_core_candidates(candidates)
+    prepared = snap_boundaries_to_attacks(prepared, guitar.onset_times)
     results: list[dict] = []
 
-    for original in candidates:
+    for original in prepared:
         candidate = dict(original)
         start = float(candidate["start"])
         end = float(candidate["end"])
@@ -394,19 +511,19 @@ def verify_chord_candidates(
             evidence["reason"] = "unsupported_chord_label"
         elif end - start < MIN_DURATION_SECONDS:
             evidence["reason"] = "interval_too_short"
-        elif confidence < MIN_CANDIDATE_CONFIDENCE:
-            evidence["reason"] = "weak_candidate_model"
         else:
             # Trim only the uncertain transition edge, never more than 150 ms.
             trim = min(0.15, max(0.0, (end - start) * 0.08))
             interval = _frame_slice(guitar, start + trim, end - trim)
             interval_rms = guitar.rms[interval]
             interval_chroma = guitar.chroma[:, interval]
-            if (
+            has_signal = not (
                 interval_chroma.shape[1] < 4
                 or interval_rms.size == 0
                 or float(np.median(interval_rms)) < guitar.energy_floor
-            ):
+            )
+            assessment = None
+            if not has_signal:
                 evidence["reason"] = "insufficient_guitar_signal"
             else:
                 assessment = assess_chroma(
@@ -420,21 +537,130 @@ def verify_chord_candidates(
                     frame_stability=assessment["frame_stability"],
                     reason=assessment["reason"],
                 )
-                bass_passed, bass_support, bass_reason = _bass_assessment(
-                    chord, bass, start + trim, end - trim
-                )
-                evidence["bass_support"] = bass_support
-                if assessment["passed"] and bass_passed:
-                    evidence["state"] = "verified"
-                    evidence["reason"] = "verified"
-                    candidate["standard"] = chord.label
-                elif bass_reason:
-                    evidence["reason"] = bass_reason
+            bass_passed, bass_support, bass_reason = _bass_assessment(
+                chord, bass, start + trim, end - trim
+            )
+            evidence["bass_support"] = bass_support
+            if confidence < MIN_CANDIDATE_CONFIDENCE:
+                evidence["reason"] = "weak_candidate_model"
+            elif assessment and assessment["passed"] and bass_passed:
+                evidence["state"] = "verified"
+                evidence["reason"] = "verified_anchor"
+                candidate["standard"] = chord.label
+            elif bass_reason:
+                evidence["reason"] = bass_reason
+
+            candidate["_interval_chroma"] = interval_chroma
+            candidate["_best_harmony"] = (
+                assessment.get("best_harmony") if assessment else None
+            )
+            candidate["_bass_passed"] = bass_passed
 
         candidate["verification"] = evidence
         results.append(candidate)
 
+    # The recording teaches itself: strong intervals anchor a chord family,
+    # while pooled repetitions decide whether weaker occurrences are the same
+    # harmony. This restores continuity without consulting a song database.
+    groups: dict[str, list[dict]] = {}
+    for candidate in results:
+        chord = core_chord(str(candidate.get("standard") or ""))
+        interval_chroma = candidate.get("_interval_chroma")
+        if chord is None or not isinstance(interval_chroma, np.ndarray):
+            continue
+        if interval_chroma.shape[1] < 4:
+            continue
+        groups.setdefault(chord.label, []).append(candidate)
+
+    consensus_labels: set[str] = set()
+    for label, occurrences in groups.items():
+        pooled_chroma = np.concatenate(
+            [candidate["_interval_chroma"] for candidate in occurrences],
+            axis=1,
+        )
+        pooled = assess_chroma(
+            label,
+            np.mean(pooled_chroma, axis=1),
+            _window_chromas(pooled_chroma, guitar.frames_per_second),
+        )
+        anchor_count = sum(
+            candidate["verification"]["state"] == "verified"
+            for candidate in occurrences
+        )
+        average_confidence = float(
+            np.mean([float(candidate.get("confidence") or 0.0) for candidate in occurrences])
+        )
+        bass_neutral_ratio = float(
+            np.mean([bool(candidate.get("_bass_passed", True)) for candidate in occurrences])
+        )
+        same_best_harmony = _same_label_harmony(label, pooled.get("best_harmony"))
+        anchored_consensus = (
+            anchor_count >= 2
+            and same_best_harmony
+            and pooled["acoustic_score"] >= 0.60
+            and pooled["score_margin"] >= -0.01
+            and pooled["frame_stability"] >= 0.50
+        )
+        repetition_consensus = (
+            anchor_count == 0
+            and len(occurrences) >= MIN_REPETITIONS_WITHOUT_ANCHORS
+            and same_best_harmony
+            and pooled["acoustic_score"] >= 0.60
+            and pooled["score_margin"] >= 0.0
+            and pooled["frame_stability"] >= 0.60
+            and average_confidence >= 0.55
+            and bass_neutral_ratio >= 0.75
+        )
+        if anchored_consensus or repetition_consensus:
+            consensus_labels.add(label)
+
+    for candidate in results:
+        evidence = candidate["verification"]
+        chord = core_chord(str(candidate.get("standard") or ""))
+        if (
+            evidence["state"] == "verified"
+            or chord is None
+            or chord.label not in consensus_labels
+            or not candidate.get("_bass_passed", True)
+        ):
+            continue
+        duration = float(candidate["end"]) - float(candidate["start"])
+        confidence = float(candidate.get("confidence") or 0.0)
+        local_support = (
+            evidence["acoustic_score"] >= 0.54
+            and evidence["score_margin"] >= -0.08
+            and evidence["frame_stability"] >= 0.15
+        )
+        repeated_low_signal = (
+            evidence["reason"] == "insufficient_guitar_signal"
+            and confidence >= 0.78
+            and duration >= 1.25
+        )
+        if (
+            duration >= 0.50
+            and confidence >= 0.50
+            and (local_support or repeated_low_signal)
+        ):
+            evidence["state"] = "verified"
+            evidence["reason"] = "verified_repetition"
+            candidate["standard"] = chord.label
+
+    for candidate in results:
+        candidate.pop("_interval_chroma", None)
+        candidate.pop("_best_harmony", None)
+        candidate.pop("_bass_passed", None)
     return results
+
+
+def verify_chord_candidates(
+    candidates: list[dict],
+    guitar_audio_path: str,
+    bass_audio_path: str | None = None,
+) -> list[dict]:
+    """Extract stem evidence once, then verify the full chord sequence."""
+    guitar = extract_audio_evidence(guitar_audio_path)
+    bass = extract_audio_evidence(bass_audio_path) if bass_audio_path else None
+    return verify_candidates_with_evidence(candidates, guitar, bass)
 
 
 def verified_count(candidates: Iterable[dict]) -> int:
@@ -443,3 +669,20 @@ def verified_count(candidates: Iterable[dict]) -> int:
         for candidate in candidates
         if candidate.get("verification", {}).get("state") == "verified"
     )
+
+
+def verified_coverage(candidates: Iterable[dict]) -> float:
+    """Fraction of the candidate timeline backed by published evidence."""
+    rows = list(candidates)
+    total = sum(
+        max(0.0, float(candidate["end"]) - float(candidate["start"]))
+        for candidate in rows
+    )
+    if total <= 0:
+        return 0.0
+    verified = sum(
+        max(0.0, float(candidate["end"]) - float(candidate["start"]))
+        for candidate in rows
+        if candidate.get("verification", {}).get("state") == "verified"
+    )
+    return round(verified / total, 4)

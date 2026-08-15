@@ -18,7 +18,11 @@ import numpy as np
 
 from blob_storage import download_url
 from btc.inference import predict_chords
-from chord_truth_gate import verify_chord_candidates, verified_count
+from chord_truth_gate import (
+    verify_chord_candidates,
+    verified_count,
+    verified_coverage,
+)
 from turso_db import (
     ensure_chord_verifications_table,
     get_client,
@@ -101,5 +105,6 @@ def reanalyze_chords(song_id: str) -> dict:
         "candidate_count": len(chords or []),
         "verified_count": verified_count(chords or []),
         "withheld_count": len(chords or []) - verified_count(chords or []),
+        "verified_coverage": verified_coverage(chords or []),
         "bpm": bpm,
     }
