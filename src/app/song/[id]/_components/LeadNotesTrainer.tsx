@@ -42,7 +42,7 @@ interface Props {
 }
 
 const SOURCES: Array<{ id: AudioSource; label: string }> = [
-  { id: "guitar", label: "Guitar" },
+  { id: "guitar", label: "Guitar Focus" },
   { id: "full", label: "Song" },
   { id: "backing", label: "Play along" },
 ];
@@ -233,8 +233,8 @@ export default function LeadNotesTrainer({
           </p>
         )}
         <p className="mt-2 font-josefin text-[7px] leading-relaxed tracking-[0.07em] text-text-darkest">
-          Generated from the isolated guitar. Use it as the strongest available
-          starting point and trust your ear where the mix is ambiguous.
+          Best detected take. Listen first; the highlighted notes follow at the
+          original tempo.
         </p>
       </div>
     </div>

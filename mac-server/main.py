@@ -37,6 +37,7 @@ from chord_reanalyze import (
     SongNotFound,
     reanalyze_chords as reanalyze_chords_for_song,
 )
+from guitar_quality import build_guitar_focus_mix, combine_guitar_candidates
 from lyrics_fetch import fetch_duration_matched_lyrics
 from pipeline_cache import PipelineCheckpoint, source_cache_dir, valid_wav
 from tab_transcribe import (
@@ -72,7 +73,7 @@ app.add_middleware(
 API_SECRET = os.environ.get("API_SECRET", "dev-secret")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/tmp/mojo-stems"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v3-coverage-first")
+PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v4-guitar-focus")
 
 VENV_PYTHON = str(Path(__file__).resolve().parent / "venv" / "bin" / "python")
 _VENV_YTDLP = Path(VENV_PYTHON).with_name("yt-dlp")
@@ -91,9 +92,9 @@ DEMUCS_DEVICE = os.environ.get(
     "mps" if torch.backends.mps.is_built() and torch.backends.mps.is_available() else "cpu",
 )
 DEMUCS_JOBS = max(1, int(os.environ.get("DEMUCS_JOBS", "4")))
-# htdemucs_ft is the fine-tuned 4-model ensemble: ~4x slower than htdemucs but
-# noticeably cleaner stems (less bleed/warble on isolated vocals and guitar).
-DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs_ft")
+# Six-stem Demucs is the fast fallback and provides a real guitar stem instead
+# of the four-stem model's catch-all "other" output.
+DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs_6s")
 DEMUCS_SHIFTS = max(0, int(os.environ.get("DEMUCS_SHIFTS", "1")))
 DEMUCS_SEGMENT = os.environ.get("DEMUCS_SEGMENT")
 # Vocal refine pass: re-separates vocals with BS-Roformer (audio-separator),
@@ -130,6 +131,13 @@ SEPARATOR_USE_AUTOCAST = os.environ.get("SEPARATOR_USE_AUTOCAST", "false").strip
     "yes",
     "on",
 }
+PRIMARY_SEPARATION_MODEL = os.environ.get(
+    "PRIMARY_SEPARATION_MODEL", "BS-Roformer-SW.ckpt"
+)
+GUITAR_FOCUS_BACKGROUND_GAIN = min(
+    1.0,
+    max(0.0, float(os.environ.get("GUITAR_FOCUS_BACKGROUND_GAIN", "0.24"))),
+)
 # Tab transcription: basic-pitch on the guitar stem → tab_notes rows.
 # Non-fatal — a song without tabs still completes. Thresholds and the CLI
 # path live in tab_transcribe.py (BASIC_PITCH_BIN, TAB_* env vars).
@@ -224,6 +232,8 @@ async def startup_workers():
         vocal_refine_model=VOCAL_REFINE_MODEL,
         guitar_refine_enabled=GUITAR_REFINE_ENABLED,
         guitar_refine_model=GUITAR_REFINE_MODEL,
+        primary_separation_model=PRIMARY_SEPARATION_MODEL,
+        guitar_focus_background_gain=GUITAR_FOCUS_BACKGROUND_GAIN,
         separator_bin_exists=Path(SEPARATOR_BIN).exists(),
         separator_use_autocast=SEPARATOR_USE_AUTOCAST,
         pipeline_version=PIPELINE_VERSION,
@@ -976,6 +986,68 @@ async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: s
     )
 
 
+SIX_STEM_NAMES = ("vocals", "drums", "bass", "guitar", "piano", "other")
+
+
+def find_separator_stems(output_dir: Path) -> dict[str, Path]:
+    """Locate named outputs from audio-separator without relying on prefixes."""
+    found: dict[str, Path] = {}
+    for path in sorted(output_dir.rglob("*.wav")):
+        name = path.name.lower()
+        for stem in SIX_STEM_NAMES:
+            if f"({stem})" in name and stem not in found and valid_wav(path):
+                found[stem] = path
+    return found
+
+
+def canonical_stems_ready(stems_dir: Path) -> bool:
+    return all(valid_wav(stems_dir / f"{stem}.wav") for stem in SIX_STEM_NAMES)
+
+
+def copy_canonical_stems(sources: dict[str, Path], stems_dir: Path) -> None:
+    missing = [
+        stem
+        for stem in SIX_STEM_NAMES
+        if stem not in sources or not valid_wav(sources[stem])
+    ]
+    if missing:
+        raise RuntimeError(f"primary separator omitted stems: {', '.join(missing)}")
+    if stems_dir.exists():
+        shutil.rmtree(stems_dir)
+    stems_dir.mkdir(parents=True, exist_ok=True)
+    for stem in SIX_STEM_NAMES:
+        shutil.copyfile(sources[stem], stems_dir / f"{stem}.wav")
+
+
+async def run_primary_separation(
+    audio_path: Path,
+    output_dir: Path,
+    song_id: str,
+    job_id: str,
+) -> None:
+    cmd = [
+        SEPARATOR_BIN,
+        str(audio_path),
+        "-m",
+        PRIMARY_SEPARATION_MODEL,
+        "--output_dir",
+        str(output_dir),
+        "--output_format",
+        "WAV",
+        "--model_file_dir",
+        SEPARATOR_MODEL_DIR,
+    ]
+    if SEPARATOR_USE_AUTOCAST:
+        cmd.append("--use_autocast")
+    await run_cmd(
+        cmd,
+        "primary six-stem separation (bs-roformer)",
+        song_id,
+        job_id,
+        timeout_seconds=DEMUCS_TIMEOUT_SECONDS,
+    )
+
+
 async def refine_stem(
     *,
     audio_path: Path,
@@ -1291,9 +1363,11 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     # Stage: separate
     update_song(song_id, status="processing", processing_stage="separate", last_error=None)
     separate_started = stage_start(stage="separate", song_id=song_id, job_id=job_id)
-    demucs_out = work_dir / "separated"
-    stems_dir = find_demucs_stems(demucs_out)
-    if checkpoint.compute_done("separate") and stems_dir:
+    primary_out = work_dir / "separated-primary"
+    demucs_out = work_dir / "separated-fallback"
+    stems_dir = work_dir / "stems"
+    separation_source_model = PRIMARY_SEPARATION_MODEL
+    if checkpoint.compute_done("separate") and canonical_stems_ready(stems_dir):
         log_event(
             "pipeline.checkpoint_reused",
             song_id=song_id,
@@ -1301,25 +1375,48 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             stage="separate",
         )
     else:
-        if demucs_out.exists():
-            shutil.rmtree(demucs_out)
-        await run_demucs(
-            audio_path=audio_path,
-            demucs_out=demucs_out,
-            song_id=song_id,
-            job_id=job_id,
-        )
-        stems_dir = find_demucs_stems(demucs_out)
-        if not stems_dir:
-            raise RuntimeError("Demucs did not produce a complete set of stems")
+        if primary_out.exists():
+            shutil.rmtree(primary_out)
+        try:
+            primary_out.mkdir(parents=True, exist_ok=True)
+            await run_primary_separation(
+                audio_path=audio_path,
+                output_dir=primary_out,
+                song_id=song_id,
+                job_id=job_id,
+            )
+            copy_canonical_stems(find_separator_stems(primary_out), stems_dir)
+        except Exception as exc:
+            log_event(
+                "primary_separation.failed_fallback_to_demucs",
+                song_id=song_id,
+                job_id=job_id,
+                model=PRIMARY_SEPARATION_MODEL,
+                error=str(exc),
+            )
+            separation_source_model = DEMUCS_MODEL
+            if demucs_out.exists():
+                shutil.rmtree(demucs_out)
+            await run_demucs(
+                audio_path=audio_path,
+                demucs_out=demucs_out,
+                song_id=song_id,
+                job_id=job_id,
+            )
+            demucs_stems = find_demucs_stems(demucs_out)
+            if not demucs_stems:
+                raise RuntimeError("Demucs did not produce a complete set of stems")
+            sources = {
+                stem: demucs_stems / f"{stem}.wav" for stem in SIX_STEM_NAMES
+            }
+            copy_canonical_stems(sources, stems_dir)
         checkpoint.mark_compute("separate")
     stage_done(stage="separate", song_id=song_id, job_id=job_id, started=separate_started)
 
-    assert stems_dir is not None
     assert_job_active(db, job_id, song_id)
 
-    # Publish Demucs stems immediately so the player is usable while the
-    # high-quality vocal and guitar passes continue in the background.
+    # Publish the coherent six-stem pass while the two target-specific quality
+    # checks continue. Learn remains gated until the complete job succeeds.
     update_song(song_id, status="processing", processing_stage="preview_upload", last_error=None)
     preview_started = stage_start(stage="preview_upload", song_id=song_id, job_id=job_id)
     preview_row = db.query_one(
@@ -1338,7 +1435,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         preview_urls = await upload_targets(
             [
                 ("original_url", audio_path, f"stems/{song_id}/original.wav"),
-                ("guitar_url", stems_dir / "other.wav", f"stems/{song_id}/preview/other.wav"),
+                ("guitar_url", stems_dir / "guitar.wav", f"stems/{song_id}/preview/guitar.wav"),
                 ("vocals_url", stems_dir / "vocals.wav", f"stems/{song_id}/preview/vocals.wav"),
                 ("drums_url", stems_dir / "drums.wav", f"stems/{song_id}/drums.wav"),
                 ("bass_url", stems_dir / "bass.wav", f"stems/{song_id}/bass.wav"),
@@ -1367,16 +1464,16 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "label": "Vocals",
                     "instrument": "vocals",
                     "url": preview_urls["vocals_url"],
-                    "source_model": DEMUCS_MODEL,
+                    "source_model": separation_source_model,
                     "quality_status": "preview",
                     "sort_order": 2,
                 },
                 {
                     "layer_key": "guitars",
-                    "label": "All Guitars",
+                    "label": "Guitar Focus",
                     "instrument": "guitar",
                     "url": preview_urls["guitar_url"],
-                    "source_model": DEMUCS_MODEL,
+                    "source_model": separation_source_model,
                     "quality_status": "preview",
                     "is_learnable": True,
                     "sort_order": 0,
@@ -1386,7 +1483,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "label": "Bass",
                     "instrument": "bass",
                     "url": preview_urls["bass_url"],
-                    "source_model": DEMUCS_MODEL,
+                    "source_model": separation_source_model,
                     "quality_status": "ready",
                     "is_learnable": True,
                     "sort_order": 1,
@@ -1396,7 +1493,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "label": "Drums",
                     "instrument": "drums",
                     "url": preview_urls["drums_url"],
-                    "source_model": DEMUCS_MODEL,
+                    "source_model": separation_source_model,
                     "quality_status": "ready",
                     "sort_order": 3,
                 },
@@ -1410,90 +1507,115 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         started=preview_started,
     )
 
-    # Stage: refine. The guitar model consumes the vocal-free instrumental
-    # created by the vocal model, preventing vocals from leaking into Guitar.
-    if (VOCAL_REFINE_ENABLED or GUITAR_REFINE_ENABLED) and Path(SEPARATOR_BIN).exists():
-        update_song(song_id, status="processing", processing_stage="refine", last_error=None)
-        refine_started = stage_start(stage="refine", song_id=song_id, job_id=job_id)
-        demucs_vocals_path = work_dir / "demucs-vocals.wav"
-        if not valid_wav(demucs_vocals_path):
-            shutil.copyfile(stems_dir / "vocals.wav", demucs_vocals_path)
-        # When vocal refinement is enabled, Guitar must only see the
-        # vocal-free instrumental. If that prerequisite fails, retain the
-        # Demucs guitar/other preview instead of reintroducing vocal bleed by
-        # running the guitar model against the full mix.
-        guitar_input: Path | None = None if VOCAL_REFINE_ENABLED else audio_path
-        if VOCAL_REFINE_ENABLED:
-            try:
-                refined_vocal_path = await refine_stem(
-                    audio_path=audio_path,
-                    stems_dir=stems_dir,
-                    work_dir=work_dir,
-                    song_id=song_id,
-                    job_id=job_id,
-                    model=VOCAL_REFINE_MODEL,
-                    stem_label="Vocals",
-                    target_filename="vocals.wav",
-                    checkpoint=checkpoint,
-                    checkpoint_stage="vocal_refine",
-                    required_labels=("Instrumental",),
-                )
-                fallback_windows = await asyncio.to_thread(
-                    preserve_vocal_coverage,
-                    refined_vocal_path,
-                    demucs_vocals_path,
-                    stems_dir / "vocals.wav",
-                )
-                log_event(
-                    "vocals.coverage_preserved",
-                    song_id=song_id,
-                    job_id=job_id,
-                    fallback_windows=fallback_windows,
-                )
-                instrumental_outputs = sorted(
-                    (work_dir / "refined-vocals").glob("*(Instrumental)*.wav")
-                )
-                if instrumental_outputs and valid_wav(instrumental_outputs[0]):
-                    guitar_input = instrumental_outputs[0]
-            except Exception as exc:
-                log_event(
-                    "refine.failed_fallback_to_demucs_stem",
-                    song_id=song_id,
-                    job_id=job_id,
-                    stem="Vocals",
-                    error=str(exc),
-                )
-        if GUITAR_REFINE_ENABLED and guitar_input is not None:
-            try:
-                await refine_stem(
-                    audio_path=guitar_input,
-                    stems_dir=stems_dir,
-                    work_dir=work_dir,
-                    song_id=song_id,
-                    job_id=job_id,
-                    model=GUITAR_REFINE_MODEL,
-                    stem_label="Guitar",
-                    target_filename="other.wav",
-                    checkpoint=checkpoint,
-                    checkpoint_stage="guitar_refine",
-                    single_stem=True,
-                )
-            except Exception as exc:
-                log_event(
-                    "refine.failed_fallback_to_demucs_stem",
-                    song_id=song_id,
-                    job_id=job_id,
-                    stem="Guitar",
-                    error=str(exc),
-                )
-        elif GUITAR_REFINE_ENABLED:
-            log_event(
-                "refine.skipped_missing_vocal_free_input",
+    # Stage: refine. Target-specific models receive the untouched original in
+    # parallel quality roles; outputs are never cascaded through one another.
+    update_song(song_id, status="processing", processing_stage="refine", last_error=None)
+    refine_started = stage_start(stage="refine", song_id=song_id, job_id=job_id)
+    primary_vocals_path = work_dir / "primary-vocals.wav"
+    if not valid_wav(primary_vocals_path):
+        shutil.copyfile(stems_dir / "vocals.wav", primary_vocals_path)
+
+    if VOCAL_REFINE_ENABLED and Path(SEPARATOR_BIN).exists():
+        try:
+            refined_vocal_path = await refine_stem(
+                audio_path=audio_path,
+                stems_dir=stems_dir,
+                work_dir=work_dir,
                 song_id=song_id,
                 job_id=job_id,
-                stem="Guitar",
+                model=VOCAL_REFINE_MODEL,
+                stem_label="Vocals",
+                target_filename="vocals.wav",
+                checkpoint=checkpoint,
+                checkpoint_stage="vocal_refine",
+                single_stem=True,
             )
-        stage_done(stage="refine", song_id=song_id, job_id=job_id, started=refine_started)
+            fallback_windows = await asyncio.to_thread(
+                preserve_vocal_coverage,
+                refined_vocal_path,
+                primary_vocals_path,
+                stems_dir / "vocals.wav",
+            )
+            log_event(
+                "vocals.coverage_preserved",
+                song_id=song_id,
+                job_id=job_id,
+                fallback_windows=fallback_windows,
+            )
+        except Exception as exc:
+            log_event(
+                "refine.failed_fallback_to_primary_stem",
+                song_id=song_id,
+                job_id=job_id,
+                stem="Vocals",
+                error=str(exc),
+            )
+
+    direct_guitar_path = stems_dir / "guitar-direct.wav"
+    if GUITAR_REFINE_ENABLED and Path(SEPARATOR_BIN).exists():
+        try:
+            await refine_stem(
+                audio_path=audio_path,
+                stems_dir=stems_dir,
+                work_dir=work_dir,
+                song_id=song_id,
+                job_id=job_id,
+                model=GUITAR_REFINE_MODEL,
+                stem_label="Guitar",
+                target_filename=direct_guitar_path.name,
+                checkpoint=checkpoint,
+                checkpoint_stage="guitar_refine_direct",
+                single_stem=True,
+            )
+        except Exception as exc:
+            log_event(
+                "refine.guitar_coverage_model_failed",
+                song_id=song_id,
+                job_id=job_id,
+                error=str(exc),
+            )
+
+    isolated_guitar_path = stems_dir / "other.wav"
+    focus_guitar_path = stems_dir / "guitar-focus.wav"
+    if not (
+        checkpoint.compute_done("guitar_focus")
+        and valid_wav(isolated_guitar_path)
+        and valid_wav(focus_guitar_path)
+    ):
+        if valid_wav(direct_guitar_path):
+            try:
+                quality_report = await asyncio.to_thread(
+                    combine_guitar_candidates,
+                    stems_dir / "guitar.wav",
+                    direct_guitar_path,
+                    isolated_guitar_path,
+                )
+                log_event(
+                    "guitar.quality_candidates_combined",
+                    song_id=song_id,
+                    job_id=job_id,
+                    **quality_report,
+                )
+            except Exception as exc:
+                shutil.copyfile(stems_dir / "guitar.wav", isolated_guitar_path)
+                log_event(
+                    "guitar.combine_failed_using_primary",
+                    song_id=song_id,
+                    job_id=job_id,
+                    error=str(exc),
+                )
+        else:
+            shutil.copyfile(stems_dir / "guitar.wav", isolated_guitar_path)
+
+        await asyncio.to_thread(
+            build_guitar_focus_mix,
+            audio_path,
+            isolated_guitar_path,
+            focus_guitar_path,
+            background_gain=GUITAR_FOCUS_BACKGROUND_GAIN,
+        )
+        checkpoint.mark_compute("guitar_focus")
+    stage_done(stage="refine", song_id=song_id, job_id=job_id, started=refine_started)
 
     assert_job_active(db, job_id, song_id)
 
@@ -1520,7 +1642,11 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     else:
         final_urls = await upload_targets(
             [
-                ("guitar_url", stems_dir / "other.wav", f"stems/{song_id}/other.wav"),
+                (
+                    "guitar_url",
+                    stems_dir / "guitar-focus.wav",
+                    f"stems/{song_id}/guitar-focus.wav",
+                ),
                 ("vocals_url", stems_dir / "vocals.wav", f"stems/{song_id}/vocals.wav"),
             ],
             song_id=song_id,
@@ -1541,20 +1667,20 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "source_model": (
                         VOCAL_REFINE_MODEL
                         if checkpoint.compute_done("vocal_refine")
-                        else DEMUCS_MODEL
+                        else separation_source_model
                     ),
                     "quality_status": "ready",
                     "sort_order": 2,
                 },
                 {
                     "layer_key": "guitars",
-                    "label": "All Guitars",
+                    "label": "Guitar Focus",
                     "instrument": "guitar",
                     "url": final_urls["guitar_url"],
                     "source_model": (
-                        GUITAR_REFINE_MODEL
-                        if checkpoint.compute_done("guitar_refine")
-                        else DEMUCS_MODEL
+                        f"focus:{separation_source_model}+{GUITAR_REFINE_MODEL}"
+                        if checkpoint.compute_done("guitar_refine_direct")
+                        else f"focus:{separation_source_model}"
                     ),
                     "quality_status": "ready",
                     "is_learnable": True,

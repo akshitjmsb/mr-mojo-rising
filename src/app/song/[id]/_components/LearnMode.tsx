@@ -556,7 +556,7 @@ export default function LearnMode({
                             : "border-border-dark text-text-dark"
                         }`}
                       >
-                        {mix === "full" ? "Song" : "Guitar"}
+                        {mix === "full" ? "Song" : "Guitar Focus"}
                       </button>
                     ))}
                   </div>
