@@ -7,13 +7,9 @@ interface Props {
   section: Section;
   sectionLabel: string;
   range: LearningRange;
-  selectionReady: boolean;
-  readyLabel: string;
-  previewPlaying: boolean;
   onChangeSection: () => void;
   onBoundaryChange: (boundary: "start" | "end", value: number) => void;
   onBoundaryCommit: () => void;
-  onPreview: () => void;
 }
 
 function formatPreciseTime(seconds: number) {
@@ -27,13 +23,9 @@ export default function LearningRangePicker({
   section,
   sectionLabel,
   range,
-  selectionReady,
-  readyLabel,
-  previewPlaying,
   onChangeSection,
   onBoundaryChange,
   onBoundaryCommit,
-  onPreview,
 }: Props) {
   return (
     <div className="rounded-[2px] border border-gold/35 bg-bg/45 p-3">
@@ -43,7 +35,8 @@ export default function LearningRangePicker({
             {sectionLabel}
           </p>
           <p className="mt-0.5 font-josefin text-[8px] tracking-[0.08em] text-text-dark">
-            {formatPreciseTime(section.start_time)}–{formatPreciseTime(section.end_time)}
+            {formatPreciseTime(section.start_time)}–
+            {formatPreciseTime(section.end_time)}
           </p>
         </div>
         <button
@@ -113,26 +106,9 @@ export default function LearningRangePicker({
         })}
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-border-dark pt-3">
-        <p className={`font-josefin text-[7px] uppercase tracking-[0.1em] ${selectionReady ? "text-gold" : "text-terracotta"}`}>
-          {selectionReady ? `✓ ${readyLabel}` : "Adjusting selection…"}
-        </p>
-        <p className="font-josefin text-[8px] text-text-dark">
-          {(range.end - range.start).toFixed(1)} sec
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={selectionReady ? onPreview : onBoundaryCommit}
-        className="mt-3 min-h-11 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold"
-      >
-        {selectionReady
-          ? previewPlaying
-            ? "Pause selection"
-            : `Hear ${formatPreciseTime(range.start)}–${formatPreciseTime(range.end)}`
-          : "Apply selection"}
-      </button>
+      <p className="mt-3 border-t border-border-dark pt-3 text-right font-josefin text-[8px] text-text-dark">
+        {(range.end - range.start).toFixed(1)} seconds selected
+      </p>
     </div>
   );
 }

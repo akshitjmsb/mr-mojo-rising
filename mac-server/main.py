@@ -18,6 +18,7 @@ from time import perf_counter
 
 import librosa
 import numpy as np
+import soundfile as sf
 import syncedlyrics
 import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -71,7 +72,7 @@ app.add_middleware(
 API_SECRET = os.environ.get("API_SECRET", "dev-secret")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/tmp/mojo-stems"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v2-vocal-first")
+PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v3-coverage-first")
 
 VENV_PYTHON = str(Path(__file__).resolve().parent / "venv" / "bin" / "python")
 _VENV_YTDLP = Path(VENV_PYTHON).with_name("yt-dlp")
@@ -841,15 +842,88 @@ def extract_title_artist(work_dir: Path) -> tuple[str, str | None]:
             pass
 
     if " - " in title:
-        parts = title.split(" - ", 1)
-        parsed_artist = parts[0].strip()
-        parsed_title = parts[1].strip()
-        if parsed_title:
-            title = parsed_title
-        if parsed_artist and not artist:
-            artist = parsed_artist
+        left, right = (part.strip() for part in title.split(" - ", 1))
+        normalized_artist = "".join((artist or "").casefold().split())
+        normalized_left = "".join(left.casefold().split())
+        normalized_right = "".join(right.casefold().split())
+
+        # YouTube titles commonly use both "Artist - Song" and "Song - Artist".
+        # The uploader is the best free signal for deciding which side is which.
+        if normalized_artist and normalized_right == normalized_artist:
+            title = left or title
+        elif normalized_artist and normalized_left == normalized_artist:
+            title = right or title
+        else:
+            title = right or title
+            if left and not artist:
+                artist = left
 
     return title, artist
+
+
+def preserve_vocal_coverage(
+    clean_path: Path,
+    broad_path: Path,
+    output_path: Path,
+) -> int:
+    """Use the clean vocal unless it drops a phrase retained by Demucs.
+
+    RoFormer is cleaner, while Demucs is deliberately broader. A smoothed
+    second-by-second crossfade gives learners one full vocal layer without
+    making the entire stem noisier. Returns the number of fallback windows.
+    """
+    clean, clean_sr = sf.read(clean_path, always_2d=True, dtype="float32")
+    broad, broad_sr = sf.read(broad_path, always_2d=True, dtype="float32")
+    if clean_sr != broad_sr:
+        raise ValueError("vocal sources use different sample rates")
+
+    length = min(len(clean), len(broad))
+    channels = min(clean.shape[1], broad.shape[1])
+    clean = clean[:length, :channels]
+    broad = broad[:length, :channels]
+    if length == 0:
+        raise ValueError("empty vocal source")
+
+    frame_size = max(1, clean_sr)
+    clean_rms: list[float] = []
+    broad_rms: list[float] = []
+    for start in range(0, length, frame_size):
+        end = min(length, start + frame_size)
+        clean_rms.append(float(np.sqrt(np.mean(clean[start:end] ** 2) + 1e-12)))
+        broad_rms.append(float(np.sqrt(np.mean(broad[start:end] ** 2) + 1e-12)))
+
+    clean_energy = np.asarray(clean_rms)
+    broad_energy = np.asarray(broad_rms)
+    audible = broad_energy[broad_energy > 1e-5]
+    broad_floor = float(np.percentile(audible, 25) * 0.35) if audible.size else 1e-4
+    missing = (broad_energy > max(1e-4, broad_floor)) & (
+        clean_energy < broad_energy * 0.38
+    )
+
+    # Smooth at frame resolution, then interpolate once across the samples.
+    # This avoids a costly sample-by-sample convolution on long songs while
+    # still crossfading cleanly into and out of the broader vocal stem.
+    frame_weights = np.convolve(
+        missing.astype(np.float32),
+        np.asarray([0.15, 0.7, 0.15], dtype=np.float32),
+        mode="same",
+    )
+    frame_centers = (np.arange(len(frame_weights), dtype=np.float32) + 0.5) * frame_size
+    sample_weights = np.interp(
+        np.arange(length, dtype=np.float32),
+        frame_centers,
+        frame_weights,
+        left=float(frame_weights[0]),
+        right=float(frame_weights[-1]),
+    )
+    sample_weights = np.clip(sample_weights, 0.0, 1.0)[:, None]
+
+    combined = clean * (1.0 - sample_weights) + broad * sample_weights
+    peak = float(np.max(np.abs(combined)))
+    if peak > 0.99:
+        combined *= 0.99 / peak
+    sf.write(output_path, combined, clean_sr, subtype="PCM_24")
+    return int(missing.sum())
 
 
 async def run_demucs(audio_path: Path, demucs_out: Path, song_id: str, job_id: str):
@@ -1341,6 +1415,9 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     if (VOCAL_REFINE_ENABLED or GUITAR_REFINE_ENABLED) and Path(SEPARATOR_BIN).exists():
         update_song(song_id, status="processing", processing_stage="refine", last_error=None)
         refine_started = stage_start(stage="refine", song_id=song_id, job_id=job_id)
+        demucs_vocals_path = work_dir / "demucs-vocals.wav"
+        if not valid_wav(demucs_vocals_path):
+            shutil.copyfile(stems_dir / "vocals.wav", demucs_vocals_path)
         # When vocal refinement is enabled, Guitar must only see the
         # vocal-free instrumental. If that prerequisite fails, retain the
         # Demucs guitar/other preview instead of reintroducing vocal bleed by
@@ -1348,7 +1425,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         guitar_input: Path | None = None if VOCAL_REFINE_ENABLED else audio_path
         if VOCAL_REFINE_ENABLED:
             try:
-                await refine_stem(
+                refined_vocal_path = await refine_stem(
                     audio_path=audio_path,
                     stems_dir=stems_dir,
                     work_dir=work_dir,
@@ -1360,6 +1437,18 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     checkpoint=checkpoint,
                     checkpoint_stage="vocal_refine",
                     required_labels=("Instrumental",),
+                )
+                fallback_windows = await asyncio.to_thread(
+                    preserve_vocal_coverage,
+                    refined_vocal_path,
+                    demucs_vocals_path,
+                    stems_dir / "vocals.wav",
+                )
+                log_event(
+                    "vocals.coverage_preserved",
+                    song_id=song_id,
+                    job_id=job_id,
+                    fallback_windows=fallback_windows,
                 )
                 instrumental_outputs = sorted(
                     (work_dir / "refined-vocals").glob("*(Instrumental)*.wav")
@@ -1806,21 +1895,29 @@ def detect_sections(audio_path: str, duration: float) -> list[dict]:
     try:
         y, sr = librosa.load(audio_path, sr=11025, mono=True)
 
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        mfcc = librosa.util.normalize(mfcc, axis=1)
-
-        rec = librosa.segment.recurrence_matrix(
-            mfcc, width=max(1, int(sr * 8 / 512)), mode="affinity", sym=True
+        hop_length = 512
+        mfcc = librosa.feature.mfcc(
+            y=y, sr=sr, n_mfcc=13, hop_length=hop_length
         )
-        novelty = librosa.segment.timelag_filter(np.diff)(rec, axis=1)
-        novelty_curve = np.mean(np.abs(novelty), axis=0)
+        chroma = librosa.feature.chroma_cqt(
+            y=y, sr=sr, hop_length=hop_length
+        )
+        features = librosa.util.normalize(
+            np.vstack([mfcc, chroma]), axis=1
+        )
 
-        kernel_size = max(3, int(sr * 4 / 512) | 1)
+        # A direct feature-change curve is bounded in memory and cannot create
+        # the invalid non-square lag matrix produced by the old diff filter.
+        novelty_curve = np.linalg.norm(np.diff(features, axis=1), axis=0)
+
+        kernel_size = max(3, int(sr * 4 / hop_length) | 1)
         novelty_smooth = np.convolve(novelty_curve, np.hanning(kernel_size), mode="same")
 
         threshold = novelty_smooth.mean() + 0.5 * novelty_smooth.std()
-        frame_times = librosa.frames_to_time(np.arange(len(novelty_smooth)), sr=sr, hop_length=512)
-        min_gap_frames = int(sr * 20 / 512)
+        frame_times = librosa.frames_to_time(
+            np.arange(len(novelty_smooth)), sr=sr, hop_length=hop_length
+        )
+        min_gap_frames = int(sr * 20 / hop_length)
 
         boundaries = [0.0]
         last_peak = -min_gap_frames

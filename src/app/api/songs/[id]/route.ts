@@ -93,12 +93,15 @@ export async function GET(
     [id],
   );
 
-  // Strict-by-default: legacy/model-only rows are not learner-facing. A chord
-  // exists in the product only after the separated-audio truth gate verifies it.
+  // Return the complete audio-derived sequence. Verification remains attached
+  // as provenance so the UI can distinguish strong anchors from best guesses
+  // without turning an uncertain recording into an empty lesson.
   let chords: Chord[] = [];
   try {
     chords = await queryAll<Chord>(
       `SELECT c.*,
+              v.state AS verification_state,
+              v.reason AS verification_reason,
               v.method AS verification_method,
               v.evidence_version,
               v.acoustic_score,
@@ -107,12 +110,12 @@ export async function GET(
               v.bass_support
        FROM chords c
        INNER JOIN chord_verifications v ON v.chord_id = c.id
-       WHERE c.song_id = ? AND v.state = 'verified'
+       WHERE c.song_id = ?
        ORDER BY c.start_time ASC`,
       [id],
     );
   } catch {
-    // Until the additive migration and audio re-analysis run, publish nothing.
+    // Until the additive migration and audio analysis run, no sequence exists.
   }
 
   const lyrics = await queryOne<Lyrics>(
