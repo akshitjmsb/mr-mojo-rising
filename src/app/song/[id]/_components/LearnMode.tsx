@@ -171,32 +171,51 @@ export default function LearnMode({
         : "guitar";
   const section =
     sections.find((item) => item.id === selectedSectionId) ?? null;
-  const sectionOptions = useMemo(
-    () =>
-      sections.map((item, index) => {
-        const sameLabel = sections.filter(
-          (candidate) => candidate.label === item.label,
-        );
-        const occurrence = sections
-          .slice(0, index + 1)
-          .filter((candidate) => candidate.label === item.label).length;
-        return {
-          section: item,
-          label:
-            sameLabel.length > 1
-              ? `${item.label} ${occurrence}`
-              : item.label,
-          leadNoteCount: tabNotes.filter(
-            (note) =>
-              note.role === "lead" &&
-              (note.role_confidence == null || note.role_confidence >= 0.6) &&
-              note.start_time >= item.start_time &&
-              note.start_time < item.end_time,
-          ).length,
-        };
-      }),
-    [sections, tabNotes],
-  );
+  const sectionOptions = useMemo(() => {
+    const options = sections.map((item, index) => {
+      const sameLabel = sections.filter(
+        (candidate) => candidate.label === item.label,
+      );
+      const occurrence = sections
+        .slice(0, index + 1)
+        .filter((candidate) => candidate.label === item.label).length;
+      return {
+        section: item,
+        label:
+          sameLabel.length > 1 ? `${item.label} ${occurrence}` : item.label,
+        leadNoteCount: tabNotes.filter(
+          (note) =>
+            note.role === "lead" &&
+            (note.role_confidence == null || note.role_confidence >= 0.6) &&
+            note.start_time >= item.start_time &&
+            note.start_time < item.end_time,
+        ).length,
+        leadDensity: 0,
+      };
+    });
+    for (const option of options) {
+      const duration = Math.max(
+        1,
+        option.section.end_time - option.section.start_time,
+      );
+      option.leadDensity = option.leadNoteCount / duration;
+    }
+    const strongestLeadIds = new Set(
+      [...options]
+        .filter((option) => option.leadNoteCount >= 3)
+        .sort(
+          (left, right) =>
+            right.leadDensity - left.leadDensity ||
+            right.leadNoteCount - left.leadNoteCount,
+        )
+        .slice(0, Math.max(1, Math.ceil(options.length * 0.25)))
+        .map((option) => option.section.id),
+    );
+    return options.map((option) => ({
+      ...option,
+      isLeadHeavy: strongestLeadIds.has(option.section.id),
+    }));
+  }, [sections, tabNotes]);
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
     "Song part";
@@ -519,9 +538,9 @@ export default function LearnMode({
                       {formatTime(option.section.end_time)}
                     </span>
                     {selectedInstrument === "lead" &&
-                      option.leadNoteCount >= 3 && (
+                      option.isLeadHeavy && (
                         <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.1em] text-gold">
-                          Lead detected
+                          Strong lead
                         </span>
                       )}
                   </button>
