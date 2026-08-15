@@ -83,6 +83,24 @@ test("withholds uncertain guesses without stretching nearby verified chords", ()
   );
 });
 
+test("keeps the strongest withheld candidate as an honest best guess", () => {
+  const guess = chord("guess", 0, 3, "D");
+  guess.confidence = 0.78;
+  guess.verification_state = "withheld";
+  const anchor = chord("anchor", 3, 6, "G");
+  anchor.verification_state = "verified";
+
+  const result = buildRhythmChordChanges([guess, anchor], 0, 6, 0);
+
+  assert.deepEqual(
+    result.map(({ label, verified }) => ({ label, verified })),
+    [
+      { label: "D", verified: false },
+      { label: "G", verified: true },
+    ],
+  );
+});
+
 test("uses the player's chord shapes and removes non-chords", () => {
   const result = buildRhythmChordChanges(
     [chord("rest", 0, 2, "N"), chord("shape", 2, 4, "D")],

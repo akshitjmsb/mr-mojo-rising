@@ -40,7 +40,7 @@ export default function RhythmChordFlow({
   if (changes.length === 0) {
     return (
       <p className="mt-4 border-y border-border-dark py-5 text-center font-josefin text-[9px] text-text-muted">
-        No chord passed audio verification here. Nothing guessed.
+        No clear chord was detected in this selection.
       </p>
     );
   }
@@ -48,7 +48,7 @@ export default function RhythmChordFlow({
   return (
     <div className="mt-4">
       <p className="mb-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-dark">
-        Verified from this recording · no web tabs
+        Best detected chord flow · brighter means stronger
       </p>
       <div
         ref={scrollerRef}
@@ -74,14 +74,25 @@ export default function RhythmChordFlow({
                 type="button"
                 onClick={() => onSeek(change.start)}
                 aria-label={`${change.label} at ${change.start.toFixed(1)} seconds`}
-                className={`absolute inset-y-0 overflow-hidden border-r border-border-dark px-3 text-left transition-colors ${
-                  active ? "bg-gold/10 text-gold" : "bg-transparent text-text-muted"
+                className={`absolute inset-y-0 overflow-hidden border-r px-3 text-left transition-colors ${
+                  change.verified ? "border-border-dark" : "border-border-darkest"
+                } ${
+                  active
+                    ? "bg-gold/10 text-gold"
+                    : change.verified
+                      ? "bg-transparent text-text-muted"
+                      : "bg-transparent text-text-dark"
                 }`}
                 style={{ left: `${left}%`, width: `${width}%` }}
               >
                 <span className="block whitespace-nowrap font-playfair text-[24px] italic leading-none">
                   {change.label}
                 </span>
+                {!change.verified ? (
+                  <span className="mt-1 block font-josefin text-[6px] uppercase tracking-[0.08em] text-text-darkest">
+                    Best guess
+                  </span>
+                ) : null}
               </button>
             );
           })}
