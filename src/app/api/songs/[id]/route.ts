@@ -36,7 +36,7 @@ function legacyStemLayers(stems: Stem | null): StemLayer[] {
     url: string | null;
     learnable: 0 | 1;
   }> = [
-    { key: "guitars", label: "All Guitars", instrument: "guitar", url: stems.guitar_url, learnable: 1 },
+    { key: "guitars", label: "Guitar Focus", instrument: "guitar", url: stems.guitar_url, learnable: 1 },
     { key: "bass", label: "Bass", instrument: "bass", url: stems.bass_url, learnable: 1 },
     { key: "vocals", label: "Vocals", instrument: "vocals", url: stems.vocals_url, learnable: 0 },
     { key: "drums", label: "Drums", instrument: "drums", url: stems.drums_url, learnable: 0 },
