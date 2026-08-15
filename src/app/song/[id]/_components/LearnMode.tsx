@@ -408,12 +408,6 @@ export default function LearnMode({
                       {formatTime(option.section.start_time)}–
                       {formatTime(option.section.end_time)}
                     </span>
-                    {selectedInstrument === "lead" &&
-                      option.leadNoteCount >= 3 && (
-                        <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.1em] text-gold">
-                          Lead detected
-                        </span>
-                      )}
                   </button>
                 ))}
               </div>
@@ -524,6 +518,12 @@ export default function LearnMode({
                       {formatTime(option.section.start_time)}–
                       {formatTime(option.section.end_time)}
                     </span>
+                    {selectedInstrument === "lead" &&
+                      option.leadNoteCount >= 3 && (
+                        <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.1em] text-gold">
+                          Lead detected
+                        </span>
+                      )}
                   </button>
                 ))}
               </div>
