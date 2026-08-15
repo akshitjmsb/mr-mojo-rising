@@ -29,6 +29,8 @@ type PracticeRange = {
 
 type LessonAudioSource =
   | "guitar"
+  | "lead"
+  | "rhythm"
   | "bass"
   | "vocals"
   | "drums"
@@ -140,6 +142,21 @@ export default function LearnMode({
   const selectedLayer = stemLayers.find(
     (layer) => layer.layer_key === selectedLayerKey,
   );
+  const visibleLayers = stemLayers.filter(
+    (layer) => layer.instrument !== "guitar" || layer.role === "all",
+  );
+  const hasLeadFocus = stemLayers.some(
+    (layer) =>
+      layer.instrument === "guitar" &&
+      layer.role === "lead" &&
+      layer.quality_status === "ready",
+  );
+  const hasRhythmFocus = stemLayers.some(
+    (layer) =>
+      layer.instrument === "guitar" &&
+      layer.role === "rhythm" &&
+      layer.quality_status === "ready",
+  );
   const selectedLayerInstrument = selectedLayer?.instrument ?? null;
   const isReferenceLayer = Boolean(
     selectedLayer && selectedLayerInstrument !== "guitar",
@@ -169,9 +186,16 @@ export default function LearnMode({
             sameLabel.length > 1
               ? `${item.label} ${occurrence}`
               : item.label,
+          leadNoteCount: tabNotes.filter(
+            (note) =>
+              note.role === "lead" &&
+              (note.role_confidence == null || note.role_confidence >= 0.6) &&
+              note.start_time >= item.start_time &&
+              note.start_time < item.end_time,
+          ).length,
         };
       }),
-    [sections],
+    [sections, tabNotes],
   );
   const selectedSectionLabel =
     sectionOptions.find((option) => option.section.id === section?.id)?.label ??
@@ -218,7 +242,7 @@ export default function LearnMode({
     );
   }, [chords, learningRange, profile.chord_shape_shift]);
   const rhythmSource: LessonAudioSource =
-    practiceMix === "full" ? "full" : "guitar";
+    practiceMix === "full" ? "full" : hasRhythmFocus ? "rhythm" : "guitar";
   const rhythmPlaybackActive = Boolean(
     learningRange &&
       isPlaying &&
@@ -318,7 +342,7 @@ export default function LearnMode({
             className="mt-4 grid grid-cols-2 gap-2"
             aria-label="Separated audio layers"
           >
-            {stemLayers.map((layer) => (
+            {visibleLayers.map((layer) => (
               <button
                 key={layer.layer_key}
                 type="button"
@@ -384,6 +408,12 @@ export default function LearnMode({
                       {formatTime(option.section.start_time)}–
                       {formatTime(option.section.end_time)}
                     </span>
+                    {selectedInstrument === "lead" &&
+                      option.leadNoteCount >= 3 && (
+                        <span className="mt-1.5 block font-josefin text-[7px] uppercase tracking-[0.1em] text-gold">
+                          Lead detected
+                        </span>
+                      )}
                   </button>
                 ))}
               </div>
@@ -527,6 +557,7 @@ export default function LearnMode({
                   loopStart={loopStart}
                   loopEnd={loopEnd}
                   hasBackingTrack={hasBackingTrack}
+                  focusSource={hasLeadFocus ? "lead" : "guitar"}
                   onPractice={onPractice}
                   onReplay={onReplay}
                   onSeek={onSeek}
@@ -545,7 +576,11 @@ export default function LearnMode({
                             onReplay(
                               learningRange,
                               1,
-                              mix === "full" ? "full" : "guitar",
+                              mix === "full"
+                                ? "full"
+                                : hasRhythmFocus
+                                  ? "rhythm"
+                                  : "guitar",
                             );
                           }
                         }}
@@ -556,7 +591,11 @@ export default function LearnMode({
                             : "border-border-dark text-text-dark"
                         }`}
                       >
-                        {mix === "full" ? "Song" : "Guitar Focus"}
+                        {mix === "full"
+                          ? "Song"
+                          : hasRhythmFocus
+                            ? "Rhythm Focus"
+                            : "Guitar Focus"}
                       </button>
                     ))}
                   </div>

@@ -7,7 +7,7 @@ import { getSongPracticeTuning, positionNotesForTuning } from "@/lib/guitar";
 import { extractLeadNotes } from "@/lib/lead-notes";
 import SoloPhraseTab from "./SoloPhraseTab";
 
-type AudioSource = "guitar" | "backing" | "full";
+type AudioSource = "guitar" | "lead" | "backing" | "full";
 
 interface Props {
   notes: TabNote[];
@@ -18,6 +18,8 @@ interface Props {
   currentSpeed: number;
   currentAudioSource:
     | "guitar"
+    | "lead"
+    | "rhythm"
     | "bass"
     | "vocals"
     | "drums"
@@ -27,6 +29,7 @@ interface Props {
   loopStart: number;
   loopEnd: number;
   hasBackingTrack: boolean;
+  focusSource: "lead" | "guitar";
   onPractice: (
     range: LearningRange,
     speed: number,
@@ -41,12 +44,6 @@ interface Props {
   onPause: () => void;
 }
 
-const SOURCES: Array<{ id: AudioSource; label: string }> = [
-  { id: "guitar", label: "Guitar Focus" },
-  { id: "full", label: "Song" },
-  { id: "backing", label: "Play along" },
-];
-
 export default function LeadNotesTrainer({
   notes,
   selection,
@@ -59,16 +56,25 @@ export default function LeadNotesTrainer({
   loopStart,
   loopEnd,
   hasBackingTrack,
+  focusSource,
   onPractice,
   onReplay,
   onSeek,
   onPause,
 }: Props) {
-  const [selectedSource, setSelectedSource] = useState<AudioSource>("guitar");
+  const [selectedSource, setSelectedSource] = useState<AudioSource>(focusSource);
   const [countIn, setCountIn] = useState<number | null>(null);
   const countInTimersRef = useRef<number[]>([]);
   const countInAudioRef = useRef<AudioContext | null>(null);
   const tuning = getSongPracticeTuning(profile.song_id, profile.tuning_id);
+  const sources: Array<{ id: AudioSource; label: string }> = [
+    {
+      id: focusSource,
+      label: focusSource === "lead" ? "Lead Focus" : "Guitar Focus",
+    },
+    { id: "full", label: "Song" },
+    { id: "backing", label: "Play along" },
+  ];
   const bestNotes = useMemo(() => {
     const inRange = notes.filter(
       (note) =>
@@ -77,12 +83,32 @@ export default function LeadNotesTrainer({
     const stronger = inRange.filter(
       (note) => note.confidence === null || note.confidence >= 0.4,
     );
+    const roleLead = stronger.filter(
+      (note) =>
+        note.role === "lead" &&
+        (note.role_confidence === null ||
+          note.role_confidence === undefined ||
+          note.role_confidence >= 0.6),
+    );
+    if (roleLead.length >= 3) {
+      return positionNotesForTuning(roleLead, profile.tuning_offset);
+    }
     const candidates = stronger.length >= 3 ? stronger : inRange;
     return positionNotesForTuning(
       extractLeadNotes(candidates),
       profile.tuning_offset,
     );
   }, [notes, profile.tuning_offset, selection.end, selection.start]);
+  const hasRoleLead = useMemo(
+    () =>
+      notes.some(
+        (note) =>
+          note.role === "lead" &&
+          note.start_time >= selection.start &&
+          note.start_time < selection.end,
+      ),
+    [notes, selection.end, selection.start],
+  );
   const selectionPlaying =
     isPlaying &&
     Math.abs(loopStart - selection.start) < 0.05 &&
@@ -174,7 +200,7 @@ export default function LeadNotesTrainer({
   return (
     <div className="mt-4 border-t border-border-dark pt-4">
       <div className="grid grid-cols-3 gap-1" aria-label="Practice audio">
-        {SOURCES.map((source) => {
+        {sources.map((source) => {
           const selected = selectedSource === source.id;
           const unavailable = source.id === "backing" && !hasBackingTrack;
           return (
@@ -212,7 +238,7 @@ export default function LeadNotesTrainer({
       <div className="mt-5">
         <div className="mb-2 flex items-end justify-between gap-3">
           <p className="font-playfair text-[18px] italic text-text">
-            AI best take
+            {hasRoleLead ? "Lead notes" : "Best detected take"}
           </p>
           <p className="font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
             {bestNotes.length} detected notes
@@ -233,8 +259,9 @@ export default function LeadNotesTrainer({
           </p>
         )}
         <p className="mt-2 font-josefin text-[7px] leading-relaxed tracking-[0.07em] text-text-darkest">
-          Best detected take. Listen first; the highlighted notes follow at the
-          original tempo.
+          {hasRoleLead
+            ? "Lead notes only · confidence gated"
+            : "Best detected take · no clear lead split in this part"}
         </p>
       </div>
     </div>
