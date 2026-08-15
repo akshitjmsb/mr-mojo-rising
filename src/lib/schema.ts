@@ -83,7 +83,9 @@ export const SCHEMA_STATEMENTS: string[] = [
     midi_pitch INTEGER NOT NULL,
     string_num INTEGER NOT NULL CHECK (string_num BETWEEN 1 AND 6),
     fret INTEGER NOT NULL CHECK (fret BETWEEN 0 AND 24),
-    confidence REAL
+    confidence REAL,
+    role TEXT NOT NULL DEFAULT 'unknown',
+    role_confidence REAL
   )`,
 
   `CREATE TABLE IF NOT EXISTS lyrics (

@@ -38,6 +38,11 @@ from chord_reanalyze import (
     reanalyze_chords as reanalyze_chords_for_song,
 )
 from guitar_quality import build_guitar_focus_mix, combine_guitar_candidates
+from guitar_roles import (
+    ROLE_MASK_VERSION,
+    classify_guitar_roles,
+    render_guitar_role_focus,
+)
 from lyrics_fetch import fetch_duration_matched_lyrics
 from pipeline_cache import PipelineCheckpoint, source_cache_dir, valid_wav
 from tab_transcribe import (
@@ -138,6 +143,10 @@ GUITAR_FOCUS_BACKGROUND_GAIN = min(
     1.0,
     max(0.0, float(os.environ.get("GUITAR_FOCUS_BACKGROUND_GAIN", "0.24"))),
 )
+GUITAR_ROLE_BASE_GAIN = min(
+    1.0,
+    max(0.0, float(os.environ.get("GUITAR_ROLE_BASE_GAIN", "0.30"))),
+)
 # Tab transcription: basic-pitch on the guitar stem → tab_notes rows.
 # Non-fatal — a song without tabs still completes. Thresholds and the CLI
 # path live in tab_transcribe.py (BASIC_PITCH_BIN, TAB_* env vars).
@@ -234,6 +243,7 @@ async def startup_workers():
         guitar_refine_model=GUITAR_REFINE_MODEL,
         primary_separation_model=PRIMARY_SEPARATION_MODEL,
         guitar_focus_background_gain=GUITAR_FOCUS_BACKGROUND_GAIN,
+        guitar_role_base_gain=GUITAR_ROLE_BASE_GAIN,
         separator_bin_exists=Path(SEPARATOR_BIN).exists(),
         separator_use_autocast=SEPARATOR_USE_AUTOCAST,
         pipeline_version=PIPELINE_VERSION,
@@ -1457,7 +1467,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "url": preview_urls["original_url"],
                     "source_model": "source",
                     "quality_status": "ready",
-                    "sort_order": 4,
+                    "sort_order": 6,
                 },
                 {
                     "layer_key": "vocals",
@@ -1466,7 +1476,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "url": preview_urls["vocals_url"],
                     "source_model": separation_source_model,
                     "quality_status": "preview",
-                    "sort_order": 2,
+                    "sort_order": 4,
                 },
                 {
                     "layer_key": "guitars",
@@ -1476,7 +1486,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "source_model": separation_source_model,
                     "quality_status": "preview",
                     "is_learnable": True,
-                    "sort_order": 0,
+                    "sort_order": 2,
                 },
                 {
                     "layer_key": "bass",
@@ -1486,7 +1496,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "source_model": separation_source_model,
                     "quality_status": "ready",
                     "is_learnable": True,
-                    "sort_order": 1,
+                    "sort_order": 3,
                 },
                 {
                     "layer_key": "drums",
@@ -1495,7 +1505,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "url": preview_urls["drums_url"],
                     "source_model": separation_source_model,
                     "quality_status": "ready",
-                    "sort_order": 3,
+                    "sort_order": 5,
                 },
             ],
         )
@@ -1670,7 +1680,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                         else separation_source_model
                     ),
                     "quality_status": "ready",
-                    "sort_order": 2,
+                    "sort_order": 4,
                 },
                 {
                     "layer_key": "guitars",
@@ -1684,7 +1694,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     ),
                     "quality_status": "ready",
                     "is_learnable": True,
-                    "sort_order": 0,
+                    "sort_order": 2,
                 },
             ],
         )
@@ -1705,14 +1715,123 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 song_id=song_id,
                 job_id=job_id,
             )
-            await asyncio.to_thread(write_tab_notes, db, song_id, tab_notes or [])
+            annotated_notes, role_report = await asyncio.to_thread(
+                classify_guitar_roles,
+                tab_notes or [],
+                sf.info(guitar_stem_path).duration,
+            )
+            await asyncio.to_thread(
+                write_tab_notes,
+                db,
+                song_id,
+                annotated_notes,
+            )
             log_event(
                 "pipeline.tabs_detected",
                 song_id=song_id,
                 job_id=job_id,
-                note_count=len(tab_notes or []),
+                note_count=len(annotated_notes),
+                **role_report,
             )
+            if role_report["passed"]:
+                lead_focus_path = stems_dir / "lead-focus.wav"
+                rhythm_focus_path = stems_dir / "rhythm-focus.wav"
+                if not (
+                    checkpoint.compute_done("guitar_roles")
+                    and valid_wav(lead_focus_path)
+                    and valid_wav(rhythm_focus_path)
+                ):
+                    audio_role_report = await run_stage_with_timeout(
+                        asyncio.to_thread(
+                            render_guitar_role_focus,
+                            guitar_stem_path,
+                            annotated_notes,
+                            lead_focus_path,
+                            rhythm_focus_path,
+                            base_gain=GUITAR_ROLE_BASE_GAIN,
+                        ),
+                        timeout_seconds=TAB_TIMEOUT_SECONDS,
+                        label="lead and rhythm focus rendering",
+                        song_id=song_id,
+                        job_id=job_id,
+                    )
+                    if audio_role_report["passed"]:
+                        checkpoint.mark_compute("guitar_roles")
+                else:
+                    audio_role_report = {"passed": True, "checkpoint_reused": True}
+
+                log_event(
+                    "guitar.roles_rendered",
+                    song_id=song_id,
+                    job_id=job_id,
+                    **audio_role_report,
+                )
+                if audio_role_report["passed"]:
+                    role_urls = await upload_targets(
+                        [
+                            (
+                                "lead",
+                                lead_focus_path,
+                                f"stems/{song_id}/lead-focus.wav",
+                            ),
+                            (
+                                "rhythm",
+                                rhythm_focus_path,
+                                f"stems/{song_id}/rhythm-focus.wav",
+                            ),
+                        ],
+                        song_id=song_id,
+                        job_id=job_id,
+                        label="guitar role upload",
+                    )
+                    assert_job_active(db, job_id, song_id)
+                    upsert_stem_layers(
+                        db,
+                        song_id,
+                        [
+                            {
+                                "layer_key": "lead_guitar",
+                                "label": "Lead Focus",
+                                "instrument": "guitar",
+                                "role": "lead",
+                                "url": role_urls["lead"],
+                                "source_model": ROLE_MASK_VERSION,
+                                "quality_status": "ready",
+                                "is_learnable": True,
+                                "sort_order": 0,
+                            },
+                            {
+                                "layer_key": "rhythm_guitar",
+                                "label": "Rhythm Focus",
+                                "instrument": "guitar",
+                                "role": "rhythm",
+                                "url": role_urls["rhythm"],
+                                "source_model": ROLE_MASK_VERSION,
+                                "quality_status": "ready",
+                                "is_learnable": True,
+                                "sort_order": 1,
+                            },
+                        ],
+                    )
+                else:
+                    db.execute(
+                        """DELETE FROM stem_layers
+                           WHERE song_id = ?
+                             AND layer_key IN ('lead_guitar', 'rhythm_guitar')""",
+                        [song_id],
+                    )
+            else:
+                db.execute(
+                    """DELETE FROM stem_layers
+                       WHERE song_id = ? AND layer_key IN ('lead_guitar', 'rhythm_guitar')""",
+                    [song_id],
+                )
         except Exception as exc:
+            db.execute(
+                """DELETE FROM stem_layers
+                   WHERE song_id = ? AND layer_key IN ('lead_guitar', 'rhythm_guitar')""",
+                [song_id],
+            )
             log_event(
                 "pipeline.tabs_failed",
                 song_id=song_id,

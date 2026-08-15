@@ -26,6 +26,8 @@ type PracticeRange = {
 
 type AudioSource =
   | "guitar"
+  | "lead"
+  | "rhythm"
   | "bass"
   | "vocals"
   | "drums"
@@ -176,10 +178,24 @@ export default function SongPlayerPage() {
   }, [songId]);
 
   const lessonReady = isLessonReady(song);
+  const leadFocusUrl = stemLayers.find(
+    (layer) =>
+      layer.instrument === "guitar" &&
+      layer.role === "lead" &&
+      layer.quality_status === "ready",
+  )?.url;
+  const rhythmFocusUrl = stemLayers.find(
+    (layer) =>
+      layer.instrument === "guitar" &&
+      layer.role === "rhythm" &&
+      layer.quality_status === "ready",
+  )?.url;
 
   const audioUrls = useMemo(() => {
     if (!lessonReady) return [];
     if (stemMode === "guitar") return stems?.guitar_url ? [stems.guitar_url] : [];
+    if (stemMode === "lead") return leadFocusUrl ? [leadFocusUrl] : [];
+    if (stemMode === "rhythm") return rhythmFocusUrl ? [rhythmFocusUrl] : [];
     if (stemMode === "bass") return stems?.bass_url ? [stems.bass_url] : [];
     if (stemMode === "vocals") return stems?.vocals_url ? [stems.vocals_url] : [];
     if (stemMode === "drums") return stems?.drums_url ? [stems.drums_url] : [];
@@ -187,7 +203,7 @@ export default function SongPlayerPage() {
     return [stems?.vocals_url, stems?.drums_url, stems?.bass_url].filter(
       (url): url is string => Boolean(url),
     );
-  }, [lessonReady, stemMode, stems]);
+  }, [leadFocusUrl, lessonReady, rhythmFocusUrl, stemMode, stems]);
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
@@ -303,6 +319,12 @@ export default function SongPlayerPage() {
 
   function resolveAudioSource(requestedSource: AudioSource): AudioSource {
     if (requestedSource === "guitar" && !stems?.guitar_url) return "full";
+    if (requestedSource === "lead" && !leadFocusUrl) {
+      return stems?.guitar_url ? "guitar" : "full";
+    }
+    if (requestedSource === "rhythm" && !rhythmFocusUrl) {
+      return stems?.guitar_url ? "guitar" : "full";
+    }
     if (requestedSource === "bass" && !stems?.bass_url) return "full";
     if (requestedSource === "vocals" && !stems?.vocals_url) return "full";
     if (requestedSource === "drums" && !stems?.drums_url) return "full";
