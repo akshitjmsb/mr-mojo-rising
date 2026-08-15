@@ -151,12 +151,6 @@ export default function LearnMode({
       layer.role === "lead" &&
       layer.quality_status === "ready",
   );
-  const hasRhythmFocus = stemLayers.some(
-    (layer) =>
-      layer.instrument === "guitar" &&
-      layer.role === "rhythm" &&
-      layer.quality_status === "ready",
-  );
   const selectedLayerInstrument = selectedLayer?.instrument ?? null;
   const isReferenceLayer = Boolean(
     selectedLayer && selectedLayerInstrument !== "guitar",
@@ -261,7 +255,7 @@ export default function LearnMode({
     );
   }, [chords, learningRange, profile.chord_shape_shift]);
   const rhythmSource: LessonAudioSource =
-    practiceMix === "full" ? "full" : hasRhythmFocus ? "rhythm" : "guitar";
+    practiceMix === "full" ? "full" : "guitar";
   const rhythmPlaybackActive = Boolean(
     learningRange &&
       isPlaying &&
@@ -595,11 +589,7 @@ export default function LearnMode({
                             onReplay(
                               learningRange,
                               1,
-                              mix === "full"
-                                ? "full"
-                                : hasRhythmFocus
-                                  ? "rhythm"
-                                  : "guitar",
+                              mix === "full" ? "full" : "guitar",
                             );
                           }
                         }}
@@ -610,11 +600,7 @@ export default function LearnMode({
                             : "border-border-dark text-text-dark"
                         }`}
                       >
-                        {mix === "full"
-                          ? "Song"
-                          : hasRhythmFocus
-                            ? "Rhythm Focus"
-                            : "Guitar Focus"}
+                        {mix === "full" ? "Song" : "Guitar Focus"}
                       </button>
                     ))}
                   </div>
