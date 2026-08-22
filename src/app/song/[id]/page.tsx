@@ -402,6 +402,31 @@ export default function SongPlayerPage() {
       setIsPlaying(false);
       return;
     }
+
+    if (sameRange && stemMode === nextSource) {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      setSpeed(nextSpeed);
+      const canResume =
+        audio.currentTime > range.start + 0.05 &&
+        audio.currentTime < range.end - 0.05;
+      if (!canResume) {
+        for (const track of audioGroupRef.current) {
+          track.currentTime = range.start;
+        }
+        setCurrentTime(range.start);
+      }
+      for (const track of audioGroupRef.current) {
+        track.playbackRate = nextSpeed;
+      }
+      void playAudioGroup().then(
+        () => setIsPlaying(true),
+        () => setIsPlaying(false),
+      );
+      return;
+    }
+
     playLessonRange(range, nextSpeed, nextSource);
   }
 
