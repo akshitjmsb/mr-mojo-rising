@@ -470,6 +470,8 @@ export default function LearnMode({
                   lyrics={lyrics}
                   currentTime={currentTime}
                   range={activeReferenceRange}
+                  chords={chords}
+                  chordShapeShift={profile.chord_shape_shift}
                   onSeek={onSeek}
                 />
               ) : null}
