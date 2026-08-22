@@ -48,6 +48,8 @@ from guitar_roles import (
     render_guitar_role_focus,
 )
 from lyrics_fetch import fetch_duration_matched_lyrics
+from lyrics_align import DEFAULT_MODEL as DEFAULT_LYRICS_ALIGN_MODEL
+from lyrics_align import align_lyrics_to_vocals
 from pipeline_cache import PipelineCheckpoint, source_cache_dir, valid_wav
 from tab_transcribe import (
     TAB_TIMEOUT_SECONDS,
@@ -59,6 +61,7 @@ from turso_db import (
     claim_next_job,
     complete_worker_command,
     ensure_chord_verifications_table,
+    ensure_lyrics_revisions_table,
     ensure_stem_layers_table,
     ensure_worker_status_table,
     get_client as get_turso_client,
@@ -166,6 +169,16 @@ DEMUCS_TIMEOUT_SECONDS = int(os.environ.get("DEMUCS_TIMEOUT_SECONDS", "2700"))
 UPLOAD_TIMEOUT_SECONDS = int(os.environ.get("UPLOAD_TIMEOUT_SECONDS", "600"))
 ANALYZE_TIMEOUT_SECONDS = int(os.environ.get("ANALYZE_TIMEOUT_SECONDS", "420"))
 LYRICS_TIMEOUT_SECONDS = int(os.environ.get("LYRICS_TIMEOUT_SECONDS", "120"))
+LYRICS_ALIGN_ENABLED = os.environ.get("LYRICS_ALIGN_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+LYRICS_ALIGN_MODEL = os.environ.get("LYRICS_ALIGN_MODEL", DEFAULT_LYRICS_ALIGN_MODEL)
+LYRICS_ALIGN_TIMEOUT_SECONDS = int(
+    os.environ.get("LYRICS_ALIGN_TIMEOUT_SECONDS", "600")
+)
 YTDLP_COOKIES_FROM_BROWSER = os.environ.get("YTDLP_COOKIES_FROM_BROWSER", "").strip()
 WORKER_WARMUP_ENABLED = os.environ.get("WORKER_WARMUP_ENABLED", "true").strip().lower() in {
     "1",
@@ -257,6 +270,9 @@ async def startup_workers():
         upload_timeout_seconds=UPLOAD_TIMEOUT_SECONDS,
         analyze_timeout_seconds=ANALYZE_TIMEOUT_SECONDS,
         lyrics_timeout_seconds=LYRICS_TIMEOUT_SECONDS,
+        lyrics_align_enabled=LYRICS_ALIGN_ENABLED,
+        lyrics_align_model=LYRICS_ALIGN_MODEL,
+        lyrics_align_timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
         ytdlp_cookies_from_browser=YTDLP_COOKIES_FROM_BROWSER or None,
         warmup_enabled=WORKER_WARMUP_ENABLED,
     )
@@ -265,6 +281,7 @@ async def startup_workers():
         asyncio.to_thread(ensure_worker_status_table),
         asyncio.to_thread(ensure_stem_layers_table),
         asyncio.to_thread(ensure_chord_verifications_table),
+        asyncio.to_thread(ensure_lyrics_revisions_table),
     )
     await asyncio.to_thread(update_worker_status, WORKER_ID, "starting")
 
@@ -1956,22 +1973,91 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 song_id=song_id,
                 job_id=job_id,
             )
+            vocal_stem_path = stems_dir / "vocals.wav"
+            if lyrics and LYRICS_ALIGN_ENABLED and valid_wav(vocal_stem_path):
+                try:
+                    aligned_lyrics, alignment_report = await run_stage_with_timeout(
+                        asyncio.to_thread(
+                            align_lyrics_to_vocals,
+                            lyrics,
+                            vocal_stem_path,
+                            model=LYRICS_ALIGN_MODEL,
+                        ),
+                        timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
+                        label="local vocal lyric alignment",
+                        song_id=song_id,
+                        job_id=job_id,
+                    )
+                except Exception as alignment_error:
+                    log_event(
+                        "lyrics.local_alignment_failed",
+                        song_id=song_id,
+                        job_id=job_id,
+                        error=str(alignment_error),
+                    )
+                else:
+                    lyrics = aligned_lyrics
+                    log_event(
+                        "lyrics.local_alignment",
+                        song_id=song_id,
+                        job_id=job_id,
+                        matched_words=alignment_report.matched_words,
+                        total_words=alignment_report.total_words,
+                        aligned_lines=alignment_report.aligned_lines,
+                        total_lines=alignment_report.total_lines,
+                        word_coverage=round(alignment_report.word_coverage, 3),
+                        line_coverage=round(alignment_report.line_coverage, 3),
+                        passed=alignment_report.passed,
+                    )
             if lyrics:
                 existing_lyrics = db.query_one(
-                    "SELECT id FROM lyrics WHERE song_id = ?", [song_id]
+                    "SELECT * FROM lyrics WHERE song_id = ?", [song_id]
                 )
                 if existing_lyrics:
-                    db.execute(
-                        """UPDATE lyrics
-                           SET synced_lrc = ?, plain_text = ?, source = ?
-                           WHERE song_id = ?""",
-                        [
-                            lyrics["synced_lrc"],
-                            lyrics["plain_text"],
-                            lyrics["source"],
-                            song_id,
-                        ],
-                    )
+                    if (
+                        existing_lyrics.get("synced_lrc") != lyrics["synced_lrc"]
+                        or existing_lyrics.get("plain_text") != lyrics["plain_text"]
+                        or existing_lyrics.get("source") != lyrics["source"]
+                    ):
+                        db.execute_batch(
+                            [
+                                (
+                                    """INSERT INTO lyrics_revisions
+                                       (id, song_id, synced_lrc, plain_text, source)
+                                       VALUES (?, ?, ?, ?, ?)""",
+                                    [
+                                        new_id(),
+                                        song_id,
+                                        existing_lyrics.get("synced_lrc"),
+                                        existing_lyrics.get("plain_text"),
+                                        existing_lyrics.get("source") or "unknown",
+                                    ],
+                                ),
+                                (
+                                    """UPDATE lyrics
+                                       SET synced_lrc = ?, plain_text = ?, source = ?
+                                       WHERE song_id = ?""",
+                                    [
+                                        lyrics["synced_lrc"],
+                                        lyrics["plain_text"],
+                                        lyrics["source"],
+                                        song_id,
+                                    ],
+                                ),
+                            ]
+                        )
+                    else:
+                        db.execute(
+                            """UPDATE lyrics
+                               SET synced_lrc = ?, plain_text = ?, source = ?
+                               WHERE song_id = ?""",
+                            [
+                                lyrics["synced_lrc"],
+                                lyrics["plain_text"],
+                                lyrics["source"],
+                                song_id,
+                            ],
+                        )
                 else:
                     db.execute(
                         """INSERT INTO lyrics
