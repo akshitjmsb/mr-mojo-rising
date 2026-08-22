@@ -249,6 +249,25 @@ export default function LearnMode({
       Math.abs(loopEnd - activeReferenceRange.end) < 0.05 &&
       currentAudioSource === selectedLayerAudioSource,
   );
+  const referenceTransportSelected = Boolean(
+    activeReferenceRange &&
+      Math.abs(loopStart - activeReferenceRange.start) < 0.05 &&
+      Math.abs(loopEnd - activeReferenceRange.end) < 0.05 &&
+      currentAudioSource === selectedLayerAudioSource,
+  );
+  const referencePosition = activeReferenceRange
+    ? referenceTransportSelected
+      ? Math.min(
+          activeReferenceRange.end,
+          Math.max(activeReferenceRange.start, currentTime),
+        )
+      : activeReferenceRange.start
+    : 0;
+  const referenceProgress = activeReferenceRange
+    ? ((referencePosition - activeReferenceRange.start) /
+        Math.max(0.001, activeReferenceRange.end - activeReferenceRange.start)) *
+      100
+    : 0;
   const rhythmChordChanges = useMemo(() => {
     if (!learningRange) return [];
     return buildRhythmChordChanges(
@@ -332,7 +351,7 @@ export default function LearnMode({
 
   function toggleReference() {
     if (!activeReferenceRange) return;
-    if (referencePlaybackActive) {
+    if (referenceTransportSelected) {
       onPractice(activeReferenceRange, 1, selectedLayerAudioSource);
     } else {
       onReplay(activeReferenceRange, 1, selectedLayerAudioSource);
@@ -436,8 +455,11 @@ export default function LearnMode({
                   <p className="font-playfair text-[17px] italic text-text">
                     {selectedReferenceLabel}
                   </p>
-                  <p className="mt-1 font-josefin text-[8px] tracking-[0.08em] text-text-dark">
-                    {formatTime(activeReferenceRange.start)}–
+                  <p
+                    className="mt-1 font-josefin text-[8px] tabular-nums tracking-[0.08em] text-text-muted"
+                    aria-live="off"
+                  >
+                    {formatTime(referencePosition)} /{" "}
                     {formatTime(activeReferenceRange.end)}
                   </p>
                 </div>
@@ -460,8 +482,24 @@ export default function LearnMode({
               >
                 {referencePlaybackActive
                   ? "Pause"
-                  : `Play ${selectedReferenceLabel}`}
+                  : referenceTransportSelected &&
+                      referencePosition > activeReferenceRange.start + 0.05
+                    ? "Resume"
+                    : `Play ${selectedReferenceLabel}`}
               </button>
+              <div
+                className="mt-3 h-px overflow-hidden bg-border-dark"
+                role="progressbar"
+                aria-label={`${selectedReferenceLabel} playback progress`}
+                aria-valuemin={activeReferenceRange.start}
+                aria-valuemax={activeReferenceRange.end}
+                aria-valuenow={referencePosition}
+              >
+                <div
+                  className="h-full bg-gold transition-[width] duration-100"
+                  style={{ width: `${referenceProgress}%` }}
+                />
+              </div>
               <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
                 {selectedLayer.label} · original tempo
               </p>
