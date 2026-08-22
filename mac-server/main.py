@@ -1975,31 +1975,40 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             )
             vocal_stem_path = stems_dir / "vocals.wav"
             if lyrics and LYRICS_ALIGN_ENABLED and valid_wav(vocal_stem_path):
-                aligned_lyrics, alignment_report = await run_stage_with_timeout(
-                    asyncio.to_thread(
-                        align_lyrics_to_vocals,
-                        lyrics,
-                        vocal_stem_path,
-                        model=LYRICS_ALIGN_MODEL,
-                    ),
-                    timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
-                    label="local vocal lyric alignment",
-                    song_id=song_id,
-                    job_id=job_id,
-                )
-                lyrics = aligned_lyrics
-                log_event(
-                    "lyrics.local_alignment",
-                    song_id=song_id,
-                    job_id=job_id,
-                    matched_words=alignment_report.matched_words,
-                    total_words=alignment_report.total_words,
-                    aligned_lines=alignment_report.aligned_lines,
-                    total_lines=alignment_report.total_lines,
-                    word_coverage=round(alignment_report.word_coverage, 3),
-                    line_coverage=round(alignment_report.line_coverage, 3),
-                    passed=alignment_report.passed,
-                )
+                try:
+                    aligned_lyrics, alignment_report = await run_stage_with_timeout(
+                        asyncio.to_thread(
+                            align_lyrics_to_vocals,
+                            lyrics,
+                            vocal_stem_path,
+                            model=LYRICS_ALIGN_MODEL,
+                        ),
+                        timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
+                        label="local vocal lyric alignment",
+                        song_id=song_id,
+                        job_id=job_id,
+                    )
+                except Exception as alignment_error:
+                    log_event(
+                        "lyrics.local_alignment_failed",
+                        song_id=song_id,
+                        job_id=job_id,
+                        error=str(alignment_error),
+                    )
+                else:
+                    lyrics = aligned_lyrics
+                    log_event(
+                        "lyrics.local_alignment",
+                        song_id=song_id,
+                        job_id=job_id,
+                        matched_words=alignment_report.matched_words,
+                        total_words=alignment_report.total_words,
+                        aligned_lines=alignment_report.aligned_lines,
+                        total_lines=alignment_report.total_lines,
+                        word_coverage=round(alignment_report.word_coverage, 3),
+                        line_coverage=round(alignment_report.line_coverage, 3),
+                        passed=alignment_report.passed,
+                    )
             if lyrics:
                 existing_lyrics = db.query_one(
                     "SELECT * FROM lyrics WHERE song_id = ?", [song_id]
@@ -2010,29 +2019,45 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                         or existing_lyrics.get("plain_text") != lyrics["plain_text"]
                         or existing_lyrics.get("source") != lyrics["source"]
                     ):
-                        db.execute(
-                            """INSERT INTO lyrics_revisions
-                               (id, song_id, synced_lrc, plain_text, source)
-                               VALUES (?, ?, ?, ?, ?)""",
+                        db.execute_batch(
                             [
-                                new_id(),
+                                (
+                                    """INSERT INTO lyrics_revisions
+                                       (id, song_id, synced_lrc, plain_text, source)
+                                       VALUES (?, ?, ?, ?, ?)""",
+                                    [
+                                        new_id(),
+                                        song_id,
+                                        existing_lyrics.get("synced_lrc"),
+                                        existing_lyrics.get("plain_text"),
+                                        existing_lyrics.get("source") or "unknown",
+                                    ],
+                                ),
+                                (
+                                    """UPDATE lyrics
+                                       SET synced_lrc = ?, plain_text = ?, source = ?
+                                       WHERE song_id = ?""",
+                                    [
+                                        lyrics["synced_lrc"],
+                                        lyrics["plain_text"],
+                                        lyrics["source"],
+                                        song_id,
+                                    ],
+                                ),
+                            ]
+                        )
+                    else:
+                        db.execute(
+                            """UPDATE lyrics
+                               SET synced_lrc = ?, plain_text = ?, source = ?
+                               WHERE song_id = ?""",
+                            [
+                                lyrics["synced_lrc"],
+                                lyrics["plain_text"],
+                                lyrics["source"],
                                 song_id,
-                                existing_lyrics.get("synced_lrc"),
-                                existing_lyrics.get("plain_text"),
-                                existing_lyrics.get("source") or "unknown",
                             ],
                         )
-                    db.execute(
-                        """UPDATE lyrics
-                           SET synced_lrc = ?, plain_text = ?, source = ?
-                           WHERE song_id = ?""",
-                        [
-                            lyrics["synced_lrc"],
-                            lyrics["plain_text"],
-                            lyrics["source"],
-                            song_id,
-                        ],
-                    )
                 else:
                     db.execute(
                         """INSERT INTO lyrics

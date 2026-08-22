@@ -69,7 +69,7 @@ const LyricLineList = memo(function LyricLineList({
                   key={`${word.time}-${wordIndex}`}
                   type="button"
                   onClick={() => onSeek(Math.max(rangeStart, word.time))}
-                  className={`relative cursor-pointer pt-3 text-left transition-colors duration-150 ${
+                  className={`relative min-h-11 cursor-pointer px-1 pt-3 text-left transition-colors duration-150 ${
                     isActiveWord ? "text-gold underline decoration-gold/45 underline-offset-4" : ""
                   }`}
                   aria-label={`Jump to ${word.text}`}
@@ -129,7 +129,10 @@ export default function SyncedLyrics({
       ? candidateIndex
       : -1;
   const activeWordKey = useMemo(() => {
-    for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex--) {
+    if (currentIndex < 0) return null;
+    const firstLine = Math.max(0, currentIndex - 1);
+    const lastLine = Math.min(lines.length - 1, currentIndex + 1);
+    for (let lineIndex = lastLine; lineIndex >= firstLine; lineIndex--) {
       const words = lines[lineIndex].words;
       if (!words) continue;
       for (let wordIndex = words.length - 1; wordIndex >= 0; wordIndex--) {
@@ -143,7 +146,7 @@ export default function SyncedLyrics({
       }
     }
     return null;
-  }, [currentTime, lines]);
+  }, [currentIndex, currentTime, lines]);
   const chordByWordKey = useMemo(() => {
     const timedWords = lines.flatMap((line, lineIndex) =>
       (line.words ?? []).map((word, wordIndex) => ({

@@ -55,6 +55,15 @@ class LyricsAlignTests(unittest.TestCase):
         self.assertIn("[00:04.200]<00:04.200>Woh <00:04.600>Chali", enhanced or "")
         self.assertIn("[00:07.300]<00:07.300>Dekho <00:07.800>Gali", enhanced or "")
 
+    def test_withholds_low_coverage_alignment(self):
+        lines = [CatalogLine(2.0, "one two three four five six")]
+        expected = source_words(lines)
+        heard = [HeardWord("one", "one", 4.2, 4.5, 0.9)]
+        mapping = align_word_sequences(expected, heard)
+        enhanced, report = build_enhanced_lrc(lines, expected, heard, mapping)
+        self.assertFalse(report.passed)
+        self.assertIsNone(enhanced)
+
 
 if __name__ == "__main__":
     unittest.main()
