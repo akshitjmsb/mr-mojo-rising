@@ -60,12 +60,17 @@ def main() -> int:
                     output.write(chunk)
         reference_path = None
         if row.get("original_url"):
-            with requests.get(row["original_url"], stream=True, timeout=120) as response:
-                response.raise_for_status()
-                with original_path.open("wb") as output:
-                    for chunk in response.iter_content(chunk_size=1024 * 1024):
-                        output.write(chunk)
-            reference_path = original_path
+            try:
+                with requests.get(
+                    row["original_url"], stream=True, timeout=120
+                ) as response:
+                    response.raise_for_status()
+                    with original_path.open("wb") as output:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            output.write(chunk)
+                reference_path = original_path
+            except requests.RequestException as error:
+                print(f"Reference audio unavailable; using vocals only: {error}")
         aligned, report = align_lyrics_to_vocals(
             row,
             vocal_path,
