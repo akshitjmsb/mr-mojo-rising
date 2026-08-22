@@ -9,6 +9,41 @@
 export interface LrcLine {
   time: number; // seconds
   text: string;
+  words?: LrcWord[];
+}
+
+export interface LrcWord {
+  time: number;
+  text: string;
+}
+
+const INLINE_TIMESTAMP_REGEX = /<(\d{1,3}):(\d{2})(?:\.(\d{2,3}))?>/g;
+
+function timestampToSeconds(
+  minutes: string,
+  seconds: string,
+  fraction?: string,
+) {
+  const milliseconds = fraction
+    ? parseInt(fraction.padEnd(3, "0"), 10)
+    : 0;
+  return parseInt(minutes, 10) * 60 + parseInt(seconds, 10) + milliseconds / 1000;
+}
+
+function parseInlineWords(value: string): LrcWord[] {
+  const matches = [...value.matchAll(INLINE_TIMESTAMP_REGEX)];
+  return matches.flatMap((match, index) => {
+    const text = value
+      .slice(match.index! + match[0].length, matches[index + 1]?.index ?? value.length)
+      .trim();
+    if (!text) return [];
+    return [
+      {
+        time: timestampToSeconds(match[1], match[2], match[3]),
+        text,
+      },
+    ];
+  });
 }
 
 /**
@@ -16,22 +51,22 @@ export interface LrcLine {
  */
 export function parseLrc(lrc: string): LrcLine[] {
   const lines: LrcLine[] = [];
-  const regex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]\s*(.*)/;
+  const regex = /\[(\d{1,3}):(\d{2})(?:\.(\d{2,3}))?\]\s*(.*)/;
 
   for (const raw of lrc.split("\n")) {
     const match = raw.match(regex);
     if (!match) continue;
 
-    const minutes = parseInt(match[1], 10);
-    const seconds = parseInt(match[2], 10);
-    const ms = match[3] ? parseInt(match[3].padEnd(3, "0"), 10) : 0;
-    const text = match[4].trim();
+    const rawText = match[4].trim();
+    const words = parseInlineWords(rawText);
+    const text = rawText.replaceAll(INLINE_TIMESTAMP_REGEX, "").trim();
 
     if (!text) continue;
 
     lines.push({
-      time: minutes * 60 + seconds + ms / 1000,
+      time: timestampToSeconds(match[1], match[2], match[3]),
       text,
+      words: words.length > 0 ? words : undefined,
     });
   }
 

@@ -96,6 +96,15 @@ export const SCHEMA_STATEMENTS: string[] = [
     source TEXT NOT NULL
   )`,
 
+  `CREATE TABLE IF NOT EXISTS lyrics_revisions (
+    id TEXT PRIMARY KEY,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    synced_lrc TEXT,
+    plain_text TEXT,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+
   `CREATE TABLE IF NOT EXISTS song_practice_profiles (
     song_id TEXT PRIMARY KEY REFERENCES songs(id) ON DELETE CASCADE,
     tuning_id TEXT NOT NULL DEFAULT 'standard',
@@ -170,6 +179,9 @@ export const SCHEMA_STATEMENTS: string[] = [
 
   `CREATE INDEX IF NOT EXISTS tab_notes_song_start_idx
     ON tab_notes (song_id, start_time)`,
+
+  `CREATE INDEX IF NOT EXISTS lyrics_revisions_song_created_idx
+    ON lyrics_revisions (song_id, created_at DESC)`,
 
   `CREATE INDEX IF NOT EXISTS stem_layers_song_sort_idx
     ON stem_layers (song_id, sort_order)`,

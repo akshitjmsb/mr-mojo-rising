@@ -244,6 +244,25 @@ def ensure_stem_layers_table() -> None:
     )
 
 
+def ensure_lyrics_revisions_table() -> None:
+    """Keep every replaced lyric timeline recoverable."""
+    client = get_client()
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS lyrics_revisions (
+           id TEXT PRIMARY KEY,
+           song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+           synced_lrc TEXT,
+           plain_text TEXT,
+           source TEXT NOT NULL,
+           created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS lyrics_revisions_song_created_idx
+           ON lyrics_revisions (song_id, created_at DESC)"""
+    )
+
+
 def ensure_chord_verifications_table() -> None:
     """Create the additive evidence ledger used by the chord truth gate."""
     client = get_client()
