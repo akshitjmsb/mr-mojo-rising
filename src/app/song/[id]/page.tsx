@@ -6,6 +6,7 @@ import SongProcessingProgress from "@/components/SongProcessingProgress";
 import Spinner from "@/components/Spinner";
 import type {
   Chord,
+  Lyrics,
   PracticeProfile,
   Section,
   Song,
@@ -71,6 +72,7 @@ export default function SongPlayerPage() {
   const [stemLayers, setStemLayers] = useState<StemLayer[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [chords, setChords] = useState<Chord[]>([]);
+  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [tabNotes, setTabNotes] = useState<TabNote[]>([]);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile>(() =>
     defaultPracticeProfile(songId),
@@ -107,6 +109,7 @@ export default function SongPlayerPage() {
         setStemLayers(data.stem_layers || []);
         setSections(data.sections || []);
         setChords(data.chords || []);
+        setLyrics(data.lyrics || null);
         setTabNotes(data.tab_notes || []);
         setPracticeProfile(
           normalizePracticeProfile(songId, data.practice_profile),
@@ -466,6 +469,7 @@ export default function SongPlayerPage() {
         stemLayers={stemLayers}
         sections={sections}
         chords={chords}
+        lyrics={lyrics}
         tabNotes={tabNotes}
         bpm={song.bpm}
         hasGuitarStem={Boolean(stems?.guitar_url)}
