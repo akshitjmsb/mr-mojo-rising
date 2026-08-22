@@ -1982,6 +1982,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                             lyrics,
                             vocal_stem_path,
                             model=LYRICS_ALIGN_MODEL,
+                            reference_audio_path=audio_path,
                         ),
                         timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
                         label="local vocal lyric alignment",
