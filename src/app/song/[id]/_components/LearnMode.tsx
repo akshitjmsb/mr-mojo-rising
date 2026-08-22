@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type {
   Chord,
+  Lyrics,
   PracticeProfile,
   Section,
   StemLayer,
@@ -19,6 +20,7 @@ import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
 import RhythmChordFlow from "./RhythmChordFlow";
+import SyncedLyrics from "./SyncedLyrics";
 
 type LearningInstrument = "lead" | "rhythm";
 
@@ -44,6 +46,7 @@ interface Props {
   stemLayers: StemLayer[];
   sections: Section[];
   chords: Chord[];
+  lyrics: Lyrics | null;
   tabNotes: TabNote[];
   bpm: number | null;
   hasGuitarStem: boolean;
@@ -114,6 +117,7 @@ export default function LearnMode({
   stemLayers,
   sections,
   chords,
+  lyrics,
   tabNotes,
   bpm,
   hasGuitarStem,
@@ -461,6 +465,14 @@ export default function LearnMode({
               <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
                 {selectedLayer.label} · original tempo
               </p>
+              {selectedLayerInstrument === "vocals" ? (
+                <SyncedLyrics
+                  lyrics={lyrics}
+                  currentTime={currentTime}
+                  range={activeReferenceRange}
+                  onSeek={onSeek}
+                />
+              ) : null}
             </div>
           )}
         </div>
