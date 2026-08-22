@@ -86,3 +86,34 @@ export function findCurrentLineIndex(lines: LrcLine[], currentTime: number): num
 
   return -1;
 }
+
+/**
+ * Find the active word inside the active lyric line only.
+ *
+ * Enhanced LRC from imperfect alignments can contain a word timestamp that
+ * overlaps a neighboring line. Constraining the lookup prevents a repeated
+ * future line from highlighting before its own line becomes active.
+ */
+export function findActiveWordKey(
+  lines: LrcLine[],
+  currentLineIndex: number,
+  currentTime: number,
+  maxAgeSeconds = 8,
+): string | null {
+  if (currentLineIndex < 0 || currentLineIndex >= lines.length) return null;
+
+  const words = lines[currentLineIndex].words;
+  if (!words) return null;
+
+  for (let wordIndex = words.length - 1; wordIndex >= 0; wordIndex--) {
+    const word = words[wordIndex];
+    if (
+      word.time <= currentTime &&
+      currentTime - word.time <= maxAgeSeconds
+    ) {
+      return `${currentLineIndex}:${wordIndex}`;
+    }
+  }
+
+  return null;
+}

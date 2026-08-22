@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useRef } from "react";
 import type { Chord, Lyrics } from "@/lib/database.types";
 import { transposeChord } from "@/lib/guitar";
 import {
+  findActiveWordKey,
   findCurrentLineIndex,
   parseLrc,
   type LrcLine,
@@ -129,23 +130,12 @@ export default function SyncedLyrics({
       ? candidateIndex
       : -1;
   const activeWordKey = useMemo(() => {
-    if (currentIndex < 0) return null;
-    const firstLine = Math.max(0, currentIndex - 1);
-    const lastLine = Math.min(lines.length - 1, currentIndex + 1);
-    for (let lineIndex = lastLine; lineIndex >= firstLine; lineIndex--) {
-      const words = lines[lineIndex].words;
-      if (!words) continue;
-      for (let wordIndex = words.length - 1; wordIndex >= 0; wordIndex--) {
-        const word = words[wordIndex];
-        if (
-          word.time <= currentTime &&
-          currentTime - word.time <= MAX_ACTIVE_LINE_SECONDS
-        ) {
-          return `${lineIndex}:${wordIndex}`;
-        }
-      }
-    }
-    return null;
+    return findActiveWordKey(
+      lines,
+      currentIndex,
+      currentTime,
+      MAX_ACTIVE_LINE_SECONDS,
+    );
   }, [currentIndex, currentTime, lines]);
   const chordByWordKey = useMemo(() => {
     const timedWords = lines.flatMap((line, lineIndex) =>
