@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
 from rapidfuzz.fuzz import ratio
+from unidecode import unidecode
 
 LINE_TIMESTAMP_RE = re.compile(r"\[(\d{1,3}):(\d{2}(?:\.\d+)?)\]\s*(.*)")
 INLINE_TIMESTAMP_RE = re.compile(r"<\d{1,3}:\d{2}(?:\.\d+)?>")
@@ -26,6 +29,8 @@ MIN_WORD_SIMILARITY = 0.48
 MIN_LINE_COVERAGE = 0.40
 MIN_RESULT_WORD_COVERAGE = 0.55
 MIN_RESULT_LINE_COVERAGE = 0.65
+HIGH_CONFIDENCE_WORD_COVERAGE = 0.85
+HIGH_CONFIDENCE_LINE_COVERAGE = 0.90
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,10 @@ def _timestamp(seconds: float, *, brackets: str = "[]") -> str:
 
 
 def _normalize(value: str) -> str:
+    if any("\u0900" <= character <= "\u097f" for character in value):
+        value = transliterate(value, sanscript.DEVANAGARI, sanscript.ITRANS)
+    else:
+        value = unidecode(value)
     return "".join(character for character in value.casefold() if character.isalnum())
 
 
@@ -262,7 +271,8 @@ def build_enhanced_lrc(
     for expected_index, word in enumerate(expected):
         line_words.setdefault(word.line_index, []).append((expected_index, word))
 
-    output_lines: list[str] = []
+    output_by_line: dict[int, str] = {}
+    line_time_anchors: list[tuple[float, float]] = []
     matched_words = 0
     aligned_lines = 0
     for line_index, line in enumerate(lines):
@@ -294,7 +304,8 @@ def build_enhanced_lrc(
             cursor = word.char_end
         enhanced_parts.append(line.text[cursor:])
         enhanced_words = "".join(enhanced_parts)
-        output_lines.append(f"{_timestamp(times[0])}{enhanced_words}")
+        output_by_line[line_index] = f"{_timestamp(times[0])}{enhanced_words}"
+        line_time_anchors.append((line.time, times[0]))
         matched_words += len(matched)
         aligned_lines += 1
 
@@ -315,7 +326,36 @@ def build_enhanced_lrc(
         line_coverage=line_coverage,
         passed=passed,
     )
-    return ("\n".join(output_lines) if passed else None), report
+    if not passed:
+        return None, report
+
+    def estimated_line_time(catalog_time: float) -> float:
+        before = next(
+            (anchor for anchor in reversed(line_time_anchors) if anchor[0] < catalog_time),
+            None,
+        )
+        after = next(
+            (anchor for anchor in line_time_anchors if anchor[0] > catalog_time),
+            None,
+        )
+        if before and after and after[0] > before[0]:
+            fraction = (catalog_time - before[0]) / (after[0] - before[0])
+            return before[1] + fraction * (after[1] - before[1])
+        if before:
+            return before[1] + catalog_time - before[0]
+        if after:
+            return max(0.0, after[1] - (after[0] - catalog_time))
+        return max(0.0, catalog_time)
+
+    # Never drop lyric content. Lines below the word-confidence threshold stay
+    # visible with a conservative, locally warped line timestamp and no
+    # word-level claims.
+    for line_index, line in enumerate(lines):
+        if line_index not in output_by_line:
+            output_by_line[line_index] = (
+                f"{_timestamp(estimated_line_time(line.time))}{line.text}"
+            )
+    return "\n".join(output_by_line[index] for index in range(len(lines))), report
 
 
 def align_lyrics_to_vocals(
@@ -323,6 +363,7 @@ def align_lyrics_to_vocals(
     vocal_audio_path: str | Path,
     *,
     model: str = DEFAULT_MODEL,
+    reference_audio_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], AlignmentReport]:
     lines = parse_catalog_lines(lyrics)
     expected = source_words(lines)
@@ -335,9 +376,12 @@ def align_lyrics_to_vocals(
     # Keep the bias short. A long repeated-chorus prompt can make Whisper skip
     # the real opening and lock onto a later occurrence of the same refrain.
     prompt = " ".join(line.text for line in lines)[:300]
-    def transcribe(language: str | None = None) -> dict[str, Any]:
+    def transcribe(
+        audio_path: str | Path,
+        language: str | None = None,
+    ) -> dict[str, Any]:
         return mlx_whisper.transcribe(
-            str(vocal_audio_path),
+            str(audio_path),
             path_or_hf_repo=model,
             word_timestamps=True,
             initial_prompt=prompt,
@@ -351,18 +395,48 @@ def align_lyrics_to_vocals(
         mapping = align_word_sequences(expected, heard)
         return build_enhanced_lrc(lines, expected, heard, mapping)
 
-    transcription = transcribe()
+    def is_better(candidate: AlignmentReport, current: AlignmentReport) -> bool:
+        return (candidate.passed, candidate.word_coverage, candidate.line_coverage) > (
+            current.passed,
+            current.word_coverage,
+            current.line_coverage,
+        )
+
+    best_mode = "vocal-auto"
+    transcription = transcribe(vocal_audio_path)
     enhanced_lrc, report = build(transcription)
-    detected_language = str(transcription.get("language") or "")
-    if (
+    reference_path = Path(reference_audio_path) if reference_audio_path else None
+    vocal_path = Path(vocal_audio_path)
+    should_check_reference = (
         not report.passed
-        and detected_language not in {"", "en"}
-        and _mostly_latin(" ".join(line.text for line in lines))
-    ):
-        romanized_lrc, romanized_report = build(transcribe("en"))
-        if romanized_report.word_coverage > report.word_coverage:
-            enhanced_lrc, report = romanized_lrc, romanized_report
-    plain_text = "\n".join(line.text for line in lines)
+        or report.word_coverage < HIGH_CONFIDENCE_WORD_COVERAGE
+        or report.line_coverage < HIGH_CONFIDENCE_LINE_COVERAGE
+    )
+    if should_check_reference and reference_path and reference_path != vocal_path:
+        reference_transcription = transcribe(reference_path)
+        candidate_lrc, candidate_report = build(reference_transcription)
+        if is_better(candidate_report, report):
+            enhanced_lrc, report = candidate_lrc, candidate_report
+            best_mode = "reference-auto"
+
+    # Romanized Hindi and Urdu lyrics are commonly written with inconsistent
+    # spellings. If automatic language detection still fails the gate, retry
+    # the full mix with likely source languages and transliterate Whisper's
+    # native-script words before matching. Stop immediately once quality passes.
+    catalog_is_latin = _mostly_latin(" ".join(line.text for line in lines))
+    if not report.passed and catalog_is_latin:
+        fallback_path = reference_path or vocal_path
+        fallback_mode = "reference" if reference_path else "vocal"
+        for language in ("hi", "ur", "en"):
+            candidate_lrc, candidate_report = build(
+                transcribe(fallback_path, language)
+            )
+            if is_better(candidate_report, report):
+                enhanced_lrc, report = candidate_lrc, candidate_report
+                best_mode = f"{fallback_mode}-{language}"
+            if report.passed:
+                break
+    plain_text = lyrics.get("plain_text") or "\n".join(line.text for line in lines)
     if not enhanced_lrc:
         return {
             "synced_lrc": None,
@@ -376,5 +450,6 @@ def align_lyrics_to_vocals(
         "source": (
             f"local-vocal-align/mlx-whisper-large-v3-turbo"
             f";words={report.word_coverage:.3f};lines={report.line_coverage:.3f}"
+            f";mode={best_mode}"
         ),
     }, report

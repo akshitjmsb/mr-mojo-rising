@@ -22,8 +22,9 @@ def main() -> int:
     args = parser.parse_args()
 
     db = get_client()
+    ensure_lyrics_revisions_table()
     row = db.query_one(
-        """SELECT l.*, s.vocals_url
+        """SELECT l.*, s.vocals_url, s.original_url
            FROM lyrics l
            INNER JOIN stems s ON s.song_id = l.song_id
            WHERE l.song_id = ?""",
@@ -31,15 +32,51 @@ def main() -> int:
     )
     if not row or not row.get("vocals_url"):
         raise SystemExit("Song lyrics or vocal stem not found")
+    current_lyrics = {
+        "synced_lrc": row.get("synced_lrc"),
+        "plain_text": row.get("plain_text"),
+        "source": row.get("source") or "unknown",
+    }
+    if str(row.get("source") or "").startswith("local-vocal-align/"):
+        catalog_revision = db.query_one(
+            """SELECT synced_lrc, plain_text, source
+               FROM lyrics_revisions
+               WHERE song_id = ?
+                 AND source NOT LIKE 'local-vocal-align/%'
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            [args.song_id],
+        )
+        if catalog_revision:
+            row.update(catalog_revision)
 
     with tempfile.TemporaryDirectory(prefix="mojo-lyrics-align-") as temp_dir:
         vocal_path = Path(temp_dir) / "vocals.mp3"
+        original_path = Path(temp_dir) / "original.mp3"
         with requests.get(row["vocals_url"], stream=True, timeout=120) as response:
             response.raise_for_status()
             with vocal_path.open("wb") as output:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     output.write(chunk)
-        aligned, report = align_lyrics_to_vocals(row, vocal_path, model=args.model)
+        reference_path = None
+        if row.get("original_url"):
+            try:
+                with requests.get(
+                    row["original_url"], stream=True, timeout=120
+                ) as response:
+                    response.raise_for_status()
+                    with original_path.open("wb") as output:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            output.write(chunk)
+                reference_path = original_path
+            except requests.RequestException as error:
+                print(f"Reference audio unavailable; using vocals only: {error}")
+        aligned, report = align_lyrics_to_vocals(
+            row,
+            vocal_path,
+            model=args.model,
+            reference_audio_path=reference_path,
+        )
 
     print(json.dumps(report.__dict__, indent=2))
     print(aligned["source"])
@@ -50,7 +87,6 @@ def main() -> int:
         print("Dry run only. Pass --apply after reviewing the quality report.")
         return 0
 
-    ensure_lyrics_revisions_table()
     db.execute_batch(
         [
             (
@@ -60,9 +96,9 @@ def main() -> int:
                 [
                     new_id(),
                     args.song_id,
-                    row.get("synced_lrc"),
-                    row.get("plain_text"),
-                    row.get("source") or "unknown",
+                    current_lyrics["synced_lrc"],
+                    current_lyrics["plain_text"],
+                    current_lyrics["source"],
                 ],
             ),
             (

@@ -8,6 +8,7 @@ from lyrics_align import (
     parse_catalog_lines,
     source_words,
     _mostly_latin,
+    _normalize,
 )
 
 
@@ -15,6 +16,10 @@ class LyricsAlignTests(unittest.TestCase):
     def test_detects_romanized_lyrics(self):
         self.assertTrue(_mostly_latin("jaanay na koi pehchane na koi"))
         self.assertFalse(_mostly_latin("جانے نہ کوئی"))
+
+    def test_normalizes_devanagari_for_romanized_matching(self):
+        self.assertEqual(_normalize("जाने"), "jane")
+        self.assertEqual(_normalize("कोई"), "koi")
 
     def test_parses_catalog_and_removes_existing_inline_tags(self):
         lines = parse_catalog_lines(
@@ -63,6 +68,25 @@ class LyricsAlignTests(unittest.TestCase):
         enhanced, report = build_enhanced_lrc(lines, expected, heard, mapping)
         self.assertFalse(report.passed)
         self.assertIsNone(enhanced)
+
+    def test_preserves_unmatched_line_after_overall_gate_passes(self):
+        lines = [
+            CatalogLine(2.0, "one two"),
+            CatalogLine(4.0, "missing words"),
+            CatalogLine(6.0, "five six"),
+        ]
+        expected = source_words(lines)
+        heard = [
+            HeardWord("one", "one", 3.0, 3.2, 0.9),
+            HeardWord("two", "two", 3.3, 3.6, 0.9),
+            HeardWord("five", "five", 7.0, 7.2, 0.9),
+            HeardWord("six", "six", 7.3, 7.6, 0.9),
+        ]
+        mapping = align_word_sequences(expected, heard)
+        enhanced, report = build_enhanced_lrc(lines, expected, heard, mapping)
+        self.assertTrue(report.passed)
+        self.assertEqual(len((enhanced or "").splitlines()), 3)
+        self.assertIn("missing words", enhanced or "")
 
 
 if __name__ == "__main__":
