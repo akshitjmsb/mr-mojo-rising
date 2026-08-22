@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { Lyrics } from "@/lib/database.types";
-import { findCurrentLineIndex, parseLrc } from "@/lib/lrc-parser";
+import {
+  findCurrentLineIndex,
+  parseLrc,
+  type LrcLine,
+} from "@/lib/lrc-parser";
+
+const MAX_ACTIVE_LINE_SECONDS = 8;
 
 type PlaybackRange = {
   start: number;
@@ -16,6 +22,43 @@ interface Props {
   onSeek: (time: number) => void;
 }
 
+type IndexedLrcLine = LrcLine & { index: number };
+
+const LyricLineList = memo(function LyricLineList({
+  lines,
+  currentIndex,
+  rangeStart,
+  onSeek,
+}: {
+  lines: IndexedLrcLine[];
+  currentIndex: number;
+  rangeStart: number;
+  onSeek: (time: number) => void;
+}) {
+  return lines.map((line) => {
+    const isCurrent = line.index === currentIndex;
+    const distance = Math.abs(line.index - currentIndex);
+    return (
+      <button
+        key={`${line.time}-${line.index}`}
+        type="button"
+        data-lyric-index={line.index}
+        aria-current={isCurrent ? "true" : undefined}
+        onClick={() => onSeek(Math.max(rangeStart, line.time))}
+        className={`block min-h-11 w-full cursor-pointer px-1 py-2 text-left font-josefin leading-relaxed transition-all duration-200 ${
+          isCurrent
+            ? "text-[15px] font-normal text-gold"
+            : distance === 1
+              ? "text-[12px] font-light text-text-secondary"
+              : "text-[11px] font-light text-text-dark"
+        }`}
+      >
+        {line.text}
+      </button>
+    );
+  });
+});
+
 export default function SyncedLyrics({
   lyrics,
   currentTime,
@@ -28,20 +71,27 @@ export default function SyncedLyrics({
     () => (syncedLrc ? parseLrc(syncedLrc) : []),
     [syncedLrc],
   );
-  const currentIndex = findCurrentLineIndex(lines, currentTime);
+  const candidateIndex = findCurrentLineIndex(lines, currentTime);
+  const currentIndex =
+    candidateIndex >= 0 &&
+    currentTime - lines[candidateIndex].time <= MAX_ACTIVE_LINE_SECONDS
+      ? candidateIndex
+      : -1;
   const visibleLines = useMemo(() => {
     if (lines.length === 0) return [];
 
+    const currentAtRangeStart = findCurrentLineIndex(lines, range.start);
+    const hasActiveLineAtRangeStart =
+      currentAtRangeStart >= 0 &&
+      range.start - lines[currentAtRangeStart].time <= MAX_ACTIVE_LINE_SECONDS;
     const firstLineInRange = lines.findIndex(
       (line) => line.time >= range.start && line.time < range.end,
     );
-    if (firstLineInRange < 0) return [];
-
-    const precedingLine = lines[firstLineInRange - 1];
     const firstIndex =
-      precedingLine && range.start - precedingLine.time <= 8
-        ? firstLineInRange - 1
+      hasActiveLineAtRangeStart
+        ? currentAtRangeStart
         : firstLineInRange;
+    if (firstIndex < 0) return [];
 
     return lines
       .map((line, index) => ({ ...line, index }))
@@ -111,28 +161,12 @@ export default function SyncedLyrics({
         className="max-h-64 overflow-y-auto rounded-[2px] border border-border-dark bg-bg/25 px-4 py-7 scroll-smooth"
         aria-label="Synchronized lyrics"
       >
-        {visibleLines.map((line) => {
-          const isCurrent = line.index === currentIndex;
-          const distance = Math.abs(line.index - currentIndex);
-          return (
-            <button
-              key={`${line.time}-${line.index}`}
-              type="button"
-              data-lyric-index={line.index}
-              aria-current={isCurrent ? "true" : undefined}
-              onClick={() => onSeek(Math.max(range.start, line.time))}
-              className={`block min-h-11 w-full cursor-pointer px-1 py-2 text-left font-josefin leading-relaxed transition-all duration-200 ${
-                isCurrent
-                  ? "text-[15px] font-normal text-gold"
-                  : distance === 1
-                    ? "text-[12px] font-light text-text-secondary"
-                    : "text-[11px] font-light text-text-dark"
-              }`}
-            >
-              {line.text}
-            </button>
-          );
-        })}
+        <LyricLineList
+          lines={visibleLines}
+          currentIndex={currentIndex}
+          rangeStart={range.start}
+          onSeek={onSeek}
+        />
       </div>
     </div>
   );
