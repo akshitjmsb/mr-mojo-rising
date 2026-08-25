@@ -231,9 +231,14 @@ export default function LeadNotesTrainer({
         {countIn !== null
           ? `Count in · ${countIn}`
           : selectedSourcePlaying
-            ? "Pause"
-            : "Play at original tempo"}
+            ? "Pause hands-free loop"
+            : "Start hands-free loop"}
       </button>
+      <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+        {selectedSourcePlaying
+          ? "Playing · put the phone down"
+          : "Original tempo · repeats automatically"}
+      </p>
 
       <div className="mt-5">
         <div className="mb-2 flex items-end justify-between gap-3">

@@ -88,6 +88,10 @@ export default function SongPlayerPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioGroupRef = useRef<HTMLAudioElement[]>([]);
   const animFrameRef = useRef<number>(0);
+  const practiceRangeRef = useRef<PracticeRange | null>(null);
+  const currentTimeRef = useRef(0);
+  practiceRangeRef.current = practiceRange;
+  currentTimeRef.current = currentTime;
 
   // Fetch the full song bundle once, then use the lightweight status endpoint
   // while processing. Refresh the large chord/tab payload only when a stage
@@ -228,7 +232,7 @@ export default function SongPlayerPage() {
       audio.preload = "auto";
       audio.playbackRate = speed;
       audio.volume = stemMode === "backing" ? 0.72 : 1;
-      // Slowing down must not drop the pitch — this is a practice tool.
+      // Slowing down must not drop the pitch — this is a learning system.
       audio.preservesPitch = true;
       return audio;
     });
@@ -252,10 +256,31 @@ export default function SongPlayerPage() {
         );
       }
     };
-    const onEnded = () => setIsPlaying(false);
+    // HTML media events continue when animation frames are suspended. This
+    // keeps a practice loop working after the phone is set down or locked.
+    const keepSectionLooping = () => {
+      const range = practiceRangeRef.current;
+      if (!range || leader.currentTime < range.end - 0.05) return;
+      for (const audio of audios) audio.currentTime = range.start;
+      setCurrentTime(range.start);
+    };
+    const onEnded = () => {
+      const range = practiceRangeRef.current;
+      if (!range) {
+        setIsPlaying(false);
+        return;
+      }
+      for (const audio of audios) audio.currentTime = range.start;
+      setCurrentTime(range.start);
+      void Promise.all(audios.map((audio) => audio.play())).then(
+        () => setIsPlaying(true),
+        () => setIsPlaying(false),
+      );
+    };
     for (const audio of audios) {
       audio.addEventListener("loadedmetadata", onLoaded);
     }
+    leader.addEventListener("timeupdate", keepSectionLooping);
     leader.addEventListener("ended", onEnded);
 
     return () => {
@@ -269,6 +294,7 @@ export default function SongPlayerPage() {
         audio.pause();
         audio.src = "";
       }
+      leader.removeEventListener("timeupdate", keepSectionLooping);
       leader.removeEventListener("ended", onEnded);
       audioRef.current = null;
       audioGroupRef.current = [];
@@ -429,6 +455,90 @@ export default function SongPlayerPage() {
 
     playLessonRange(range, nextSpeed, nextSource);
   }
+
+  // Lock-screen and headphone controls are the primary transport once the
+  // learner puts the phone down.
+  useEffect(() => {
+    if (!song || !("mediaSession" in navigator)) return;
+    const mediaSession = navigator.mediaSession;
+    mediaSession.metadata = new MediaMetadata({
+      title: song.title,
+      artist: song.artist || "Mr. Mojo Rising",
+      album: "Guitar practice",
+    });
+
+    const register = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null,
+    ) => {
+      try {
+        mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Some browsers expose Media Session but omit individual actions.
+      }
+    };
+
+    register("play", () => {
+      void Promise.all(audioGroupRef.current.map((audio) => audio.play())).then(
+        () => setIsPlaying(true),
+        () => setIsPlaying(false),
+      );
+    });
+    register("pause", () => {
+      for (const audio of audioGroupRef.current) audio.pause();
+      setIsPlaying(false);
+    });
+    register("seekbackward", (details) => {
+      seekTo(currentTimeRef.current - (details.seekOffset || 5));
+    });
+    register("seekforward", (details) => {
+      seekTo(currentTimeRef.current + (details.seekOffset || 5));
+    });
+    register("previoustrack", () => {
+      seekTo(practiceRangeRef.current?.start ?? 0);
+    });
+
+    return () => {
+      register("play", null);
+      register("pause", null);
+      register("seekbackward", null);
+      register("seekforward", null);
+      register("previoustrack", null);
+    };
+  }, [seekTo, song]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  }, [isPlaying]);
+
+  // When the moving cue is being used as a music stand, keep it visible. A
+  // manual phone lock still works and playback continues through media audio.
+  useEffect(() => {
+    if (!isPlaying || !("wakeLock" in navigator)) return;
+    let wakeLock: WakeLockSentinel | null = null;
+
+    async function acquireWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+      } catch {
+        // Wake Lock is an enhancement; playback must never depend on it.
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && wakeLock?.released) {
+        void acquireWakeLock();
+      }
+    }
+
+    void acquireWakeLock();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      void wakeLock?.release();
+    };
+  }, [isPlaying]);
 
   if (loading) {
     return (
