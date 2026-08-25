@@ -19,6 +19,7 @@ import {
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import LearningRangePicker from "./LearningRangePicker";
 import LeadNotesTrainer from "./LeadNotesTrainer";
+import ListenAndMatch from "./ListenAndMatch";
 import RhythmChordFlow from "./RhythmChordFlow";
 import SyncedLyrics from "./SyncedLyrics";
 
@@ -670,6 +671,14 @@ export default function LearnMode({
                     end={learningRange.end}
                     currentTime={currentTime}
                     onSeek={onSeek}
+                  />
+                  <ListenAndMatch
+                    changes={rhythmChordChanges}
+                    selection={learningRange}
+                    bpm={bpm}
+                    tuningOffset={profile.tuning_offset}
+                    onReplay={onReplay}
+                    onPause={onPause}
                   />
                 </div>
               )}
