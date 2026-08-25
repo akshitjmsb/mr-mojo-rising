@@ -1,7 +1,7 @@
 {
   "name": "Mr. Mojo Rising",
   "short_name": "MojoRising",
-  "description": "Isolate guitar stems from any song. Loop sections. Practice at any speed.",
+  "description": "Choose a song part, hear the guitar clearly, and learn through hands-free loops.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0806",
