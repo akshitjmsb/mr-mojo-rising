@@ -1,13 +1,15 @@
 # Mr. Mojo Rising
 > *"Mr. Mojo Risin'" — The Doors, L.A. Woman, 1971.*
 
-An AI-powered guitar practice studio I built for myself. Drop in any song, get back isolated stems, chords, lyrics, and loopable sections — all on your phone while you play.
+An AI-powered guitar-learning system I built for myself. Drop in any song, get back isolated stems, chords, lyrics, and loopable sections — then put the phone down and play.
 
 ---
 
 ## The Problem
 
 Learning a song from YouTube means: scrubbing, rewinding, missing chord changes, losing the section you needed. I wanted a tool that actually understands the song — and lets me practice it the way I think about it, not the way a video player works.
+
+The interaction rule is simple: make one choice, hear the useful sound immediately, and require no more phone handling while the section repeats.
 
 ## What It Does
 

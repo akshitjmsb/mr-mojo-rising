@@ -28,7 +28,7 @@ export default function Header({ songTitle, songArtist, backHref }: HeaderProps)
             Mr. Mojo Rising
           </h1>
           <p className="mt-1.5 font-josefin text-[9px] font-thin uppercase tracking-[0.28em] text-gold">
-            Guitar Practice Studio
+            Guitar Learning System
           </p>
         </div>
 

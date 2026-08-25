@@ -313,13 +313,22 @@ export default function LearnMode({
   }
 
   function selectSection(nextSection: Section) {
-    setSelectedSectionId(nextSection.id);
-    setLearningRange(
-      defaultLearningRangeForSection(
-        nextSection.start_time,
-        nextSection.end_time,
-      ),
+    const nextRange = defaultLearningRangeForSection(
+      nextSection.start_time,
+      nextSection.end_time,
     );
+    setSelectedSectionId(nextSection.id);
+    setLearningRange(nextRange);
+    onReplay(
+      nextRange,
+      1,
+      selectedInstrument === "lead" && hasLeadFocus ? "lead" : "guitar",
+    );
+  }
+
+  function selectReferencePart(id: string, range: PracticeRange) {
+    setSelectedSectionId(id);
+    onReplay(range, 1, selectedLayerAudioSource);
   }
 
   function changeLearningBoundary(
@@ -418,7 +427,12 @@ export default function LearnMode({
                 {fullReferenceRange && (
                   <button
                     type="button"
-                    onClick={() => setSelectedSectionId(FULL_TRACK_PART_ID)}
+                    onClick={() =>
+                      selectReferencePart(
+                        FULL_TRACK_PART_ID,
+                        fullReferenceRange,
+                      )
+                    }
                     className="min-h-16 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2 text-left"
                   >
                     <span className="block font-playfair text-[17px] italic text-text">
@@ -434,7 +448,12 @@ export default function LearnMode({
                   <button
                     key={option.section.id}
                     type="button"
-                    onClick={() => setSelectedSectionId(option.section.id)}
+                    onClick={() =>
+                      selectReferencePart(option.section.id, {
+                        start: option.section.start_time,
+                        end: option.section.end_time,
+                      })
+                    }
                     className="min-h-16 cursor-pointer rounded-[2px] border border-border-dark bg-bg/30 px-3 py-2 text-left"
                   >
                     <span className="block font-playfair text-[17px] italic text-text">
@@ -501,7 +520,9 @@ export default function LearnMode({
                 />
               </div>
               <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
-                {selectedLayer.label} · original tempo
+                {referencePlaybackActive
+                  ? "Playing · put the phone down"
+                  : `${selectedLayer.label} · loops automatically`}
               </p>
               {selectedLayerInstrument === "vocals" ? (
                 <SyncedLyrics
@@ -662,8 +683,15 @@ export default function LearnMode({
                     aria-pressed={rhythmPlaybackActive}
                     className="mt-3 min-h-12 w-full cursor-pointer rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[10px] uppercase tracking-[0.16em] text-gold"
                   >
-                    {rhythmPlaybackActive ? "Pause" : "Play at original tempo"}
+                    {rhythmPlaybackActive
+                      ? "Pause hands-free loop"
+                      : "Start hands-free loop"}
                   </button>
+                  <p className="mt-2 text-center font-josefin text-[7px] uppercase tracking-[0.1em] text-text-dark">
+                    {rhythmPlaybackActive
+                      ? "Playing · put the phone down"
+                      : "Original tempo · repeats automatically"}
+                  </p>
                   <RhythmChordFlow
                     changes={rhythmChordChanges}
                     start={learningRange.start}
