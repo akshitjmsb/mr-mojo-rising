@@ -54,7 +54,7 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Mr. Mojo Rising — Guitar Learning System",
   description:
-    "Choose a song part, hear the guitar clearly, and learn through hands-free loops.",
+    "Organize separated audio, lyrics, chords, and guitar notes on one accurate synchronized song map.",
   manifest: "/manifest.json",
   icons: {
     icon: [

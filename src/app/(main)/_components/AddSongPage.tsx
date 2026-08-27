@@ -181,10 +181,10 @@ function AddSongPageInner() {
               : next.processing_stage === "separate"
                 ? "This is the intensive step; each instrument is being separated."
                 : next.processing_stage === "preview_upload"
-                  ? "The first separation is saved. Learn Mode stays closed until every step is complete."
+                  ? "The first separation is saved. Song Map stays closed until every step is complete."
                   : next.processing_stage === "refine"
                     ? "The separated instrument layers are being cleaned and refined."
-                    : "Song parts, timing, notes, and chords are being checked before Learn Mode opens.",
+                    : "Song sections, timing, notes, and chords are being checked before Song Map opens.",
           );
         }
       } catch {
@@ -436,7 +436,7 @@ function AddSongPageInner() {
           <p className="font-josefin text-[12px] tracking-[0.06em] text-text-secondary">
             {resolvedExistingSong
               ? resolvedExistingSongReady
-                ? "This song is already available to learn."
+                ? "This song is already mapped."
                 : "This song is already being prepared."
               : "Add this song?"}
           </p>

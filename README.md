@@ -16,7 +16,7 @@ The interaction rule is simple: make one choice, hear the useful sound immediate
 1. **Add Song** — Search by song or artist, or paste a YouTube link. The song gets queued for processing.
 2. **Stem Isolation** — Demucs separates guitar, vocals, drums, and bass.
 3. **Analysis** — Sections detected (intro, verse, chorus), chords identified, lyrics extracted.
-4. **Practice** — Follow Learn Mode from tuning through the solo, with musical phrase loops, a moving six-string tab, plain-language fingering help, and advanced A/B tools when needed. Per-song setup is saved, while personal progress stays on the device.
+4. **Song Map** — Every section, separated layer, lyric, chord change, and lead note shares one master clock. Verified evidence, best guesses, and withheld results remain visibly distinct.
 
 ---
 
