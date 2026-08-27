@@ -1,7 +1,7 @@
 {
   "name": "Mr. Mojo Rising",
   "short_name": "MojoRising",
-  "description": "Choose a song part, hear the guitar clearly, and learn through hands-free loops.",
+  "description": "Organize separated audio, lyrics, chords, and guitar notes on one accurate synchronized song map.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0806",
