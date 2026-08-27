@@ -14,10 +14,8 @@ import type {
   StemLayer,
   TabNote,
 } from "@/lib/database.types";
-import LearnMode from "./_components/LearnMode";
-import {
-  getSongPracticeTuning,
-} from "@/lib/guitar";
+import SongMap from "./_components/SongMap";
+import { getSongPracticeTuning } from "@/lib/guitar";
 import { isLessonReady } from "@/lib/import-progress";
 
 type PracticeRange = {
@@ -321,8 +319,7 @@ export default function SongPlayerPage() {
   const loopStart = practiceRange?.start ?? 0;
   const loopEnd = practiceRange?.end ?? Number.POSITIVE_INFINITY;
 
-  // One learning pipeline means one playback model: the chosen phrase loops
-  // at exactly the source and speed the learner selected.
+  // Every map piece shares one playback model and one master clock.
   const updateTime = useCallback(() => {
     if (!audioRef.current) return;
     const audio = audioRef.current;
@@ -407,11 +404,6 @@ export default function SongPlayerPage() {
       () => setIsPlaying(true),
       () => setIsPlaying(false),
     );
-  }
-
-  function handleBeforeTunerStart() {
-    pauseAudioGroup();
-    setIsPlaying(false);
   }
 
   function handleLessonPractice(
@@ -579,18 +571,18 @@ export default function SongPlayerPage() {
         : song.processing_stage === "separate"
           ? "Separating the recording into individual instrument layers."
           : song.processing_stage === "preview_upload"
-            ? "The first separation is saved. Learn Mode remains closed until every step is complete."
+            ? "The first separation is saved. Song Map remains closed until every step is complete."
             : song.processing_stage === "refine"
               ? "Cleaning and refining every separated instrument layer."
-              : "Checking song parts, timing, notes, and chords before Learn Mode opens.";
+              : "Checking song sections, timing, notes, and chords before Song Map opens.";
 
     return (
       <main className="flex flex-1 flex-col items-center px-6 py-10 text-center">
         <p className="font-playfair text-[22px] font-bold italic text-gold">
-          Preparing your lesson...
+          Building your song map...
         </p>
         <p className="mb-6 mt-2 max-w-[320px] font-josefin text-[10px] leading-relaxed tracking-[0.08em] text-text-muted">
-          Learn Mode will open automatically when the entire song is ready.
+          Song Map will open automatically when every synchronized piece is ready.
         </p>
         <SongProcessingProgress status={song} detail={processingDetail} />
       </main>
@@ -599,29 +591,22 @@ export default function SongPlayerPage() {
 
   return (
     <main className="flex-1 overflow-hidden">
-      <LearnMode
+      <SongMap
         songId={song.id}
         stemLayers={stemLayers}
         sections={sections}
         chords={chords}
         lyrics={lyrics}
         tabNotes={tabNotes}
-        bpm={song.bpm}
-        hasGuitarStem={Boolean(stems?.guitar_url)}
-        hasBackingTrack={Boolean(
-          stems?.vocals_url && stems?.drums_url && stems?.bass_url,
-        )}
         profile={practiceProfile}
         currentTime={currentTime}
         isPlaying={isPlaying}
-        currentSpeed={speed}
         currentAudioSource={stemMode}
         loopStart={loopStart}
         loopEnd={loopEnd}
         onPractice={handleLessonPractice}
         onReplay={playLessonRange}
         onSeek={seekTo}
-        onPause={handleBeforeTunerStart}
       />
     </main>
   );

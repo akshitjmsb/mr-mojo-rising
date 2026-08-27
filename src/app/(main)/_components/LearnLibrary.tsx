@@ -134,7 +134,7 @@ export default function LearnLibrary() {
     <main className="flex-1">
       <div className="px-5 pt-4 pb-2.5">
         <p className="font-playfair text-[22px] italic text-text">
-          Choose a song to learn
+          Your songs
         </p>
         <p className="mt-1 font-josefin text-[9px] uppercase tracking-[0.2em] text-text-muted">
           {loading
