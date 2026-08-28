@@ -79,6 +79,34 @@ if [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
   PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
 fi
 
+# yt-dlp must track YouTube's player changes more closely than the rest of the
+# frozen ML environment. Refresh it at most daily; a network failure is
+# non-fatal because the worker can continue with its last known-good version.
+YTDLP_UPDATE_INTERVAL_SECONDS="${YTDLP_UPDATE_INTERVAL_SECONDS:-86400}"
+YTDLP_STATE_DIR="${YTDLP_STATE_DIR:-$HOME/Library/Application Support/MrMojoRising/state}"
+YTDLP_UPDATE_STAMP="$YTDLP_STATE_DIR/yt-dlp-updated"
+mkdir -p "$YTDLP_STATE_DIR"
+
+stamp_age="$YTDLP_UPDATE_INTERVAL_SECONDS"
+if [ -f "$YTDLP_UPDATE_STAMP" ]; then
+  now_epoch="$(date +%s)"
+  if stamp_epoch="$(stat -f %m "$YTDLP_UPDATE_STAMP" 2>/dev/null)"; then
+    stamp_age="$((now_epoch - stamp_epoch))"
+  elif stamp_epoch="$(stat -c %Y "$YTDLP_UPDATE_STAMP" 2>/dev/null)"; then
+    stamp_age="$((now_epoch - stamp_epoch))"
+  fi
+fi
+
+if [ "$stamp_age" -ge "$YTDLP_UPDATE_INTERVAL_SECONDS" ]; then
+  echo "Refreshing YouTube downloader..."
+  if "$PYTHON_BIN" -m pip install --disable-pip-version-check --quiet --upgrade "yt-dlp[default]"; then
+    touch "$YTDLP_UPDATE_STAMP"
+    echo "YouTube downloader: $($SCRIPT_DIR/venv/bin/yt-dlp --version 2>/dev/null || echo ready)"
+  else
+    echo "Warning: downloader refresh failed; continuing with the installed version."
+  fi
+fi
+
 if [ -z "${DEMUCS_PYTHON:-}" ] && [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
   export DEMUCS_PYTHON="$SCRIPT_DIR/venv/bin/python"
 fi

@@ -71,6 +71,12 @@ from turso_db import (
     update_worker_status,
     write_chord_analysis,
 )
+from youtube_download import (
+    build_download_attempts,
+    discover_javascript_runtime,
+    is_recoverable_download_failure,
+    ytdlp_version,
+)
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
 
@@ -90,6 +96,10 @@ PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v4-guitar-focus")
 VENV_PYTHON = str(Path(__file__).resolve().parent / "venv" / "bin" / "python")
 _VENV_YTDLP = Path(VENV_PYTHON).with_name("yt-dlp")
 YTDLP_BIN = os.environ.get("YTDLP_BIN", str(_VENV_YTDLP) if _VENV_YTDLP.exists() else "yt-dlp")
+YTDLP_AUTO_UPDATE_ON_FAILURE = os.environ.get(
+    "YTDLP_AUTO_UPDATE_ON_FAILURE", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
+YTDLP_PIP_SPEC = os.environ.get("YTDLP_PIP_SPEC", "yt-dlp[default]")
 WORKER_ID = os.environ.get("WORKER_ID", f"mac-worker-{os.getpid()}")
 WORKER_CONCURRENCY = max(1, int(os.environ.get("WORKER_CONCURRENCY", "1")))
 QUEUE_POLL_INTERVAL_SECONDS = float(os.environ.get("QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
@@ -197,6 +207,16 @@ class JobCancelled(RuntimeError):
     """Raised when a running job is deleted or loses its queue lease."""
 
 
+class CommandFailed(RuntimeError):
+    """A subprocess failed and preserved its diagnostic output."""
+
+    def __init__(self, label: str, return_code: int, stderr: str):
+        super().__init__(f"{label} failed (exit {return_code})")
+        self.label = label
+        self.return_code = return_code
+        self.stderr = stderr
+
+
 def stage_start(*, stage: str, song_id: str, job_id: str) -> float:
     started = perf_counter()
     log_event("pipeline.stage_start", stage=stage, song_id=song_id, job_id=job_id)
@@ -240,6 +260,13 @@ class ProcessRequest(BaseModel):
 async def startup_workers():
     global REQUEUE_TASK, WORKER_STATUS_TASK, WORKER_COMMAND_TASK
 
+    js_runtime = discover_javascript_runtime()
+    downloader_version = await asyncio.to_thread(ytdlp_version, YTDLP_BIN)
+    if not js_runtime or not downloader_version:
+        raise RuntimeError(
+            "YouTube downloader is not ready: yt-dlp and Deno 2.3+ or Node 22+ are required"
+        )
+
     log_event(
         "worker.startup",
         worker_id=WORKER_ID,
@@ -274,6 +301,9 @@ async def startup_workers():
         lyrics_align_model=LYRICS_ALIGN_MODEL,
         lyrics_align_timeout_seconds=LYRICS_ALIGN_TIMEOUT_SECONDS,
         ytdlp_cookies_from_browser=YTDLP_COOKIES_FROM_BROWSER or None,
+        ytdlp_version=downloader_version,
+        ytdlp_js_runtime=js_runtime.name,
+        ytdlp_js_runtime_version=js_runtime.version,
         warmup_enabled=WORKER_WARMUP_ENABLED,
     )
 
@@ -326,6 +356,10 @@ async def shutdown_workers():
 
 @app.get("/health")
 async def health():
+    js_runtime, downloader_version = await asyncio.gather(
+        asyncio.to_thread(discover_javascript_runtime),
+        asyncio.to_thread(ytdlp_version, YTDLP_BIN),
+    )
     return {
         "status": "ok",
         "worker_id": WORKER_ID,
@@ -333,6 +367,12 @@ async def health():
         "poll_interval_seconds": QUEUE_POLL_INTERVAL_SECONDS,
         "demucs_device": DEMUCS_DEVICE,
         "demucs_jobs": DEMUCS_JOBS,
+        "downloader": {
+            "ready": bool(js_runtime and downloader_version),
+            "yt_dlp_version": downloader_version,
+            "javascript_runtime": js_runtime.name if js_runtime else None,
+            "javascript_runtime_version": js_runtime.version if js_runtime else None,
+        },
     }
 
 
@@ -356,12 +396,15 @@ async def process_song(req: ProcessRequest):
         db.execute(
             """UPDATE processing_jobs
                SET status = 'queued',
+                   attempt_count = 0,
                    run_after = unixepoch(),
                    last_error = NULL,
                    error_code = NULL,
                    locked_by = NULL,
                    locked_at = NULL,
                    heartbeat_at = NULL,
+                   started_at = NULL,
+                   finished_at = NULL,
                    updated_at = unixepoch()
                WHERE song_id = ?""",
             [req.song_id],
@@ -773,7 +816,7 @@ async def run_cmd(
             return_code=proc.returncode,
             stderr=stderr_str[:1000],
         )
-        raise RuntimeError(f"{label} failed (exit {proc.returncode})")
+        raise CommandFailed(label, proc.returncode, stderr_str)
 
     log_event(
         "pipeline.command_done",
@@ -784,6 +827,96 @@ async def run_cmd(
     )
 
     return stdout, stderr
+
+
+async def download_youtube_audio(
+    *,
+    work_dir: Path,
+    youtube_url: str,
+    song_id: str,
+    job_id: str,
+) -> None:
+    """Download with isolated client fallbacks and one in-job self-repair."""
+    runtime = discover_javascript_runtime()
+    if not runtime:
+        raise RuntimeError("yt-dlp has no supported JavaScript runtime (Deno 2.3+ or Node 22+)")
+
+    attempts = build_download_attempts(
+        ytdlp_bin=YTDLP_BIN,
+        runtime=runtime,
+        output_template=work_dir / "original.%(ext)s",
+        youtube_url=youtube_url,
+        cookies_from_browser=YTDLP_COOKIES_FROM_BROWSER,
+    )
+    refreshed = False
+    last_failure: CommandFailed | None = None
+
+    while True:
+        recoverable = False
+        for attempt in attempts:
+            try:
+                log_event(
+                    "download.attempt",
+                    song_id=song_id,
+                    job_id=job_id,
+                    strategy=attempt.name,
+                    ytdlp_version=ytdlp_version(YTDLP_BIN),
+                    js_runtime=runtime.name,
+                    js_runtime_version=runtime.version,
+                )
+                await run_cmd(
+                    attempt.command,
+                    f"yt-dlp download ({attempt.name})",
+                    song_id,
+                    job_id,
+                    timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
+                )
+                log_event(
+                    "download.succeeded",
+                    song_id=song_id,
+                    job_id=job_id,
+                    strategy=attempt.name,
+                )
+                return
+            except CommandFailed as exc:
+                last_failure = exc
+                recoverable = recoverable or is_recoverable_download_failure(exc.stderr)
+                log_event(
+                    "download.attempt_failed",
+                    song_id=song_id,
+                    job_id=job_id,
+                    strategy=attempt.name,
+                    recoverable=is_recoverable_download_failure(exc.stderr),
+                )
+
+        if not (YTDLP_AUTO_UPDATE_ON_FAILURE and recoverable and not refreshed):
+            if last_failure:
+                raise last_failure
+            raise RuntimeError("All YouTube download strategies failed")
+
+        refreshed = True
+        log_event("download.self_repair_start", song_id=song_id, job_id=job_id)
+        await run_cmd(
+            [
+                VENV_PYTHON,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--upgrade",
+                YTDLP_PIP_SPEC,
+            ],
+            "yt-dlp self-update",
+            song_id,
+            job_id,
+            timeout_seconds=180,
+        )
+        log_event(
+            "download.self_repair_done",
+            song_id=song_id,
+            job_id=job_id,
+            ytdlp_version=ytdlp_version(YTDLP_BIN),
+        )
 
 
 async def run_stage_with_timeout(
@@ -1322,31 +1455,11 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
             stage="download",
         )
     else:
-        download_cmd = [
-            YTDLP_BIN,
-            "--remote-components",
-            "ejs:github",
-            "-x",
-            "--audio-format",
-            "wav",
-            "--audio-quality",
-            "0",
-            "--write-info-json",
-            "--force-overwrites",
-            "-o",
-            str(work_dir / "original.%(ext)s"),
-            "--no-playlist",
-            youtube_url,
-        ]
-        if YTDLP_COOKIES_FROM_BROWSER:
-            download_cmd[1:1] = ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
-
-        await run_cmd(
-            download_cmd,
-            "yt-dlp download",
-            song_id,
-            job_id,
-            timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS,
+        await download_youtube_audio(
+            work_dir=work_dir,
+            youtube_url=youtube_url,
+            song_id=song_id,
+            job_id=job_id,
         )
 
         if not valid_wav(audio_path):
