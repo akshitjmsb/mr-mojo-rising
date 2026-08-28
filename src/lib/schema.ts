@@ -141,6 +141,18 @@ export const SCHEMA_STATEMENTS: string[] = [
     finished_at INTEGER
   )`,
 
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id TEXT PRIMARY KEY,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    notified_at INTEGER,
+    UNIQUE (song_id, endpoint)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS worker_status (
     worker_id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'idle'
@@ -192,6 +204,9 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS processing_jobs_heartbeat_idx
     ON processing_jobs (heartbeat_at)
     WHERE status = 'running'`,
+
+  `CREATE INDEX IF NOT EXISTS push_subscriptions_song_idx
+    ON push_subscriptions (song_id, notified_at)`,
 
   `CREATE INDEX IF NOT EXISTS worker_status_heartbeat_idx
     ON worker_status (heartbeat_at)`,

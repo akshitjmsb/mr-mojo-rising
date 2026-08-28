@@ -21,6 +21,7 @@ import numpy as np
 import soundfile as sf
 import syncedlyrics
 import torch
+import requests
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -100,6 +101,10 @@ YTDLP_AUTO_UPDATE_ON_FAILURE = os.environ.get(
     "YTDLP_AUTO_UPDATE_ON_FAILURE", "true"
 ).strip().lower() in {"1", "true", "yes", "on"}
 YTDLP_PIP_SPEC = os.environ.get("YTDLP_PIP_SPEC", "yt-dlp[default]")
+SONG_READY_WEBHOOK_URL = os.environ.get(
+    "SONG_READY_WEBHOOK_URL",
+    "https://mr-mojo-rising.vercel.app/api/notifications/song-ready",
+).strip()
 WORKER_ID = os.environ.get("WORKER_ID", f"mac-worker-{os.getpid()}")
 WORKER_CONCURRENCY = max(1, int(os.environ.get("WORKER_CONCURRENCY", "1")))
 QUEUE_POLL_INTERVAL_SECONDS = float(os.environ.get("QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
@@ -241,6 +246,23 @@ def log_event(event: str, **fields):
         **fields,
     }
     print(json.dumps(payload, default=str), flush=True)
+
+
+def notify_song_ready(song_id: str) -> dict | None:
+    """Ask the web system to push a ready alert; never owns job success."""
+    if not SONG_READY_WEBHOOK_URL:
+        return None
+    response = requests.post(
+        SONG_READY_WEBHOOK_URL,
+        json={"song_id": song_id},
+        headers={"Authorization": f"Bearer {API_SECRET}"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    try:
+        return response.json()
+    except ValueError:
+        return None
 
 
 async def verify_token(authorization: str = Header(...)):
@@ -631,6 +653,22 @@ async def process_claimed_job(worker_name: str, job: dict):
             processing_stage="complete",
             last_error=None,
         )
+
+        try:
+            notification_result = await asyncio.to_thread(notify_song_ready, song_id)
+            log_event(
+                "notification.song_ready",
+                job_id=job_id,
+                song_id=song_id,
+                result=notification_result,
+            )
+        except Exception as notification_error:
+            log_event(
+                "notification.song_ready_failed",
+                job_id=job_id,
+                song_id=song_id,
+                error=str(notification_error),
+            )
 
         duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         log_event(

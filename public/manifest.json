@@ -1,6 +1,7 @@
 {
   "name": "Mr. Mojo Rising",
   "short_name": "MojoRising",
+  "id": "/",
   "description": "Organize separated audio, lyrics, chords, and guitar notes on one accurate synchronized song map.",
   "start_url": "/",
   "display": "standalone",

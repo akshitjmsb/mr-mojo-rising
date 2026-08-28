@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import SongProcessingProgress from "@/components/SongProcessingProgress";
+import SongReadyNotification from "@/components/SongReadyNotification";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
@@ -338,6 +339,7 @@ function AddSongPageInner() {
             status={importStatus}
             detail={importStatusText}
           />
+          <SongReadyNotification songId={importingSongId} />
           <button
             type="button"
             onClick={handleCancelSubmit}
