@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import SongProcessingProgress from "@/components/SongProcessingProgress";
 import SongReadyNotification from "@/components/SongReadyNotification";
 import type { Song } from "@/lib/database.types";
+import { fetchJson, HttpResponseError } from "@/lib/fetch-json";
 import { isLessonReady } from "@/lib/import-progress";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
 import { useTheme } from "@/lib/theme/ThemeProvider";
@@ -208,6 +209,7 @@ function AddSongPageInner() {
 
     setResolveError("");
     setSearchError("");
+    setSubmitError("");
     setResolved(null);
     setSearchResults([]);
 
@@ -225,21 +227,23 @@ function AddSongPageInner() {
     setSearching(true);
     setSearchResults([]);
     try {
-      const response = await fetch(
+      const data = await fetchJson<{ results?: YouTubeSearchResult[] }>(
         `/api/youtube/search?q=${encodeURIComponent(value)}`,
-        { signal: ctrl.signal },
+        { signal: ctrl.signal, attempts: 2 },
       );
-      const data = await response.json();
-      if (!response.ok) {
-        setSearchError(data.error || "YouTube search failed.");
-        return;
-      }
-      setSearchResults((data.results as YouTubeSearchResult[]) ?? []);
+      setSearchResults(data.results ?? []);
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
-      setSearchError("Could not reach the search service.");
+      setSearchError(
+        err instanceof HttpResponseError
+          ? err.message
+          : "Connection interrupted. Search again.",
+      );
     } finally {
-      setSearching(false);
+      if (lastSearchRef.current === ctrl) {
+        lastSearchRef.current = null;
+        setSearching(false);
+      }
     }
   }
 
@@ -250,17 +254,15 @@ function AddSongPageInner() {
     setImportStatusText("Queued for processing.");
     setImportStatus(null);
     try {
-      const res = await fetch("/api/songs/import", {
+      const data = await fetchJson<{
+        id: string;
+        status?: Song["status"];
+      }>("/api/songs/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ youtube_url }),
+        attempts: 3,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setSubmitError(data.error || "Failed to queue song.");
-        setSubmitting(false);
-        return;
-      }
       const songId = data.id as string;
       const initialStatus: Song["status"] =
         data.status === "ready"
@@ -278,8 +280,12 @@ function AddSongPageInner() {
       });
       importingSongIdRef.current = songId;
       setImportingSongId(songId);
-    } catch {
-      setSubmitError("Could not connect to the server.");
+    } catch (error) {
+      setSubmitError(
+        error instanceof HttpResponseError
+          ? error.message
+          : "Connection interrupted. Tap the song to try again.",
+      );
       setSubmitting(false);
     }
   }
@@ -371,7 +377,12 @@ function AddSongPageInner() {
           <input
             type="search"
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              setInput(event.target.value);
+              setResolveError("");
+              setSearchError("");
+              setSubmitError("");
+            }}
             placeholder="Patience Guns N’ Roses, or paste a link"
             inputMode="search"
             enterKeyHint={looksLikeUrl(input) ? "go" : "search"}
