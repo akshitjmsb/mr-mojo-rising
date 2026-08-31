@@ -593,6 +593,7 @@ export default function SongPlayerPage() {
     <main className="flex-1 overflow-hidden">
       <SongMap
         songId={song.id}
+        songTitle={song.title}
         stemLayers={stemLayers}
         sections={sections}
         chords={chords}

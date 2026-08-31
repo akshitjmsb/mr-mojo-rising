@@ -16,6 +16,7 @@ import {
 import { extractLeadNotes } from "@/lib/lead-notes";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import RhythmChordFlow from "./RhythmChordFlow";
+import SelectionDownloadButton from "./SelectionDownloadButton";
 import SoloPhraseTab from "./SoloPhraseTab";
 import SyncedLyrics from "./SyncedLyrics";
 
@@ -37,12 +38,14 @@ type MapPiece = {
   source: AudioSource;
   kind: MapKind;
   status: "Ready" | "Mapped" | "Synced" | "Best available";
+  downloadLayerKey: string;
 };
 
 type TimeRange = { start: number; end: number };
 
 interface Props {
   songId: string;
+  songTitle: string;
   stemLayers: StemLayer[];
   sections: Section[];
   chords: Chord[];
@@ -91,6 +94,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
         source: "lead",
         kind: "notes",
         status: layer.quality_status === "ready" ? "Mapped" : "Best available",
+        downloadLayerKey: layer.layer_key,
       };
     }
     if (layer.role === "rhythm") {
@@ -100,6 +104,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
         source: "rhythm",
         kind: "chords",
         status: layer.quality_status === "ready" ? "Mapped" : "Best available",
+        downloadLayerKey: layer.layer_key,
       };
     }
     if (layer.role === "all") {
@@ -109,6 +114,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
         source: "guitar",
         kind: "audio",
         status: layer.quality_status === "ready" ? "Ready" : "Best available",
+        downloadLayerKey: layer.layer_key,
       };
     }
     return null;
@@ -121,6 +127,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
       source: "vocals",
       kind: "lyrics",
       status: layer.quality_status === "ready" ? "Synced" : "Best available",
+      downloadLayerKey: layer.layer_key,
     };
   }
   if (layer.instrument === "bass") {
@@ -130,6 +137,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
       source: "bass",
       kind: "audio",
       status: layer.quality_status === "ready" ? "Ready" : "Best available",
+      downloadLayerKey: layer.layer_key,
     };
   }
   if (layer.instrument === "drums") {
@@ -139,6 +147,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
       source: "drums",
       kind: "audio",
       status: layer.quality_status === "ready" ? "Ready" : "Best available",
+      downloadLayerKey: layer.layer_key,
     };
   }
   if (layer.instrument === "full") {
@@ -148,6 +157,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
       source: "full",
       kind: "overview",
       status: layer.quality_status === "ready" ? "Ready" : "Best available",
+      downloadLayerKey: layer.layer_key,
     };
   }
   return null;
@@ -155,6 +165,7 @@ function pieceFromLayer(layer: StemLayer): MapPiece | null {
 
 export default function SongMap({
   songId,
+  songTitle,
   stemLayers,
   sections,
   chords,
@@ -193,6 +204,7 @@ export default function SongMap({
         source: "guitar",
         kind: "notes",
         status: "Best available",
+        downloadLayerKey: combinedGuitar.key,
       });
     }
     if (
@@ -206,6 +218,7 @@ export default function SongMap({
         source: "guitar",
         kind: "chords",
         status: "Best available",
+        downloadLayerKey: combinedGuitar.key,
       });
     }
     return directPieces.sort(
@@ -479,14 +492,26 @@ export default function SongMap({
             {formatTime(position)}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={togglePlayback}
-          aria-pressed={playbackActive}
-          className="mt-3 min-h-12 w-full rounded-[2px] border border-gold bg-gold/10 px-4 font-josefin text-[9px] uppercase tracking-[0.15em] text-gold"
-        >
-          {playbackActive ? "Pause" : `Play ${selectedPiece.label}`}
-        </button>
+        <div className="mt-3 grid grid-cols-[1.35fr_1fr] gap-2">
+          <button
+            type="button"
+            onClick={togglePlayback}
+            aria-pressed={playbackActive}
+            className="min-h-12 rounded-[2px] border border-gold bg-gold/10 px-3 font-josefin text-[9px] uppercase tracking-[0.13em] text-gold"
+          >
+            {playbackActive ? "Pause" : "Play selection"}
+          </button>
+          <SelectionDownloadButton
+            key={`${selectedPiece.downloadLayerKey}:${range.start}:${range.end}`}
+            songId={songId}
+            songTitle={songTitle}
+            layerKey={selectedPiece.downloadLayerKey}
+            pieceLabel={selectedPiece.label}
+            sectionLabel={sectionLabel}
+            start={range.start}
+            end={range.end}
+          />
+        </div>
         <div
           className="mt-3 h-px overflow-hidden bg-border-dark"
           role="progressbar"
