@@ -1,18 +1,19 @@
 import { list } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { queryOne } from "@/lib/queries";
+import { summarizeBlobStorage } from "@/lib/storage-usage";
 
 const HOBBY_STORAGE_LIMIT_BYTES = 1_000_000_000;
 const MAX_LIST_PAGES = 100;
 
-async function blobStorageBytes() {
-  let total = 0;
+async function blobStorageInventory() {
+  const blobs: Array<{ pathname: string; size: number }> = [];
   let cursor: string | undefined;
 
   for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
     const result = await list({ limit: 1_000, cursor });
-    for (const blob of result.blobs) total += blob.size;
-    if (!result.hasMore || !result.cursor) return total;
+    blobs.push(...result.blobs);
+    if (!result.hasMore || !result.cursor) return summarizeBlobStorage(blobs);
     cursor = result.cursor;
   }
 
@@ -25,10 +26,11 @@ export async function GET() {
       `SELECT COUNT(*) AS count FROM songs
        WHERE status = 'ready' AND processing_stage = 'complete'`,
     );
-    const [usedBytes, songRow] = await Promise.all([
-      blobStorageBytes(),
+    const [inventory, songRow] = await Promise.all([
+      blobStorageInventory(),
       songsPromise,
     ]);
+    const usedBytes = inventory.totalBytes;
     const songCount = Number(songRow?.count ?? 0);
     const averageSongBytes = songCount > 0 ? usedBytes / songCount : 0;
     const remainingBytes = Math.max(0, HOBBY_STORAGE_LIMIT_BYTES - usedBytes);
@@ -45,6 +47,7 @@ export async function GET() {
         song_count: songCount,
         average_song_bytes: Math.round(averageSongBytes),
         estimated_songs_remaining: estimatedSongsRemaining,
+        song_bytes: inventory.songBytes,
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

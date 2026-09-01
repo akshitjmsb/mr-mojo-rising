@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { del } from "@vercel/blob";
+import { del, list } from "@vercel/blob";
 import { execute, queryAll, queryOne } from "@/lib/queries";
 import type {
   Chord,
@@ -36,30 +36,80 @@ function legacyStemLayers(stems: Stem | null): StemLayer[] {
     url: string | null;
     learnable: 0 | 1;
   }> = [
-    { key: "guitars", label: "Guitar Focus", instrument: "guitar", url: stems.guitar_url, learnable: 1 },
-    { key: "bass", label: "Bass", instrument: "bass", url: stems.bass_url, learnable: 1 },
-    { key: "vocals", label: "Vocals", instrument: "vocals", url: stems.vocals_url, learnable: 0 },
-    { key: "drums", label: "Drums", instrument: "drums", url: stems.drums_url, learnable: 0 },
-    { key: "full", label: "Full Song", instrument: "full", url: stems.original_url, learnable: 0 },
+    {
+      key: "guitars",
+      label: "Guitar Focus",
+      instrument: "guitar",
+      url: stems.guitar_url,
+      learnable: 1,
+    },
+    {
+      key: "bass",
+      label: "Bass",
+      instrument: "bass",
+      url: stems.bass_url,
+      learnable: 1,
+    },
+    {
+      key: "vocals",
+      label: "Vocals",
+      instrument: "vocals",
+      url: stems.vocals_url,
+      learnable: 0,
+    },
+    {
+      key: "drums",
+      label: "Drums",
+      instrument: "drums",
+      url: stems.drums_url,
+      learnable: 0,
+    },
+    {
+      key: "full",
+      label: "Full Song",
+      instrument: "full",
+      url: stems.original_url,
+      learnable: 0,
+    },
   ];
   return definitions.flatMap((definition, sortOrder) =>
     definition.url
-      ? [{
-          id: `legacy-${definition.key}`,
-          song_id: stems.song_id,
-          layer_key: definition.key,
-          label: definition.label,
-          instrument: definition.instrument,
-          role: "all",
-          url: definition.url,
-          source_model: null,
-          quality_status: "ready" as const,
-          is_learnable: definition.learnable,
-          sort_order: sortOrder,
-          updated_at: 0,
-        }]
+      ? [
+          {
+            id: `legacy-${definition.key}`,
+            song_id: stems.song_id,
+            layer_key: definition.key,
+            label: definition.label,
+            instrument: definition.instrument,
+            role: "all",
+            url: definition.url,
+            source_model: null,
+            quality_status: "ready" as const,
+            is_learnable: definition.learnable,
+            sort_order: sortOrder,
+            updated_at: 0,
+          },
+        ]
       : [],
   );
+}
+
+async function listSongBlobUrls(songId: string) {
+  const urls: string[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 100; page += 1) {
+    const result = await list({
+      prefix: `stems/${songId}/`,
+      limit: 1_000,
+      cursor,
+    });
+    urls.push(...result.blobs.map((blob) => blob.url));
+    if (!result.hasMore || !result.cursor) return urls;
+    cursor = result.cursor;
+  }
+
+  throw new Error("Song blob listing exceeded the safety page limit.");
 }
 
 export async function GET(
@@ -223,6 +273,27 @@ export async function DELETE(
     // The legacy stems row still covers blob cleanup before migration.
   }
 
+  const referencedUrls = stems
+    ? [
+        stems.original_url,
+        stems.guitar_url,
+        stems.vocals_url,
+        stems.drums_url,
+        stems.bass_url,
+        ...stemLayers.map((layer) => layer.url),
+      ].filter(
+        (url): url is string => typeof url === "string" && url.length > 0,
+      )
+    : [];
+  let storedUrls: string[] = [];
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      storedUrls = await listSongBlobUrls(id);
+    } catch (err) {
+      console.error("Failed to list all song blob files", err);
+    }
+  }
+
   // Delete the database row first. Its cascading job deletion causes the Mac
   // worker to release the lease and terminate any expensive subprocess.
   try {
@@ -235,15 +306,8 @@ export async function DELETE(
     );
   }
 
-  if (stems && process.env.BLOB_READ_WRITE_TOKEN) {
-    const urls = [
-      stems.original_url,
-      stems.guitar_url,
-      stems.vocals_url,
-      stems.drums_url,
-      stems.bass_url,
-      ...stemLayers.map((layer) => layer.url),
-    ].filter((u): u is string => typeof u === "string" && u.length > 0);
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const urls = [...new Set([...referencedUrls, ...storedUrls])];
 
     if (urls.length > 0) {
       try {

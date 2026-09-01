@@ -9,14 +9,16 @@ export type StorageUsage = {
   song_count: number;
   average_song_bytes: number;
   estimated_songs_remaining: number | null;
+  song_bytes: Record<string, number>;
 };
 
 type Props = {
   refreshKey: number;
   mode: "usage" | "capacity";
+  onUsage?: (usage: StorageUsage) => void;
 };
 
-export default function StorageMeter({ refreshKey, mode }: Props) {
+export default function StorageMeter({ refreshKey, mode, onUsage }: Props) {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
 
   useEffect(() => {
@@ -24,7 +26,10 @@ export default function StorageMeter({ refreshKey, mode }: Props) {
     void fetch("/api/storage", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((nextUsage: StorageUsage | null) => {
-        if (!cancelled && nextUsage) setUsage(nextUsage);
+        if (!cancelled && nextUsage) {
+          setUsage(nextUsage);
+          onUsage?.(nextUsage);
+        }
       })
       .catch(() => {
         // Capacity context must never block the catalog.
@@ -32,7 +37,7 @@ export default function StorageMeter({ refreshKey, mode }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [onUsage, refreshKey]);
 
   if (!usage) return null;
 

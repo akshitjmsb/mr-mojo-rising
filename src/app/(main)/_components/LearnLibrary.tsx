@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
 import { groupSongsByArtist } from "@/lib/song-catalog";
-import StorageMeter from "./StorageMeter";
+import StorageMeter, { type StorageUsage } from "./StorageMeter";
 
 type LearnSong = Song & {
   worker_online_count?: number;
@@ -20,6 +20,11 @@ function pendingLabel(song: LearnSong, workerOnline: boolean) {
   return "Failed";
 }
 
+function songSize(bytes: number | undefined) {
+  if (!bytes) return null;
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
 export default function LearnLibrary() {
   const router = useRouter();
   const [songs, setSongs] = useState<LearnSong[]>([]);
@@ -30,6 +35,7 @@ export default function LearnLibrary() {
   const [activeSongId, setActiveSongId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [storageRefreshKey, setStorageRefreshKey] = useState(0);
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
 
   const fetchSongs = useCallback(async () => {
     try {
@@ -161,7 +167,11 @@ export default function LearnLibrary() {
         )}
       </div>
 
-      <StorageMeter refreshKey={storageRefreshKey} mode="usage" />
+      <StorageMeter
+        refreshKey={storageRefreshKey}
+        mode="usage"
+        onUsage={setStorageUsage}
+      />
 
       <div className="pb-4">
         {artistGroups.map((group, groupIndex) => {
@@ -181,6 +191,7 @@ export default function LearnLibrary() {
                 const workerOnline = (song.worker_online_count ?? 0) > 0;
                 const playable = isLessonReady(song);
                 const actionsOpen = activeSongId === song.id;
+                const storedSize = songSize(storageUsage?.song_bytes[song.id]);
 
                 return (
                   <div
@@ -212,6 +223,12 @@ export default function LearnLibrary() {
                         }`}
                       >
                         {pendingLabel(song, workerOnline)}
+                      </p>
+                    )}
+
+                    {!actionsOpen && storedSize && (
+                      <p className="shrink-0 pl-2 font-josefin text-[7px] tabular-nums uppercase tracking-[0.08em] text-text-dark">
+                        {storedSize}
                       </p>
                     )}
 
@@ -251,9 +268,9 @@ export default function LearnLibrary() {
                         );
                         setConfirmDeleteId(null);
                       }}
-                      className="flex h-11 w-9 shrink-0 cursor-pointer items-center justify-end border-none bg-transparent font-josefin text-[13px] tracking-[0.12em] text-text-dark"
+                      className="flex h-11 w-7 shrink-0 cursor-pointer items-center justify-end border-none bg-transparent font-josefin text-[15px] text-text-dark"
                     >
-                      ···
+                      ⋮
                     </button>
                   </div>
                 );
