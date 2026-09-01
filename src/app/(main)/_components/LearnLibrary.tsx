@@ -13,6 +13,13 @@ type LearnSong = Song & {
   preview_ready?: number;
 };
 
+function pendingLabel(song: LearnSong, workerOnline: boolean) {
+  if (song.status === "processing") return "Processing";
+  if (song.status === "ready") return "Finalizing";
+  if (song.status === "queued") return workerOnline ? "Queued" : "Mac offline";
+  return "Failed";
+}
+
 export default function LearnLibrary() {
   const router = useRouter();
   const [songs, setSongs] = useState<LearnSong[]>([]);
@@ -20,6 +27,7 @@ export default function LearnLibrary() {
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const [retryingSongId, setRetryingSongId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [activeSongId, setActiveSongId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [storageRefreshKey, setStorageRefreshKey] = useState(0);
 
@@ -48,8 +56,6 @@ export default function LearnLibrary() {
     (song) => song.status !== "failed" && !isLessonReady(song),
   );
 
-  // Poll only while work is active, and schedule the next request after the
-  // current one finishes so slow network calls never overlap.
   useEffect(() => {
     if (!hasActiveSongs) return;
     let cancelled = false;
@@ -67,18 +73,18 @@ export default function LearnLibrary() {
     };
   }, [fetchSongs, hasActiveSongs]);
 
-  // Reset delete confirmation when tapping outside that song row
   useEffect(() => {
-    if (!confirmDeleteId) return;
+    if (!activeSongId) return;
     function onPointerDown(e: PointerEvent) {
       const target = e.target as HTMLElement | null;
-      if (!target?.closest(`[data-confirm-target="${confirmDeleteId}"]`)) {
+      if (!target?.closest(`[data-song-actions="${activeSongId}"]`)) {
+        setActiveSongId(null);
         setConfirmDeleteId(null);
       }
     }
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [confirmDeleteId]);
+  }, [activeSongId]);
 
   async function handleDeleteSong(song: LearnSong) {
     if (confirmDeleteId !== song.id) {
@@ -88,12 +94,11 @@ export default function LearnLibrary() {
 
     setError("");
     setConfirmDeleteId(null);
+    setActiveSongId(null);
     setDeletingSongId(song.id);
 
     try {
-      const res = await fetch(`/api/songs/${song.id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/songs/${song.id}`, { method: "DELETE" });
       const data = await res.json();
 
       if (!res.ok) {
@@ -101,7 +106,7 @@ export default function LearnLibrary() {
         return;
       }
 
-      setSongs((prev) => prev.filter((s) => s.id !== song.id));
+      setSongs((prev) => prev.filter((item) => item.id !== song.id));
       setStorageRefreshKey((current) => current + 1);
     } catch {
       setError("Failed to delete song");
@@ -109,8 +114,6 @@ export default function LearnLibrary() {
       setDeletingSongId(null);
     }
   }
-
-  const artistGroups = useMemo(() => groupSongsByArtist(songs), [songs]);
 
   async function handleRetrySong(song: LearnSong) {
     setError("");
@@ -120,31 +123,32 @@ export default function LearnLibrary() {
       const res = await fetch(`/api/songs/${song.id}/retry`, {
         method: "POST",
       });
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(data.error || "Failed to retry song");
-        await fetchSongs();
-        return;
       }
-
       await fetchSongs();
     } catch {
       setError("Failed to retry song");
     } finally {
       setRetryingSongId(null);
+      setActiveSongId(null);
     }
   }
 
+  const artistGroups = useMemo(() => groupSongsByArtist(songs), [songs]);
+
   return (
     <main className="flex-1">
-      <div className="px-5 pt-4 pb-2.5">
-        <p className="font-playfair text-[22px] italic text-text">Your songs</p>
-        <p className="mt-1 font-josefin text-[9px] uppercase tracking-[0.2em] text-text-muted">
-          {loading
-            ? "Loading..."
-            : `${songs.length} song${songs.length !== 1 ? "s" : ""}`}
-        </p>
+      <div className="px-5 pt-4 pb-2">
+        <h1 className="font-playfair text-[22px] italic text-text">
+          Your songs
+        </h1>
+        {loading && (
+          <p className="mt-1 font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
+            Loading…
+          </p>
+        )}
         {error && (
           <p className="mt-2 font-josefin text-[11px] tracking-[0.08em] text-terracotta">
             {error}
@@ -154,135 +158,97 @@ export default function LearnLibrary() {
 
       <StorageMeter refreshKey={storageRefreshKey} />
 
-      <div>
+      <div className="pb-4">
         {artistGroups.map((group, groupIndex) => {
           const headingId = `artist-${groupIndex}`;
           return (
             <section key={group.artist} aria-labelledby={headingId}>
-              <div className="flex items-baseline justify-between border-y border-border-darkest bg-gold/[0.025] px-5 py-2.5">
+              <div className="px-5 pt-5 pb-1.5">
                 <h2
                   id={headingId}
-                  className="font-playfair text-[17px] italic text-gold"
+                  className="font-josefin text-[9px] uppercase tracking-[0.16em] text-gold"
                 >
                   {group.artist}
                 </h2>
-                <p className="font-josefin text-[7px] uppercase tracking-[0.12em] text-text-dark">
-                  {group.songs.length} song{group.songs.length === 1 ? "" : "s"}
-                </p>
               </div>
+
               {group.songs.map((song) => {
                 const workerOnline = (song.worker_online_count ?? 0) > 0;
                 const playable = isLessonReady(song);
+                const actionsOpen = activeSongId === song.id;
+
                 return (
                   <div
                     key={song.id}
-                    className="flex items-center border-b border-border-darkest"
+                    data-song-actions={song.id}
+                    className="flex min-h-12 items-center border-b border-border-darkest px-5"
                   >
                     <button
                       onClick={() => {
-                        if (playable) {
-                          router.push(`/song/${song.id}`);
-                        }
+                        if (playable) router.push(`/song/${song.id}`);
                       }}
-                      className={`flex w-full items-center gap-3.5 border-none bg-transparent py-4 pl-5 pr-3 text-left transition-colors duration-200 ${
+                      className={`min-w-0 flex-1 border-none bg-transparent py-3 pr-3 text-left ${
                         playable
-                          ? "cursor-pointer hover:bg-gold/5"
+                          ? "cursor-pointer hover:text-gold"
                           : "cursor-default"
                       }`}
                     >
-                      <div className="flex h-[38px] w-[38px] shrink-0 items-center justify-center border border-border">
-                        {!playable && song.status !== "failed" ? (
-                          <svg
-                            className="spinning"
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="var(--color-text-muted)"
-                            strokeWidth="2"
-                          >
-                            <path d="M21 12a9 9 0 11-6.219-8.56" />
-                          </svg>
-                        ) : playable ? (
-                          <svg
-                            width="12"
-                            height="14"
-                            viewBox="0 0 12 14"
-                            fill="var(--color-text-muted)"
-                          >
-                            <path d="M0 0L12 7L0 14V0Z" />
-                          </svg>
-                        ) : (
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="var(--color-text-muted)"
-                            strokeWidth="2"
-                          >
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 8v4M12 16h.01" />
-                          </svg>
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <p className="overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[14px] italic text-text">
-                          {song.title}
-                        </p>
-                      </div>
-
-                      <div className="shrink-0 text-right">
-                        {song.status === "processing" && (
-                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                            Processing
-                          </p>
-                        )}
-                        {song.status === "ready" && !playable && (
-                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                            Finalizing
-                          </p>
-                        )}
-                        {song.status === "queued" && (
-                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-text-muted">
-                            {workerOnline ? "Queued" : "Mac Offline"}
-                          </p>
-                        )}
-                        {song.status === "failed" && (
-                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-terracotta">
-                            Failed
-                          </p>
-                        )}
-                      </div>
+                      <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[15px] italic text-text">
+                        {song.title}
+                      </span>
                     </button>
-                    {song.status === "failed" && (
+
+                    {!playable && (
+                      <p
+                        className={`shrink-0 font-josefin text-[7px] uppercase tracking-[0.12em] ${
+                          song.status === "failed"
+                            ? "text-terracotta"
+                            : "text-orange"
+                        }`}
+                      >
+                        {pendingLabel(song, workerOnline)}
+                      </p>
+                    )}
+
+                    {actionsOpen && song.status === "failed" && (
                       <button
                         onClick={() => handleRetrySong(song)}
                         disabled={
                           retryingSongId === song.id ||
                           deletingSongId === song.id
                         }
-                        className="min-w-[64px] cursor-pointer border-none border-l border-l-border-darkest bg-transparent px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold disabled:cursor-default disabled:opacity-50"
+                        className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-gold disabled:cursor-default disabled:opacity-50"
                       >
-                        {retryingSongId === song.id ? "..." : "Retry"}
+                        {retryingSongId === song.id ? "…" : "Retry"}
                       </button>
                     )}
+
+                    {actionsOpen && (
+                      <button
+                        onClick={() => handleDeleteSong(song)}
+                        disabled={deletingSongId === song.id}
+                        className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-terracotta disabled:cursor-default disabled:opacity-50"
+                      >
+                        {deletingSongId === song.id
+                          ? "…"
+                          : confirmDeleteId === song.id
+                            ? "Delete?"
+                            : "Delete"}
+                      </button>
+                    )}
+
                     <button
-                      data-confirm-target={song.id}
-                      onClick={() => handleDeleteSong(song)}
-                      disabled={deletingSongId === song.id}
-                      className={`min-w-[80px] cursor-pointer border-none border-l border-l-border-darkest px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] transition-colors duration-200 disabled:cursor-default disabled:opacity-50 ${
-                        confirmDeleteId === song.id
-                          ? "bg-terracotta/10 text-terracotta"
-                          : "bg-transparent text-text-muted"
-                      }`}
+                      aria-label={`Actions for ${song.title}`}
+                      aria-expanded={actionsOpen}
+                      onClick={() => {
+                        setActiveSongId((current) =>
+                          current === song.id ? null : song.id,
+                        );
+                        setConfirmDeleteId(null);
+                      }}
+                      className="flex h-11 w-9 shrink-0 cursor-pointer items-center justify-end border-none bg-transparent font-josefin text-[13px] tracking-[0.12em] text-text-dark"
                     >
-                      {deletingSongId === song.id
-                        ? "..."
-                        : confirmDeleteId === song.id
-                          ? "Confirm?"
-                          : "Delete"}
+                      ···
                     </button>
                   </div>
                 );
@@ -292,11 +258,9 @@ export default function LearnLibrary() {
         })}
 
         {!loading && songs.length === 0 && (
-          <div className="px-5 py-10 text-center">
-            <p className="font-josefin text-[12px] font-thin leading-[1.8] tracking-[0.1em] text-text-muted">
-              No songs yet. Add one to get started.
-            </p>
-          </div>
+          <p className="px-5 py-10 text-center font-josefin text-[11px] tracking-[0.08em] text-text-muted">
+            No songs yet
+          </p>
         )}
       </div>
     </main>
