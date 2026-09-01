@@ -40,16 +40,16 @@ export default function StorageMeter({ refreshKey }: Props) {
   const capacity =
     songsRemaining === null
       ? `${Math.round(usage.used_bytes / 1_000_000)} MB used`
-      : `about ${songsRemaining} left`;
+      : `Space for about ${songsRemaining} more song${songsRemaining === 1 ? "" : "s"}`;
 
   return (
     <p
       aria-label="Song storage"
-      className={`px-5 font-josefin text-[8px] uppercase tracking-[0.12em] ${
+      className={`font-josefin text-[8px] uppercase tracking-[0.12em] ${
         nearlyFull ? "text-terracotta" : "text-text-dark"
       }`}
     >
-      {usage.song_count} song{usage.song_count === 1 ? "" : "s"} · {capacity}
+      {capacity}
     </p>
   );
 }

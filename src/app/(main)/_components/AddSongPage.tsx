@@ -9,6 +9,7 @@ import { fetchJson, HttpResponseError } from "@/lib/fetch-json";
 import { isLessonReady } from "@/lib/import-progress";
 import type { ResolvedLink, YouTubeSearchResult } from "@/lib/intake";
 import { useTheme } from "@/lib/theme/ThemeProvider";
+import StorageMeter from "./StorageMeter";
 
 type ImportStatus = Pick<
   Song,
@@ -25,7 +26,9 @@ type ImportStatus = Pick<
 function looksLikeUrl(s: string) {
   const t = s.trim();
   if (!t) return false;
-  return /^https?:\/\//i.test(t) || /^(www\.)?(youtube\.com|youtu\.be)/i.test(t);
+  return (
+    /^https?:\/\//i.test(t) || /^(www\.)?(youtube\.com|youtu\.be)/i.test(t)
+  );
 }
 
 function youtubeVideoId(url: string) {
@@ -72,7 +75,8 @@ function AddSongPageInner() {
     void fetch("/api/songs", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : []))
       .then((songs: unknown) => {
-        if (!cancelled && Array.isArray(songs)) setLibrarySongs(songs as Song[]);
+        if (!cancelled && Array.isArray(songs))
+          setLibrarySongs(songs as Song[]);
       })
       .catch(() => {
         // Duplicate detection is helpful, but never blocks adding a song.
@@ -82,28 +86,31 @@ function AddSongPageInner() {
     };
   }, []);
 
-  const resolveUrl = useCallback(async (raw: string): Promise<ResolvedLink | null> => {
-    setResolveError("");
-    setResolving(true);
-    try {
-      const res = await fetch("/api/resolve-link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: raw }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setResolveError(data.error || "Could not understand that link.");
+  const resolveUrl = useCallback(
+    async (raw: string): Promise<ResolvedLink | null> => {
+      setResolveError("");
+      setResolving(true);
+      try {
+        const res = await fetch("/api/resolve-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: raw }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setResolveError(data.error || "Could not understand that link.");
+          return null;
+        }
+        return data as ResolvedLink;
+      } catch {
+        setResolveError("Network error reaching the server.");
         return null;
+      } finally {
+        setResolving(false);
       }
-      return data as ResolvedLink;
-    } catch {
-      setResolveError("Network error reaching the server.");
-      return null;
-    } finally {
-      setResolving(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Honor share-target params on mount. iOS often packs the link in `text`
   // (or even `title`) rather than `url`, so dig a URL out of any of them.
@@ -162,19 +169,24 @@ function AddSongPageInner() {
           setSubmitError(next.last_error || "Processing failed.");
           setSubmitting(false);
           setImportingSongId(null);
-        } else if (next.job_status === "queued" || next.job_status === "retryable") {
+        } else if (
+          next.job_status === "queued" ||
+          next.job_status === "retryable"
+        ) {
           const position = next.queue_position ?? 1;
           const workerOnline = (next.worker_online_count ?? 0) > 0;
           const retryText =
-            next.job_status === "retryable" && next.attempt_count && next.max_attempts
+            next.job_status === "retryable" &&
+            next.attempt_count &&
+            next.max_attempts
               ? ` Retry ${next.attempt_count + 1} of ${next.max_attempts} is scheduled.`
               : "";
           setImportStatusText(
             !workerOnline
               ? "Queued, but the Mac worker looks offline. Start Mr. Mojo Rising on the Mac to process it."
               : position > 1
-              ? `Queued behind ${position - 1} song${position === 2 ? "" : "s"}.${retryText}`
-              : `Queued for processing.${retryText}`,
+                ? `Queued behind ${position - 1} song${position === 2 ? "" : "s"}.${retryText}`
+                : `Queued for processing.${retryText}`,
           );
         } else if (next.status === "processing") {
           setImportStatusText(
@@ -273,8 +285,7 @@ function AddSongPageInner() {
       setImportStatus({
         id: songId,
         status: initialStatus,
-        processing_stage:
-          initialStatus === "ready" ? "complete" : "queued",
+        processing_stage: initialStatus === "ready" ? "complete" : "queued",
         last_error: null,
         job_status: initialStatus === "ready" ? "succeeded" : "queued",
       });
@@ -367,6 +378,9 @@ function AddSongPageInner() {
         <p className="mt-2.5 font-josefin text-[12px] font-light leading-[1.8] tracking-[0.1em] text-text-muted">
           {content.searchHero.subtitle}
         </p>
+        <div className="mt-3">
+          <StorageMeter refreshKey={0} />
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
@@ -562,10 +576,7 @@ function AddSongPageInner() {
         </div>
       )}
 
-      {!searching &&
-        searchResults.length === 0 &&
-        !resolved &&
-        !input && (
+      {!searching && searchResults.length === 0 && !resolved && !input && (
         <div className="flex flex-col gap-2.5 border border-border-darkest bg-input-bg/40 p-4">
           <p className="font-josefin text-[10px] uppercase tracking-[0.2em] text-gold">
             Tip

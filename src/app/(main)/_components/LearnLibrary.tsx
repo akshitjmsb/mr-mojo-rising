@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
 import { groupSongsByArtist } from "@/lib/song-catalog";
-import StorageMeter from "./StorageMeter";
 
 type LearnSong = Song & {
   worker_online_count?: number;
@@ -29,7 +28,6 @@ export default function LearnLibrary() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [activeSongId, setActiveSongId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [storageRefreshKey, setStorageRefreshKey] = useState(0);
 
   const fetchSongs = useCallback(async () => {
     try {
@@ -107,7 +105,6 @@ export default function LearnLibrary() {
       }
 
       setSongs((prev) => prev.filter((item) => item.id !== song.id));
-      setStorageRefreshKey((current) => current + 1);
     } catch {
       setError("Failed to delete song");
     } finally {
@@ -142,8 +139,13 @@ export default function LearnLibrary() {
     <main className="flex-1">
       <div className="px-5 pt-4 pb-2">
         <h1 className="font-playfair text-[22px] italic text-text">
-          Your songs
+          Choose a song
         </h1>
+        {!loading && (
+          <p className="mt-1 font-josefin text-[9px] tracking-[0.08em] text-text-muted">
+            Open its separated parts.
+          </p>
+        )}
         {loading && (
           <p className="mt-1 font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
             Loading…
@@ -155,8 +157,6 @@ export default function LearnLibrary() {
           </p>
         )}
       </div>
-
-      <StorageMeter refreshKey={storageRefreshKey} />
 
       <div className="pb-4">
         {artistGroups.map((group, groupIndex) => {
