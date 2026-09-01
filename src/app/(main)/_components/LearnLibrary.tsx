@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
+import { groupSongsByArtist } from "@/lib/song-catalog";
+import StorageMeter from "./StorageMeter";
 
 type LearnSong = Song & {
   worker_online_count?: number;
@@ -19,6 +21,7 @@ export default function LearnLibrary() {
   const [retryingSongId, setRetryingSongId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [storageRefreshKey, setStorageRefreshKey] = useState(0);
 
   const fetchSongs = useCallback(async () => {
     try {
@@ -99,12 +102,15 @@ export default function LearnLibrary() {
       }
 
       setSongs((prev) => prev.filter((s) => s.id !== song.id));
+      setStorageRefreshKey((current) => current + 1);
     } catch {
       setError("Failed to delete song");
     } finally {
       setDeletingSongId(null);
     }
   }
+
+  const artistGroups = useMemo(() => groupSongsByArtist(songs), [songs]);
 
   async function handleRetrySong(song: LearnSong) {
     setError("");
@@ -133,9 +139,7 @@ export default function LearnLibrary() {
   return (
     <main className="flex-1">
       <div className="px-5 pt-4 pb-2.5">
-        <p className="font-playfair text-[22px] italic text-text">
-          Your songs
-        </p>
+        <p className="font-playfair text-[22px] italic text-text">Your songs</p>
         <p className="mt-1 font-josefin text-[9px] uppercase tracking-[0.2em] text-text-muted">
           {loading
             ? "Loading..."
@@ -148,124 +152,142 @@ export default function LearnLibrary() {
         )}
       </div>
 
+      <StorageMeter refreshKey={storageRefreshKey} />
+
       <div>
-        {songs.map((song) => {
-          const workerOnline = (song.worker_online_count ?? 0) > 0;
-          const playable = isLessonReady(song);
+        {artistGroups.map((group, groupIndex) => {
+          const headingId = `artist-${groupIndex}`;
           return (
-          <div
-            key={song.id}
-            className="flex items-center border-b border-border-darkest"
-          >
-            <button
-              onClick={() => {
-                if (playable) {
-                  router.push(`/song/${song.id}`);
-                }
-              }}
-              className={`flex w-full items-center gap-3.5 border-none bg-transparent py-4 pl-5 pr-3 text-left transition-colors duration-200 ${
-                playable
-                  ? "cursor-pointer hover:bg-gold/5"
-                  : "cursor-default"
-              }`}
-            >
-              <div className="flex h-[38px] w-[38px] shrink-0 items-center justify-center border border-border">
-                {!playable && song.status !== "failed" ? (
-                  <svg
-                    className="spinning"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--color-text-muted)"
-                    strokeWidth="2"
-                  >
-                    <path d="M21 12a9 9 0 11-6.219-8.56" />
-                  </svg>
-                ) : playable ? (
-                  <svg
-                    width="12"
-                    height="14"
-                    viewBox="0 0 12 14"
-                    fill="var(--color-text-muted)"
-                  >
-                    <path d="M0 0L12 7L0 14V0Z" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--color-text-muted)"
-                    strokeWidth="2"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 8v4M12 16h.01" />
-                  </svg>
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <p className="overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[14px] italic text-text">
-                  {song.title}
-                </p>
-                <p className="mt-0.5 font-josefin text-[10px] font-thin uppercase tracking-[0.12em] text-text-dark">
-                  {song.artist || "Unknown Artist"}
+            <section key={group.artist} aria-labelledby={headingId}>
+              <div className="flex items-baseline justify-between border-y border-border-darkest bg-gold/[0.025] px-5 py-2.5">
+                <h2
+                  id={headingId}
+                  className="font-playfair text-[17px] italic text-gold"
+                >
+                  {group.artist}
+                </h2>
+                <p className="font-josefin text-[7px] uppercase tracking-[0.12em] text-text-dark">
+                  {group.songs.length} song{group.songs.length === 1 ? "" : "s"}
                 </p>
               </div>
+              {group.songs.map((song) => {
+                const workerOnline = (song.worker_online_count ?? 0) > 0;
+                const playable = isLessonReady(song);
+                return (
+                  <div
+                    key={song.id}
+                    className="flex items-center border-b border-border-darkest"
+                  >
+                    <button
+                      onClick={() => {
+                        if (playable) {
+                          router.push(`/song/${song.id}`);
+                        }
+                      }}
+                      className={`flex w-full items-center gap-3.5 border-none bg-transparent py-4 pl-5 pr-3 text-left transition-colors duration-200 ${
+                        playable
+                          ? "cursor-pointer hover:bg-gold/5"
+                          : "cursor-default"
+                      }`}
+                    >
+                      <div className="flex h-[38px] w-[38px] shrink-0 items-center justify-center border border-border">
+                        {!playable && song.status !== "failed" ? (
+                          <svg
+                            className="spinning"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="var(--color-text-muted)"
+                            strokeWidth="2"
+                          >
+                            <path d="M21 12a9 9 0 11-6.219-8.56" />
+                          </svg>
+                        ) : playable ? (
+                          <svg
+                            width="12"
+                            height="14"
+                            viewBox="0 0 12 14"
+                            fill="var(--color-text-muted)"
+                          >
+                            <path d="M0 0L12 7L0 14V0Z" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="var(--color-text-muted)"
+                            strokeWidth="2"
+                          >
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 8v4M12 16h.01" />
+                          </svg>
+                        )}
+                      </div>
 
-              <div className="shrink-0 text-right">
-                {song.status === "processing" && (
-                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                    Processing
-                  </p>
-                )}
-                {song.status === "ready" && !playable && (
-                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
-                    Finalizing
-                  </p>
-                )}
-                {song.status === "queued" && (
-                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-text-muted">
-                    {workerOnline ? "Queued" : "Mac Offline"}
-                  </p>
-                )}
-                {song.status === "failed" && (
-                  <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-terracotta">
-                    Failed
-                  </p>
-                )}
-              </div>
-            </button>
-            {song.status === "failed" && (
-              <button
-                onClick={() => handleRetrySong(song)}
-                disabled={
-                  retryingSongId === song.id || deletingSongId === song.id
-                }
-                className="min-w-[64px] cursor-pointer border-none border-l border-l-border-darkest bg-transparent px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold disabled:cursor-default disabled:opacity-50"
-              >
-                {retryingSongId === song.id ? "..." : "Retry"}
-              </button>
-            )}
-            <button
-              data-confirm-target={song.id}
-              onClick={() => handleDeleteSong(song)}
-              disabled={deletingSongId === song.id}
-              className={`min-w-[80px] cursor-pointer border-none border-l border-l-border-darkest px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] transition-colors duration-200 disabled:cursor-default disabled:opacity-50 ${
-                confirmDeleteId === song.id
-                  ? "bg-terracotta/10 text-terracotta"
-                  : "bg-transparent text-text-muted"
-              }`}
-            >
-              {deletingSongId === song.id
-                ? "..."
-                : confirmDeleteId === song.id
-                  ? "Confirm?"
-                  : "Delete"}
-            </button>
-          </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[14px] italic text-text">
+                          {song.title}
+                        </p>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        {song.status === "processing" && (
+                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
+                            Processing
+                          </p>
+                        )}
+                        {song.status === "ready" && !playable && (
+                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-orange">
+                            Finalizing
+                          </p>
+                        )}
+                        {song.status === "queued" && (
+                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-text-muted">
+                            {workerOnline ? "Queued" : "Mac Offline"}
+                          </p>
+                        )}
+                        {song.status === "failed" && (
+                          <p className="font-josefin text-[9px] uppercase tracking-[0.15em] text-terracotta">
+                            Failed
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                    {song.status === "failed" && (
+                      <button
+                        onClick={() => handleRetrySong(song)}
+                        disabled={
+                          retryingSongId === song.id ||
+                          deletingSongId === song.id
+                        }
+                        className="min-w-[64px] cursor-pointer border-none border-l border-l-border-darkest bg-transparent px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] text-gold disabled:cursor-default disabled:opacity-50"
+                      >
+                        {retryingSongId === song.id ? "..." : "Retry"}
+                      </button>
+                    )}
+                    <button
+                      data-confirm-target={song.id}
+                      onClick={() => handleDeleteSong(song)}
+                      disabled={deletingSongId === song.id}
+                      className={`min-w-[80px] cursor-pointer border-none border-l border-l-border-darkest px-3.5 font-josefin text-[9px] uppercase tracking-[0.14em] transition-colors duration-200 disabled:cursor-default disabled:opacity-50 ${
+                        confirmDeleteId === song.id
+                          ? "bg-terracotta/10 text-terracotta"
+                          : "bg-transparent text-text-muted"
+                      }`}
+                    >
+                      {deletingSongId === song.id
+                        ? "..."
+                        : confirmDeleteId === song.id
+                          ? "Confirm?"
+                          : "Delete"}
+                    </button>
+                  </div>
+                );
+              })}
+            </section>
           );
         })}
 

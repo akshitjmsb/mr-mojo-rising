@@ -46,6 +46,26 @@ class MainQualityHelperTests(unittest.TestCase):
                 ("Patience", "Guns N' Roses"),
             )
 
+    def test_title_artist_prefers_music_metadata_over_label_channel(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            (path / "original.info.json").write_text(
+                json.dumps(
+                    {
+                        "title": "Woh Chali Woh Chali (Official Video)",
+                        "track": "Woh Chali Woh Chali",
+                        "artist": "Bombay Vikings",
+                        "uploader": "Universal Music India",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                extract_title_artist(path),
+                ("Woh Chali Woh Chali", "Bombay Vikings"),
+            )
+
     def test_vocal_coverage_restores_a_dropped_phrase(self):
         sample_rate = 1000
         seconds = 4

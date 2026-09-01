@@ -1044,8 +1044,17 @@ def extract_title_artist(work_dir: Path) -> tuple[str, str | None]:
         try:
             with open(info_path, "r", encoding="utf-8") as f:
                 info = json.load(f)
-            title = (info.get("title") or "Unknown Title").strip()
-            artist = (info.get("uploader") or info.get("channel") or None)
+            title = (
+                info.get("track") or info.get("title") or "Unknown Title"
+            ).strip()
+            artist = (
+                info.get("artist")
+                or info.get("album_artist")
+                or info.get("creator")
+                or info.get("uploader")
+                or info.get("channel")
+                or None
+            )
             if isinstance(artist, str):
                 artist = artist.strip()
                 if artist == "":
