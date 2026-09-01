@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
 import { groupSongsByArtist } from "@/lib/song-catalog";
+import StorageMeter from "./StorageMeter";
 
 type LearnSong = Song & {
   worker_online_count?: number;
@@ -28,6 +29,7 @@ export default function LearnLibrary() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [activeSongId, setActiveSongId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [storageRefreshKey, setStorageRefreshKey] = useState(0);
 
   const fetchSongs = useCallback(async () => {
     try {
@@ -105,6 +107,7 @@ export default function LearnLibrary() {
       }
 
       setSongs((prev) => prev.filter((item) => item.id !== song.id));
+      setStorageRefreshKey((current) => current + 1);
     } catch {
       setError("Failed to delete song");
     } finally {
@@ -157,6 +160,8 @@ export default function LearnLibrary() {
           </p>
         )}
       </div>
+
+      <StorageMeter refreshKey={storageRefreshKey} mode="usage" />
 
       <div className="pb-4">
         {artistGroups.map((group, groupIndex) => {

@@ -379,7 +379,7 @@ function AddSongPageInner() {
           {content.searchHero.subtitle}
         </p>
         <div className="mt-3">
-          <StorageMeter refreshKey={0} />
+          <StorageMeter refreshKey={0} mode="capacity" />
         </div>
       </div>
 

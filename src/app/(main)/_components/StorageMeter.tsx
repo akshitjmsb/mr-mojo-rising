@@ -13,9 +13,10 @@ export type StorageUsage = {
 
 type Props = {
   refreshKey: number;
+  mode: "usage" | "capacity";
 };
 
-export default function StorageMeter({ refreshKey }: Props) {
+export default function StorageMeter({ refreshKey, mode }: Props) {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
 
   useEffect(() => {
@@ -37,6 +38,37 @@ export default function StorageMeter({ refreshKey }: Props) {
 
   const songsRemaining = usage.estimated_songs_remaining;
   const nearlyFull = songsRemaining !== null && songsRemaining <= 3;
+  const percentage = Math.min(
+    100,
+    Math.max(0, (usage.used_bytes / usage.limit_bytes) * 100),
+  );
+
+  if (mode === "usage") {
+    return (
+      <div className="px-5 pt-3" aria-label="Space utilization">
+        <div className="flex items-center justify-between font-josefin text-[8px] uppercase tracking-[0.12em] text-text-dark">
+          <span>Space</span>
+          <span className={nearlyFull ? "text-terracotta" : undefined}>
+            {Math.round(usage.used_bytes / 1_000_000)} MB / 1 GB
+          </span>
+        </div>
+        <div
+          className="mt-1.5 h-px bg-border-darkest"
+          role="progressbar"
+          aria-label="Storage used"
+          aria-valuemin={0}
+          aria-valuemax={usage.limit_bytes}
+          aria-valuenow={usage.used_bytes}
+        >
+          <div
+            className={`h-full ${nearlyFull ? "bg-terracotta" : "bg-gold"}`}
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const capacity =
     songsRemaining === null
       ? `${Math.round(usage.used_bytes / 1_000_000)} MB used`
