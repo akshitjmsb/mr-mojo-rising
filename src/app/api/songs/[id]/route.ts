@@ -44,24 +44,10 @@ function legacyStemLayers(stems: Stem | null): StemLayer[] {
       learnable: 1,
     },
     {
-      key: "bass",
-      label: "Bass",
-      instrument: "bass",
-      url: stems.bass_url,
-      learnable: 1,
-    },
-    {
       key: "vocals",
       label: "Vocals",
       instrument: "vocals",
       url: stems.vocals_url,
-      learnable: 0,
-    },
-    {
-      key: "drums",
-      label: "Drums",
-      instrument: "drums",
-      url: stems.drums_url,
       learnable: 0,
     },
     {
@@ -137,6 +123,12 @@ export async function GET(
     // Legacy databases continue to work until the additive migration runs.
   }
   if (stemLayers.length === 0) stemLayers = legacyStemLayers(stems ?? null);
+  const intentionalStemLayers = stemLayers.filter(
+    (layer) =>
+      layer.instrument === "full" ||
+      layer.instrument === "vocals" ||
+      layer.instrument === "guitar",
+  );
 
   const sections = await queryAll<Section>(
     `SELECT * FROM sections WHERE song_id = ? ORDER BY start_time ASC`,
@@ -192,7 +184,7 @@ export async function GET(
   return NextResponse.json({
     song,
     stems: stems ?? null,
-    stem_layers: stemLayers,
+    stem_layers: intentionalStemLayers,
     sections,
     chords,
     lyrics: lyrics ?? null,

@@ -23,15 +23,7 @@ type PracticeRange = {
   end: number;
 };
 
-type AudioSource =
-  | "guitar"
-  | "lead"
-  | "rhythm"
-  | "bass"
-  | "vocals"
-  | "drums"
-  | "backing"
-  | "full";
+type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getSongPracticeTuning(songId, "standard");
@@ -81,7 +73,9 @@ export default function SongPlayerPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1.0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(null);
+  const [practiceRange, setPracticeRange] = useState<PracticeRange | null>(
+    null,
+  );
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioGroupRef = useRef<HTMLAudioElement[]>([]);
@@ -117,11 +111,12 @@ export default function SongPlayerPage() {
           normalizePracticeProfile(songId, data.practice_profile),
         );
         if (data.sections?.length > 0) {
-          setPracticeRange((current) =>
-            current ?? {
-              start: data.sections[0].start_time,
-              end: data.sections[0].end_time,
-            },
+          setPracticeRange(
+            (current) =>
+              current ?? {
+                start: data.sections[0].start_time,
+                end: data.sections[0].end_time,
+              },
           );
         }
         return (data.song as Song | null | undefined) ?? null;
@@ -198,16 +193,15 @@ export default function SongPlayerPage() {
 
   const audioUrls = useMemo(() => {
     if (!lessonReady) return [];
-    if (stemMode === "guitar") return stems?.guitar_url ? [stems.guitar_url] : [];
+    if (stemMode === "guitar")
+      return stems?.guitar_url ? [stems.guitar_url] : [];
     if (stemMode === "lead") return leadFocusUrl ? [leadFocusUrl] : [];
     if (stemMode === "rhythm") return rhythmFocusUrl ? [rhythmFocusUrl] : [];
-    if (stemMode === "bass") return stems?.bass_url ? [stems.bass_url] : [];
-    if (stemMode === "vocals") return stems?.vocals_url ? [stems.vocals_url] : [];
-    if (stemMode === "drums") return stems?.drums_url ? [stems.drums_url] : [];
-    if (stemMode === "full") return stems?.original_url ? [stems.original_url] : [];
-    return [stems?.vocals_url, stems?.drums_url, stems?.bass_url].filter(
-      (url): url is string => Boolean(url),
-    );
+    if (stemMode === "vocals")
+      return stems?.vocals_url ? [stems.vocals_url] : [];
+    if (stemMode === "full")
+      return stems?.original_url ? [stems.original_url] : [];
+    return [];
   }, [leadFocusUrl, lessonReady, rhythmFocusUrl, stemMode, stems]);
 
   // Carries position + play state across stem switches so changing stems
@@ -221,15 +215,14 @@ export default function SongPlayerPage() {
     playing: boolean;
   } | null>(null);
 
-  // A backing track is a synchronized group of vocals, drums, and bass.
-  // Other sources remain a one-element group and use the same transport.
+  // Every intentional layer uses the same transport and master clock.
   useEffect(() => {
     if (audioUrls.length === 0) return;
     const audios = audioUrls.map((url) => {
       const audio = new Audio(url);
       audio.preload = "auto";
       audio.playbackRate = speed;
-      audio.volume = stemMode === "backing" ? 0.72 : 1;
+      audio.volume = 1;
       // Slowing down must not drop the pitch — this is a learning system.
       audio.preservesPitch = true;
       return audio;
@@ -351,15 +344,7 @@ export default function SongPlayerPage() {
     if (requestedSource === "rhythm" && !rhythmFocusUrl) {
       return stems?.guitar_url ? "guitar" : "full";
     }
-    if (requestedSource === "bass" && !stems?.bass_url) return "full";
     if (requestedSource === "vocals" && !stems?.vocals_url) return "full";
-    if (requestedSource === "drums" && !stems?.drums_url) return "full";
-    if (
-      requestedSource === "backing" &&
-      (!stems?.vocals_url || !stems?.drums_url || !stems?.bass_url)
-    ) {
-      return "full";
-    }
     return requestedSource;
   }
 
@@ -582,7 +567,8 @@ export default function SongPlayerPage() {
           Building your song map...
         </p>
         <p className="mb-6 mt-2 max-w-[320px] font-josefin text-[10px] leading-relaxed tracking-[0.08em] text-text-muted">
-          Song Map will open automatically when every synchronized piece is ready.
+          Song Map will open automatically when every synchronized piece is
+          ready.
         </p>
         <SongProcessingProgress status={song} detail={processingDetail} />
       </main>

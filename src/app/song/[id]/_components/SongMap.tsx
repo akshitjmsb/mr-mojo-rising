@@ -9,26 +9,16 @@ import type {
   StemLayer,
   TabNote,
 } from "@/lib/database.types";
-import {
-  getSongPracticeTuning,
-  positionNotesForTuning,
-} from "@/lib/guitar";
+import { getSongPracticeTuning, positionNotesForTuning } from "@/lib/guitar";
 import { extractLeadNotes } from "@/lib/lead-notes";
+import { selectPrimarySongLayers } from "@/lib/primary-song-layers";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
 import RhythmChordFlow from "./RhythmChordFlow";
 import SelectionDownloadButton from "./SelectionDownloadButton";
 import SoloPhraseTab from "./SoloPhraseTab";
 import SyncedLyrics from "./SyncedLyrics";
 
-type AudioSource =
-  | "guitar"
-  | "lead"
-  | "rhythm"
-  | "bass"
-  | "vocals"
-  | "drums"
-  | "backing"
-  | "full";
+type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full";
 
 type MapKind = "overview" | "chords" | "notes" | "lyrics" | "audio";
 
@@ -64,18 +54,6 @@ interface Props {
 
 const FULL_SONG_ID = "__full_song__";
 
-const PIECE_PRIORITY: Record<string, number> = {
-  "full:overview": 0,
-  "lead:notes": 1,
-  "guitar:notes": 1,
-  "rhythm:chords": 2,
-  "guitar:chords": 2,
-  "guitar:audio": 3,
-  "vocals:lyrics": 4,
-  "bass:audio": 5,
-  "drums:audio": 6,
-};
-
 function formatTime(seconds: number) {
   const safe = Math.max(0, seconds);
   const minutes = Math.floor(safe / 60);
@@ -83,84 +61,6 @@ function formatTime(seconds: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${remainder}`;
-}
-
-function pieceFromLayer(layer: StemLayer): MapPiece | null {
-  if (layer.instrument === "guitar") {
-    if (layer.role === "lead") {
-      return {
-        key: layer.layer_key,
-        label: "Lead Guitar",
-        source: "lead",
-        kind: "notes",
-        status: layer.quality_status === "ready" ? "Mapped" : "Best available",
-        downloadLayerKey: layer.layer_key,
-      };
-    }
-    if (layer.role === "rhythm") {
-      return {
-        key: layer.layer_key,
-        label: "Rhythm Guitar",
-        source: "rhythm",
-        kind: "chords",
-        status: layer.quality_status === "ready" ? "Mapped" : "Best available",
-        downloadLayerKey: layer.layer_key,
-      };
-    }
-    if (layer.role === "all") {
-      return {
-        key: layer.layer_key,
-        label: "All Guitars",
-        source: "guitar",
-        kind: "audio",
-        status: layer.quality_status === "ready" ? "Ready" : "Best available",
-        downloadLayerKey: layer.layer_key,
-      };
-    }
-    return null;
-  }
-
-  if (layer.instrument === "vocals") {
-    return {
-      key: layer.layer_key,
-      label: "Vocals",
-      source: "vocals",
-      kind: "lyrics",
-      status: layer.quality_status === "ready" ? "Synced" : "Best available",
-      downloadLayerKey: layer.layer_key,
-    };
-  }
-  if (layer.instrument === "bass") {
-    return {
-      key: layer.layer_key,
-      label: "Bass",
-      source: "bass",
-      kind: "audio",
-      status: layer.quality_status === "ready" ? "Ready" : "Best available",
-      downloadLayerKey: layer.layer_key,
-    };
-  }
-  if (layer.instrument === "drums") {
-    return {
-      key: layer.layer_key,
-      label: "Drums",
-      source: "drums",
-      kind: "audio",
-      status: layer.quality_status === "ready" ? "Ready" : "Best available",
-      downloadLayerKey: layer.layer_key,
-    };
-  }
-  if (layer.instrument === "full") {
-    return {
-      key: layer.layer_key,
-      label: "Full Song",
-      source: "full",
-      kind: "overview",
-      status: layer.quality_status === "ready" ? "Ready" : "Best available",
-      downloadLayerKey: layer.layer_key,
-    };
-  }
-  return null;
 }
 
 export default function SongMap({
@@ -182,51 +82,44 @@ export default function SongMap({
   onSeek,
 }: Props) {
   const pieces = useMemo(() => {
-    const seen = new Set<string>();
-    const directPieces = stemLayers
-      .map(pieceFromLayer)
-      .filter((piece): piece is MapPiece => {
-        if (!piece || seen.has(`${piece.source}:${piece.kind}`)) return false;
-        seen.add(`${piece.source}:${piece.kind}`);
-        return true;
-      });
-    const combinedGuitar = directPieces.find(
-      (piece) => piece.source === "guitar" && piece.kind === "audio",
+    return selectPrimarySongLayers(stemLayers).map<MapPiece>(
+      ({ kind, layer, dedicated }) => {
+        if (kind === "full") {
+          return {
+            key: `full:${layer.layer_key}`,
+            label: "Full Song",
+            source: "full",
+            kind: "overview",
+            status:
+              layer.quality_status === "ready" ? "Ready" : "Best available",
+            downloadLayerKey: layer.layer_key,
+          };
+        }
+        if (kind === "vocals") {
+          return {
+            key: `vocals:${layer.layer_key}`,
+            label: "Vocals",
+            source: "vocals",
+            kind: "lyrics",
+            status:
+              layer.quality_status === "ready" ? "Synced" : "Best available",
+            downloadLayerKey: layer.layer_key,
+          };
+        }
+        return {
+          key: `${kind}:${layer.layer_key}`,
+          label: kind === "rhythm" ? "Rhythm Guitar" : "Lead Guitar",
+          source: dedicated ? kind : "guitar",
+          kind: kind === "rhythm" ? "chords" : "notes",
+          status:
+            dedicated && layer.quality_status === "ready"
+              ? "Mapped"
+              : "Best available",
+          downloadLayerKey: layer.layer_key,
+        };
+      },
     );
-    if (
-      combinedGuitar &&
-      tabNotes.length > 0 &&
-      !directPieces.some((piece) => piece.kind === "notes")
-    ) {
-      directPieces.push({
-        key: "analysis-lead",
-        label: "Lead Notes",
-        source: "guitar",
-        kind: "notes",
-        status: "Best available",
-        downloadLayerKey: combinedGuitar.key,
-      });
-    }
-    if (
-      combinedGuitar &&
-      chords.length > 0 &&
-      !directPieces.some((piece) => piece.kind === "chords")
-    ) {
-      directPieces.push({
-        key: "analysis-rhythm",
-        label: "Rhythm Chords",
-        source: "guitar",
-        kind: "chords",
-        status: "Best available",
-        downloadLayerKey: combinedGuitar.key,
-      });
-    }
-    return directPieces.sort(
-      (left, right) =>
-        (PIECE_PRIORITY[`${left.source}:${left.kind}`] ?? 99) -
-        (PIECE_PRIORITY[`${right.source}:${right.kind}`] ?? 99),
-    );
-  }, [chords.length, stemLayers, tabNotes.length]);
+  }, [stemLayers]);
   const fullRange = useMemo<TimeRange | null>(() => {
     if (sections.length === 0) return null;
     return {
@@ -238,12 +131,7 @@ export default function SongMap({
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     sections[0]?.id ?? null,
   );
-  const defaultPiece =
-    pieces.find((piece) => piece.kind === "chords") ??
-    pieces.find((piece) => piece.kind === "notes") ??
-    pieces.find((piece) => piece.kind === "lyrics") ??
-    pieces[0] ??
-    null;
+  const defaultPiece = pieces[0] ?? null;
   const selectedPiece =
     pieces.find((piece) => piece.key === selectedPieceKey) ?? defaultPiece;
   const selectedSection =
@@ -265,7 +153,7 @@ export default function SongMap({
   const sectionLabel =
     selectedSectionId === FULL_SONG_ID
       ? "Full song"
-      : selectedSection?.label ?? "Song";
+      : (selectedSection?.label ?? "Song");
   const tuning = getSongPracticeTuning(songId, profile.tuning_id);
 
   const chordChanges = useMemo(() => {
@@ -294,7 +182,12 @@ export default function SongMap({
 
   const leadEvidence = useMemo(() => {
     if (!range) {
-      return { notes: [] as TabNote[], highConfidence: 0, withheld: 0, roleLed: false };
+      return {
+        notes: [] as TabNote[],
+        highConfidence: 0,
+        withheld: 0,
+        roleLed: false,
+      };
     }
     const inRange = tabNotes.filter(
       (note) => note.start_time >= range.start && note.start_time < range.end,
@@ -336,7 +229,8 @@ export default function SongMap({
       : range.start
     : 0;
   const progress = range
-    ? ((position - range.start) / Math.max(0.001, range.end - range.start)) * 100
+    ? ((position - range.start) / Math.max(0.001, range.end - range.start)) *
+      100
     : 0;
 
   function selectPiece(piece: MapPiece) {
@@ -449,10 +343,10 @@ export default function SongMap({
 
       <div className="mt-4">
         <p className="mb-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-          Synchronized pieces
+          Choose a layer
         </p>
         <div
-          className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="grid grid-cols-2 gap-2"
           aria-label="Synchronized song pieces"
         >
           {pieces.map((piece) => (
@@ -461,7 +355,7 @@ export default function SongMap({
               type="button"
               onClick={() => selectPiece(piece)}
               aria-pressed={selectedPiece.key === piece.key}
-              className={`min-h-12 shrink-0 rounded-[2px] border px-3 text-left ${
+              className={`min-h-12 rounded-[2px] border px-3 text-left ${
                 selectedPiece.key === piece.key
                   ? "border-gold bg-gold/10 text-gold"
                   : "border-border-dark text-text-muted"
@@ -557,7 +451,8 @@ export default function SongMap({
               Lead notes
             </p>
             <p className="text-right font-josefin text-[7px] uppercase tracking-[0.08em] text-text-dark">
-              {leadEvidence.highConfidence} strong · {leadEvidence.notes.length} shown
+              {leadEvidence.highConfidence} strong · {leadEvidence.notes.length}{" "}
+              shown
               {leadEvidence.withheld > 0
                 ? ` · ${leadEvidence.withheld} withheld`
                 : ""}
@@ -609,8 +504,8 @@ export default function SongMap({
       ) : null}
 
       <p className="mt-5 border-t border-border-dark pt-3 font-josefin text-[7px] uppercase leading-relaxed tracking-[0.09em] text-text-darkest">
-        Quality gate · uncertain analysis is labeled or withheld, never presented
-        as fact.
+        Quality gate · uncertain analysis is labeled or withheld, never
+        presented as fact.
       </p>
     </section>
   );
