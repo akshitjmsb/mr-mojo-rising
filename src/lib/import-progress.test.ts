@@ -28,6 +28,13 @@ test("maps durable worker stages to learner-facing progress", () => {
     4,
   );
   assert.equal(
+    importProgressIndex({
+      status: "processing",
+      processing_stage: "quality_gate",
+    }),
+    4,
+  );
+  assert.equal(
     importProgressIndex({ status: "ready", processing_stage: "complete" }),
     5,
   );

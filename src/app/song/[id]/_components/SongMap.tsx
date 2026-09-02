@@ -27,7 +27,8 @@ type MapPiece = {
   label: string;
   source: AudioSource;
   kind: MapKind;
-  status: "Ready" | "Mapped" | "Synced" | "Best available";
+  status: "Ready" | "Best available";
+  qualityNote: string | null;
   downloadLayerKey: string;
 };
 
@@ -84,14 +85,26 @@ export default function SongMap({
   const pieces = useMemo(() => {
     return selectPrimarySongLayers(stemLayers).map<MapPiece>(
       ({ kind, layer, dedicated }) => {
+        const measuredReady = layer.quality_gate_status === "ready";
+        const sourceReady =
+          kind === "full" && layer.quality_gate_status !== "best_available";
+        const ready = sourceReady || measuredReady;
+        const publiclyReady =
+          ready && (kind === "full" || kind === "vocals" || dedicated);
+        const qualityNote = publiclyReady
+          ? null
+          : !dedicated
+            ? "Dedicated separation was not reliable; using the combined guitar"
+            : (layer.quality_summary ??
+              "Quality evidence is not available yet");
         if (kind === "full") {
           return {
             key: `full:${layer.layer_key}`,
             label: "Full Song",
             source: "full",
             kind: "overview",
-            status:
-              layer.quality_status === "ready" ? "Ready" : "Best available",
+            status: publiclyReady ? "Ready" : "Best available",
+            qualityNote,
             downloadLayerKey: layer.layer_key,
           };
         }
@@ -101,8 +114,8 @@ export default function SongMap({
             label: "Vocals",
             source: "vocals",
             kind: "lyrics",
-            status:
-              layer.quality_status === "ready" ? "Synced" : "Best available",
+            status: publiclyReady ? "Ready" : "Best available",
+            qualityNote,
             downloadLayerKey: layer.layer_key,
           };
         }
@@ -111,10 +124,8 @@ export default function SongMap({
           label: kind === "rhythm" ? "Rhythm Guitar" : "Lead Guitar",
           source: dedicated ? kind : "guitar",
           kind: kind === "rhythm" ? "chords" : "notes",
-          status:
-            dedicated && layer.quality_status === "ready"
-              ? "Mapped"
-              : "Best available",
+          status: publiclyReady ? "Ready" : "Best available",
+          qualityNote,
           downloadLayerKey: layer.layer_key,
         };
       },
@@ -406,6 +417,11 @@ export default function SongMap({
             end={range.end}
           />
         </div>
+        {selectedPiece.qualityNote ? (
+          <p className="mt-2 font-josefin text-[7px] uppercase leading-relaxed tracking-[0.08em] text-text-dark">
+            Best available · {selectedPiece.qualityNote}
+          </p>
+        ) : null}
         <div
           className="mt-3 h-px overflow-hidden bg-border-dark"
           role="progressbar"
@@ -503,10 +519,6 @@ export default function SongMap({
         </div>
       ) : null}
 
-      <p className="mt-5 border-t border-border-dark pt-3 font-josefin text-[7px] uppercase leading-relaxed tracking-[0.09em] text-text-darkest">
-        Quality gate · uncertain analysis is labeled or withheld, never
-        presented as fact.
-      </p>
     </section>
   );
 }

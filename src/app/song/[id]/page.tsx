@@ -178,18 +178,18 @@ export default function SongPlayerPage() {
   }, [songId]);
 
   const lessonReady = isLessonReady(song);
-  const leadFocusUrl = stemLayers.find(
-    (layer) =>
-      layer.instrument === "guitar" &&
-      layer.role === "lead" &&
-      layer.quality_status === "ready",
-  )?.url;
-  const rhythmFocusUrl = stemLayers.find(
-    (layer) =>
-      layer.instrument === "guitar" &&
-      layer.role === "rhythm" &&
-      layer.quality_status === "ready",
-  )?.url;
+  const leadLayers = stemLayers.filter(
+    (layer) => layer.instrument === "guitar" && layer.role === "lead",
+  );
+  const rhythmLayers = stemLayers.filter(
+    (layer) => layer.instrument === "guitar" && layer.role === "rhythm",
+  );
+  const leadFocusUrl =
+    leadLayers.find((layer) => layer.quality_status === "ready")?.url ??
+    leadLayers[0]?.url;
+  const rhythmFocusUrl =
+    rhythmLayers.find((layer) => layer.quality_status === "ready")?.url ??
+    rhythmLayers[0]?.url;
 
   const audioUrls = useMemo(() => {
     if (!lessonReady) return [];
@@ -559,6 +559,8 @@ export default function SongPlayerPage() {
             ? "The first separation is saved. Song Map remains closed until every step is complete."
             : song.processing_stage === "refine"
               ? "Cleaning and refining every separated instrument layer."
+              : song.processing_stage === "quality_gate"
+                ? "Running the final timing, clipping, leakage, and separation checks."
               : "Checking song sections, timing, notes, and chords before Song Map opens.";
 
     return (

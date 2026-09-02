@@ -42,6 +42,20 @@ export const SCHEMA_STATEMENTS: string[] = [
     UNIQUE (song_id, layer_key)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS stem_quality_reports (
+    id TEXT PRIMARY KEY,
+    song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    layer_key TEXT NOT NULL,
+    status TEXT NOT NULL
+      CHECK (status IN ('ready', 'best_available')),
+    score REAL NOT NULL CHECK (score BETWEEN 0 AND 100),
+    summary TEXT NOT NULL,
+    checks_json TEXT NOT NULL,
+    evidence_version TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE (song_id, layer_key)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS sections (
     id TEXT PRIMARY KEY,
     song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
@@ -197,6 +211,9 @@ export const SCHEMA_STATEMENTS: string[] = [
 
   `CREATE INDEX IF NOT EXISTS stem_layers_song_sort_idx
     ON stem_layers (song_id, sort_order)`,
+
+  `CREATE INDEX IF NOT EXISTS stem_quality_reports_song_status_idx
+    ON stem_quality_reports (song_id, status)`,
 
   `CREATE INDEX IF NOT EXISTS processing_jobs_status_run_after_idx
     ON processing_jobs (status, run_after, created_at)`,

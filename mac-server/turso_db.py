@@ -244,6 +244,30 @@ def ensure_stem_layers_table() -> None:
     )
 
 
+def ensure_stem_quality_reports_table() -> None:
+    """Create the evidence ledger behind Ready and Best Available labels."""
+    client = get_client()
+    client.execute(
+        """CREATE TABLE IF NOT EXISTS stem_quality_reports (
+           id TEXT PRIMARY KEY,
+           song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+           layer_key TEXT NOT NULL,
+           status TEXT NOT NULL
+             CHECK (status IN ('ready', 'best_available')),
+           score REAL NOT NULL CHECK (score BETWEEN 0 AND 100),
+           summary TEXT NOT NULL,
+           checks_json TEXT NOT NULL,
+           evidence_version TEXT NOT NULL,
+           updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+           UNIQUE (song_id, layer_key)
+        )"""
+    )
+    client.execute(
+        """CREATE INDEX IF NOT EXISTS stem_quality_reports_song_status_idx
+           ON stem_quality_reports (song_id, status)"""
+    )
+
+
 def ensure_lyrics_revisions_table() -> None:
     """Keep every replaced lyric timeline recoverable."""
     client = get_client()

@@ -80,7 +80,7 @@ export async function GET(
   if (layerKey) {
     const layer = await queryOne<Pick<StemLayer, "url" | "label">>(
       `SELECT url, label FROM stem_layers
-       WHERE song_id = ? AND layer_key = ? AND quality_status = 'ready'
+       WHERE song_id = ? AND layer_key = ?
        LIMIT 1`,
       [id, layerKey],
     );

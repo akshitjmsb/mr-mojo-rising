@@ -198,6 +198,8 @@ function AddSongPageInner() {
                   ? "The first separation is saved. Song Map stays closed until every step is complete."
                   : next.processing_stage === "refine"
                     ? "The separated instrument layers are being cleaned and refined."
+                    : next.processing_stage === "quality_gate"
+                      ? "The final audio is being checked for timing, clipping, leakage, and separation."
                     : "Song sections, timing, notes, and chords are being checked before Song Map opens.",
           );
         }

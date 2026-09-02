@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from blob_storage import upload_file as blob_upload_file
+from audio_quality_gate import evaluate_four_layers
 from btc.inference import predict_chords as btc_predict_chords
 from chord_truth_gate import (
     verify_chord_candidates,
@@ -63,6 +64,7 @@ from turso_db import (
     complete_worker_command,
     ensure_chord_verifications_table,
     ensure_lyrics_revisions_table,
+    ensure_stem_quality_reports_table,
     ensure_stem_layers_table,
     ensure_worker_status_table,
     get_client as get_turso_client,
@@ -332,6 +334,7 @@ async def startup_workers():
     await asyncio.gather(
         asyncio.to_thread(ensure_worker_status_table),
         asyncio.to_thread(ensure_stem_layers_table),
+        asyncio.to_thread(ensure_stem_quality_reports_table),
         asyncio.to_thread(ensure_chord_verifications_table),
         asyncio.to_thread(ensure_lyrics_revisions_table),
     )
@@ -1483,6 +1486,70 @@ def upsert_stem_layers(db, song_id: str, layers: list[dict]) -> None:
         db.execute_batch(statements)
 
 
+def publish_stem_quality_reports(db, song_id: str, reports: dict[str, dict]) -> None:
+    """Persist the evidence and make quality_status reflect the measured gate."""
+    layer_keys = {
+        "full": "full",
+        "vocals": "vocals",
+        "guitars": "guitars",
+        "rhythm": "rhythm_guitar",
+        "lead": "lead_guitar",
+    }
+    db.execute("DELETE FROM stem_quality_reports WHERE song_id = ?", [song_id])
+    db.execute(
+        """UPDATE stem_layers
+           SET quality_status = 'preview', updated_at = unixepoch()
+           WHERE song_id = ?
+             AND (instrument IN ('full', 'vocals', 'guitar'))""",
+        [song_id],
+    )
+    statements = []
+    for kind, report in reports.items():
+        layer_key = layer_keys[kind]
+        status = report["status"]
+        statements.extend(
+            [
+                (
+                    """INSERT INTO stem_quality_reports
+                         (id, song_id, layer_key, status, score, summary,
+                          checks_json, evidence_version, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+                       ON CONFLICT(song_id, layer_key) DO UPDATE SET
+                         status = excluded.status,
+                         score = excluded.score,
+                         summary = excluded.summary,
+                         checks_json = excluded.checks_json,
+                         evidence_version = excluded.evidence_version,
+                         updated_at = unixepoch()""",
+                    [
+                        new_id(),
+                        song_id,
+                        layer_key,
+                        status,
+                        report["score"],
+                        report["summary"],
+                        json.dumps(
+                            {
+                                "facts": report["facts"],
+                                "checks": report["checks"],
+                            },
+                            separators=(",", ":"),
+                        ),
+                        report["evidence_version"],
+                    ],
+                ),
+                (
+                    """UPDATE stem_layers
+                       SET quality_status = ?, updated_at = unixepoch()
+                       WHERE song_id = ? AND layer_key = ?""",
+                    ["ready" if status == "ready" else "preview", song_id, layer_key],
+                ),
+            ]
+        )
+    if statements:
+        db.execute_batch(statements)
+
+
 async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
     db = get_turso_client()
     work_dir = source_cache_dir(OUTPUT_DIR, youtube_url, PIPELINE_VERSION)
@@ -2247,6 +2314,64 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         if not lyrics_task.done():
             lyrics_task.cancel()
             await asyncio.gather(lyrics_task, return_exceptions=True)
+
+    # Stage: quality gate. This is intentionally last: it measures the exact
+    # artifacts users will hear, including the optional lead/rhythm renders.
+    # A failed check never hides audio; it changes the promise from Ready to
+    # Best Available and records the precise limitation.
+    assert_job_active(db, job_id, song_id)
+    update_song(song_id, status="processing", processing_stage="quality_gate", last_error=None)
+    quality_started = stage_start(stage="quality_gate", song_id=song_id, job_id=job_id)
+    try:
+        quality_paths = {
+            "full": audio_path,
+            "vocals": stems_dir / "vocals.wav",
+            "guitars": focus_guitar_path,
+        }
+        lead_focus_path = stems_dir / "lead-focus.wav"
+        rhythm_focus_path = stems_dir / "rhythm-focus.wav"
+        published_roles = db.query_one(
+            """SELECT COUNT(*) AS count FROM stem_layers
+               WHERE song_id = ? AND layer_key IN ('lead_guitar', 'rhythm_guitar')""",
+            [song_id],
+        )
+        if (
+            valid_wav(lead_focus_path)
+            and valid_wav(rhythm_focus_path)
+            and int((published_roles or {}).get("count", 0)) == 2
+        ):
+            quality_paths["lead"] = lead_focus_path
+            quality_paths["rhythm"] = rhythm_focus_path
+        reports = await asyncio.to_thread(evaluate_four_layers, quality_paths)
+        await asyncio.to_thread(publish_stem_quality_reports, db, song_id, reports)
+        log_event(
+            "pipeline.four_layer_quality_gate",
+            song_id=song_id,
+            job_id=job_id,
+            ready_layers=[kind for kind, report in reports.items() if report["status"] == "ready"],
+            best_available_layers=[
+                kind for kind, report in reports.items() if report["status"] != "ready"
+            ],
+            scores={kind: report["score"] for kind, report in reports.items()},
+        )
+    except Exception as exc:
+        # Truthful fallback: if evidence collection itself fails, no processed
+        # layer keeps an unearned Ready label.
+        db.execute(
+            """UPDATE stem_layers
+               SET quality_status = 'preview', updated_at = unixepoch()
+               WHERE song_id = ? AND instrument IN ('vocals', 'guitar')""",
+            [song_id],
+        )
+        log_event(
+            "pipeline.four_layer_quality_gate_failed",
+            song_id=song_id,
+            job_id=job_id,
+            error=str(exc),
+            traceback=traceback.format_exc(),
+        )
+    finally:
+        stage_done(stage="quality_gate", song_id=song_id, job_id=job_id, started=quality_started)
 
 
 def classify_error(exc: Exception) -> str:

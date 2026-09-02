@@ -56,6 +56,23 @@ export type StemLayer = {
   is_learnable: 0 | 1;
   sort_order: number;
   updated_at: number;
+  quality_gate_status?: "ready" | "best_available" | null;
+  quality_score?: number | null;
+  quality_summary?: string | null;
+  quality_checks_json?: string | null;
+  quality_evidence_version?: string | null;
+};
+
+export type StemQualityReport = {
+  id: string;
+  song_id: string;
+  layer_key: string;
+  status: "ready" | "best_available";
+  score: number;
+  summary: string;
+  checks_json: string;
+  evidence_version: string;
+  updated_at: number;
 };
 
 export type Section = {

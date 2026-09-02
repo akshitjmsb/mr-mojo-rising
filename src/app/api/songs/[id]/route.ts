@@ -116,11 +116,28 @@ export async function GET(
   let stemLayers: StemLayer[] = [];
   try {
     stemLayers = await queryAll<StemLayer>(
-      `SELECT * FROM stem_layers WHERE song_id = ? ORDER BY sort_order ASC`,
+      `SELECT sl.*,
+              qr.status AS quality_gate_status,
+              qr.score AS quality_score,
+              qr.summary AS quality_summary,
+              qr.checks_json AS quality_checks_json,
+              qr.evidence_version AS quality_evidence_version
+       FROM stem_layers sl
+       LEFT JOIN stem_quality_reports qr
+         ON qr.song_id = sl.song_id AND qr.layer_key = sl.layer_key
+       WHERE sl.song_id = ?
+       ORDER BY sl.sort_order ASC`,
       [id],
     );
   } catch {
-    // Legacy databases continue to work until the additive migration runs.
+    try {
+      stemLayers = await queryAll<StemLayer>(
+        `SELECT * FROM stem_layers WHERE song_id = ? ORDER BY sort_order ASC`,
+        [id],
+      );
+    } catch {
+      // Legacy databases continue to work until the additive migration runs.
+    }
   }
   if (stemLayers.length === 0) stemLayers = legacyStemLayers(stems ?? null);
   const intentionalStemLayers = stemLayers.filter(

@@ -16,8 +16,8 @@ export const IMPORT_PROGRESS_STEPS = [
     description: "Cleaning the separated instrument layers",
   },
   {
-    label: "Analyze song",
-    description: "Finding song parts, notes, timing, and verified chords",
+    label: "Check quality",
+    description: "Checking timing, clipping, leakage, and layer separation",
   },
   {
     label: "Ready",
@@ -47,7 +47,8 @@ export function importProgressIndex(status: ImportProgressStatus) {
     status.processing_stage === "upload" ||
     status.processing_stage === "transcribe" ||
     status.processing_stage === "analyze" ||
-    status.processing_stage === "lyrics"
+    status.processing_stage === "lyrics" ||
+    status.processing_stage === "quality_gate"
   ) {
     return 4;
   }
