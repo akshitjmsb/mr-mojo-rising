@@ -598,6 +598,12 @@ export default function SongPlayerPage() {
         onPractice={handleLessonPractice}
         onReplay={playLessonRange}
         onSeek={seekTo}
+        onRangeChange={(range) => {
+          practiceRangeRef.current = range;
+          setPracticeRange(range);
+          const position = audioRef.current?.currentTime ?? currentTime;
+          if (position < range.start || position >= range.end) seekTo(range.start);
+        }}
       />
     </main>
   );

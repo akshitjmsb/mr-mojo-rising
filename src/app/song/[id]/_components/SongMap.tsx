@@ -22,6 +22,7 @@ import RhythmChordFlow from "./RhythmChordFlow";
 import SelectionDownloadButton from "./SelectionDownloadButton";
 import SoloPhraseTab from "./SoloPhraseTab";
 import SyncedLyrics from "./SyncedLyrics";
+import SelectionRange from "./SelectionRange";
 
 type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full";
 
@@ -56,6 +57,7 @@ interface Props {
   onPractice: (range: TimeRange, speed: number, source?: AudioSource) => void;
   onReplay: (range: TimeRange, speed: number, source?: AudioSource) => void;
   onSeek: (time: number) => void;
+  onRangeChange: (range: TimeRange) => void;
 }
 
 const FULL_SONG_ID = "__full_song__";
@@ -86,6 +88,7 @@ export default function SongMap({
   onPractice,
   onReplay,
   onSeek,
+  onRangeChange,
 }: Props) {
   const pieces = useMemo(() => {
     return selectPrimarySongLayers(stemLayers).map<MapPiece>(
@@ -143,6 +146,7 @@ export default function SongMap({
   const [selectedPieceKey, setSelectedPieceKey] = useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] =
     useState<string>(FULL_SONG_ID);
+  const [customRange, setCustomRange] = useState<TimeRange | null>(null);
   const defaultPiece =
     pieces.find((piece) => piece.source === DEFAULT_SONG_LAYER) ??
     pieces[0] ??
@@ -155,18 +159,18 @@ export default function SongMap({
     null;
   const range = useMemo(
     () =>
-      selectedSectionId === FULL_SONG_ID
+      customRange ?? (selectedSectionId === FULL_SONG_ID
         ? fullRange
         : selectedSection
           ? {
               start: selectedSection.start_time,
               end: selectedSection.end_time,
             }
-          : null,
-    [fullRange, selectedSection, selectedSectionId],
+          : null),
+    [customRange, fullRange, selectedSection, selectedSectionId],
   );
   const sectionLabel =
-    selectedSectionId === FULL_SONG_ID
+    customRange ? "Custom selection" : selectedSectionId === FULL_SONG_ID
       ? "Full song"
       : (selectedSection?.label ?? "Song");
   const tuning = getSongPracticeTuning(songId, profile.tuning_id);
@@ -254,6 +258,7 @@ export default function SongMap({
   }
 
   function selectSection(id: string, nextRange: TimeRange) {
+    setCustomRange(null);
     setSelectedSectionId(id);
     if (selectedPiece) onReplay(nextRange, 1, selectedPiece.source);
   }
@@ -317,9 +322,9 @@ export default function SongMap({
             <button
               type="button"
               onClick={() => selectSection(FULL_SONG_ID, fullRange)}
-              aria-pressed={selectedSectionId === FULL_SONG_ID}
+              aria-pressed={!customRange && selectedSectionId === FULL_SONG_ID}
               className={`min-h-12 shrink-0 rounded-[2px] border px-3 text-left ${
-                selectedSectionId === FULL_SONG_ID
+                !customRange && selectedSectionId === FULL_SONG_ID
                   ? "border-gold bg-gold/10 text-gold"
                   : "border-border-dark text-text-muted"
               }`}
@@ -343,11 +348,11 @@ export default function SongMap({
                 })
               }
               aria-pressed={
-                selectedSectionId !== FULL_SONG_ID &&
+                !customRange && selectedSectionId !== FULL_SONG_ID &&
                 selectedSection?.id === section.id
               }
               className={`min-h-12 shrink-0 rounded-[2px] border px-3 text-left ${
-                selectedSection?.id === section.id &&
+                !customRange && selectedSection?.id === section.id &&
                 selectedSectionId !== FULL_SONG_ID
                   ? "border-gold bg-gold/10 text-gold"
                   : "border-border-dark text-text-muted"
@@ -362,6 +367,16 @@ export default function SongMap({
             </button>
           ))}
         </div>
+        {fullRange && fullRange.end > fullRange.start ? (
+          <SelectionRange
+            bounds={fullRange}
+            value={range}
+            onChange={(nextRange) => {
+              setCustomRange(nextRange);
+              onRangeChange(nextRange);
+            }}
+          />
+        ) : null}
       </div>
 
       <div className="mt-4">
