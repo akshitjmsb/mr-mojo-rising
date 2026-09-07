@@ -342,7 +342,10 @@ export default function SongMap({
                   end: section.end_time,
                 })
               }
-              aria-pressed={selectedSection?.id === section.id}
+              aria-pressed={
+                selectedSectionId !== FULL_SONG_ID &&
+                selectedSection?.id === section.id
+              }
               className={`min-h-12 shrink-0 rounded-[2px] border px-3 text-left ${
                 selectedSection?.id === section.id &&
                 selectedSectionId !== FULL_SONG_ID
