@@ -83,14 +83,14 @@ export default function SelectionDownloadButton({
         type="button"
         onClick={downloadSelection}
         disabled={preparing}
-        className="min-h-12 rounded-[2px] border border-border-dark bg-transparent px-3 font-josefin text-[8px] uppercase tracking-[0.13em] text-text-muted disabled:opacity-55"
+        className="min-h-9 w-full rounded-[2px] border border-border-dark bg-transparent px-3 font-josefin text-[7px] uppercase tracking-[0.13em] text-text-dark disabled:opacity-55"
       >
         {preparing ? "Preparing…" : "Download selection"}
       </button>
       {error ? (
         <p
           role="alert"
-          className="col-span-2 font-josefin text-[8px] leading-relaxed tracking-[0.06em] text-terracotta"
+          className="mt-2 font-josefin text-[8px] leading-relaxed tracking-[0.06em] text-terracotta"
         >
           {error}
         </p>

@@ -13,6 +13,11 @@ import { getSongPracticeTuning, positionNotesForTuning } from "@/lib/guitar";
 import { extractLeadNotes } from "@/lib/lead-notes";
 import { selectPrimarySongLayers } from "@/lib/primary-song-layers";
 import { buildRhythmChordChanges } from "@/lib/rhythm-chords";
+import {
+  DEFAULT_SONG_LAYER,
+  fullSongRange,
+  skipWithinRange,
+} from "@/lib/song-player-defaults";
 import RhythmChordFlow from "./RhythmChordFlow";
 import SelectionDownloadButton from "./SelectionDownloadButton";
 import SoloPhraseTab from "./SoloPhraseTab";
@@ -131,18 +136,17 @@ export default function SongMap({
       },
     );
   }, [stemLayers]);
-  const fullRange = useMemo<TimeRange | null>(() => {
-    if (sections.length === 0) return null;
-    return {
-      start: Math.min(...sections.map((section) => section.start_time)),
-      end: Math.max(...sections.map((section) => section.end_time)),
-    };
-  }, [sections]);
-  const [selectedPieceKey, setSelectedPieceKey] = useState<string | null>(null);
-  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
-    sections[0]?.id ?? null,
+  const fullRange = useMemo<TimeRange | null>(
+    () => fullSongRange(sections),
+    [sections],
   );
-  const defaultPiece = pieces[0] ?? null;
+  const [selectedPieceKey, setSelectedPieceKey] = useState<string | null>(null);
+  const [selectedSectionId, setSelectedSectionId] =
+    useState<string>(FULL_SONG_ID);
+  const defaultPiece =
+    pieces.find((piece) => piece.source === DEFAULT_SONG_LAYER) ??
+    pieces[0] ??
+    null;
   const selectedPiece =
     pieces.find((piece) => piece.key === selectedPieceKey) ?? defaultPiece;
   const selectedSection =
@@ -261,6 +265,11 @@ export default function SongMap({
     } else {
       onReplay(range, 1, selectedPiece.source);
     }
+  }
+
+  function skipBy(seconds: number) {
+    if (!range) return;
+    onSeek(skipWithinRange(position, seconds, range));
   }
 
   if (!range || !selectedPiece) {
@@ -397,7 +406,15 @@ export default function SongMap({
             {formatTime(position)}
           </p>
         </div>
-        <div className="mt-3 grid grid-cols-[1.35fr_1fr] gap-2">
+        <div className="mt-3 grid grid-cols-[0.8fr_1.4fr_0.8fr] gap-2">
+          <button
+            type="button"
+            onClick={() => skipBy(-10)}
+            aria-label="Rewind 10 seconds"
+            className="min-h-12 rounded-[2px] border border-border-dark bg-transparent px-2 font-josefin text-[9px] tracking-[0.08em] text-text-muted"
+          >
+            −10s
+          </button>
           <button
             type="button"
             onClick={togglePlayback}
@@ -406,6 +423,16 @@ export default function SongMap({
           >
             {playbackActive ? "Pause" : "Play selection"}
           </button>
+          <button
+            type="button"
+            onClick={() => skipBy(10)}
+            aria-label="Forward 10 seconds"
+            className="min-h-12 rounded-[2px] border border-border-dark bg-transparent px-2 font-josefin text-[9px] tracking-[0.08em] text-text-muted"
+          >
+            +10s
+          </button>
+        </div>
+        <div className="mt-2">
           <SelectionDownloadButton
             key={`${selectedPiece.downloadLayerKey}:${range.start}:${range.end}`}
             songId={songId}
@@ -422,17 +449,27 @@ export default function SongMap({
             Best available · {selectedPiece.qualityNote}
           </p>
         ) : null}
-        <div
-          className="mt-3 h-px overflow-hidden bg-border-dark"
-          role="progressbar"
-          aria-label={`${selectedPiece.label} playback progress`}
-          aria-valuemin={range.start}
-          aria-valuemax={range.end}
-          aria-valuenow={position}
-        >
-          <div
-            className="h-full bg-gold transition-[width] duration-100"
-            style={{ width: `${progress}%` }}
+        <div className="relative mt-2 h-7">
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 overflow-hidden bg-border-dark">
+            <div
+              className="h-full bg-gold transition-[width] duration-100"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-gold bg-bg"
+            style={{ left: `${progress}%` }}
+          />
+          <input
+            type="range"
+            min={range.start}
+            max={range.end}
+            step="0.1"
+            value={position}
+            onChange={(event) => onSeek(Number(event.target.value))}
+            aria-label={`Seek within ${sectionLabel}`}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
         </div>
       </div>

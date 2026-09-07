@@ -17,6 +17,10 @@ import type {
 import SongMap from "./_components/SongMap";
 import { getSongPracticeTuning } from "@/lib/guitar";
 import { isLessonReady } from "@/lib/import-progress";
+import {
+  DEFAULT_SONG_LAYER,
+  fullSongRange,
+} from "@/lib/song-player-defaults";
 
 type PracticeRange = {
   start: number;
@@ -69,7 +73,8 @@ export default function SongPlayerPage() {
   );
   const [loading, setLoading] = useState(true);
 
-  const [stemMode, setStemMode] = useState<AudioSource>("guitar");
+  const [stemMode, setStemMode] =
+    useState<AudioSource>(DEFAULT_SONG_LAYER);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1.0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -111,13 +116,10 @@ export default function SongPlayerPage() {
           normalizePracticeProfile(songId, data.practice_profile),
         );
         if (data.sections?.length > 0) {
-          setPracticeRange(
-            (current) =>
-              current ?? {
-                start: data.sections[0].start_time,
-                end: data.sections[0].end_time,
-              },
-          );
+          const nextRange = fullSongRange(data.sections as Section[]);
+          if (nextRange) {
+            setPracticeRange((current) => current ?? nextRange);
+          }
         }
         return (data.song as Song | null | undefined) ?? null;
       } finally {
