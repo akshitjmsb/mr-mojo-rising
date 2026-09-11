@@ -552,6 +552,7 @@ export function usePitchDetection(options: Options = {}) {
   useEffect(() => {
     if (!running) return;
     const onVisible = () => {
+      const generation = startGenerationRef.current;
       trackerRef.current.reset();
       setReading({
         frequency: null,
@@ -569,6 +570,11 @@ export function usePitchDetection(options: Options = {}) {
         state !== "closed"
       )
         ctx.resume().catch(() => {
+          if (
+            ctxRef.current !== ctx ||
+            startGenerationRef.current !== generation
+          )
+            return;
           setError("Audio was interrupted. Tap Start tuner to reconnect.");
           stop();
         });
