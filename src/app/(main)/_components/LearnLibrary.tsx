@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Song } from "@/lib/database.types";
 import { isLessonReady } from "@/lib/import-progress";
-import { groupSongsByArtist } from "@/lib/song-catalog";
 import StorageMeter, { type StorageUsage } from "./StorageMeter";
 
 type LearnSong = Song & {
@@ -142,19 +141,21 @@ export default function LearnLibrary() {
     }
   }
 
-  const artistGroups = useMemo(() => groupSongsByArtist(songs), [songs]);
+  const sortedSongs = useMemo(
+    () =>
+      [...songs].sort((a, b) =>
+        a.title.localeCompare(b.title, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      ),
+    [songs],
+  );
 
   return (
     <main className="flex-1">
       <div className="px-5 pt-4 pb-2">
-        <h1 className="font-playfair text-[22px] italic text-text">
-          Choose a song
-        </h1>
-        {!loading && (
-          <p className="mt-1 font-josefin text-[9px] tracking-[0.08em] text-text-muted">
-            Open its separated parts.
-          </p>
-        )}
+        <h1 className="sr-only">Songs</h1>
         {loading && (
           <p className="mt-1 font-josefin text-[8px] uppercase tracking-[0.16em] text-text-dark">
             Loading…
@@ -167,115 +168,92 @@ export default function LearnLibrary() {
         )}
       </div>
 
-      <StorageMeter
-        refreshKey={storageRefreshKey}
-        mode="usage"
-        onUsage={setStorageUsage}
-      />
+      {activeSongId && (
+        <StorageMeter
+          refreshKey={storageRefreshKey}
+          mode="usage"
+          onUsage={setStorageUsage}
+        />
+      )}
 
       <div className="pb-4">
-        {artistGroups.map((group, groupIndex) => {
-          const headingId = `artist-${groupIndex}`;
+        {sortedSongs.map((song) => {
+          const workerOnline = (song.worker_online_count ?? 0) > 0;
+          const playable = isLessonReady(song);
+          const actionsOpen = activeSongId === song.id;
+          const storedSize = songSize(storageUsage?.song_bytes[song.id]);
+
           return (
-            <section key={group.artist} aria-labelledby={headingId}>
-              <div className="px-5 pt-5 pb-1.5">
-                <h2
-                  id={headingId}
-                  className="font-josefin text-[9px] uppercase tracking-[0.16em] text-gold"
+            <div
+              key={song.id}
+              data-song-actions={song.id}
+              className="flex min-h-12 items-center border-b border-border-darkest px-5"
+            >
+              <button
+                onClick={() => router.push(`/song/${song.id}`)}
+                className="min-w-0 flex-1 cursor-pointer border-none bg-transparent py-3 pr-3 text-left hover:text-gold"
+              >
+                <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[15px] italic text-text">
+                  {song.title}
+                </span>
+              </button>
+
+              {actionsOpen && !playable && (
+                <p
+                  className={`shrink-0 font-josefin text-[7px] uppercase tracking-[0.12em] ${
+                    song.status === "failed" ? "text-terracotta" : "text-orange"
+                  }`}
                 >
-                  {group.artist}
-                </h2>
-              </div>
+                  {pendingLabel(song, workerOnline)}
+                </p>
+              )}
 
-              {group.songs.map((song) => {
-                const workerOnline = (song.worker_online_count ?? 0) > 0;
-                const playable = isLessonReady(song);
-                const actionsOpen = activeSongId === song.id;
-                const storedSize = songSize(storageUsage?.song_bytes[song.id]);
+              {actionsOpen && storedSize && (
+                <p className="shrink-0 pl-2 font-josefin text-[7px] tabular-nums uppercase tracking-[0.08em] text-text-dark">
+                  {storedSize}
+                </p>
+              )}
 
-                return (
-                  <div
-                    key={song.id}
-                    data-song-actions={song.id}
-                    className="flex min-h-12 items-center border-b border-border-darkest px-5"
-                  >
-                    <button
-                      onClick={() => {
-                        if (playable) router.push(`/song/${song.id}`);
-                      }}
-                      className={`min-w-0 flex-1 border-none bg-transparent py-3 pr-3 text-left ${
-                        playable
-                          ? "cursor-pointer hover:text-gold"
-                          : "cursor-default"
-                      }`}
-                    >
-                      <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-playfair text-[15px] italic text-text">
-                        {song.title}
-                      </span>
-                    </button>
+              {actionsOpen && song.status === "failed" && (
+                <button
+                  onClick={() => handleRetrySong(song)}
+                  disabled={
+                    retryingSongId === song.id || deletingSongId === song.id
+                  }
+                  className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-gold disabled:cursor-default disabled:opacity-50"
+                >
+                  {retryingSongId === song.id ? "…" : "Retry"}
+                </button>
+              )}
 
-                    {!playable && (
-                      <p
-                        className={`shrink-0 font-josefin text-[7px] uppercase tracking-[0.12em] ${
-                          song.status === "failed"
-                            ? "text-terracotta"
-                            : "text-orange"
-                        }`}
-                      >
-                        {pendingLabel(song, workerOnline)}
-                      </p>
-                    )}
+              {actionsOpen && (
+                <button
+                  onClick={() => handleDeleteSong(song)}
+                  disabled={deletingSongId === song.id}
+                  className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-terracotta disabled:cursor-default disabled:opacity-50"
+                >
+                  {deletingSongId === song.id
+                    ? "…"
+                    : confirmDeleteId === song.id
+                      ? "Delete?"
+                      : "Delete"}
+                </button>
+              )}
 
-                    {!actionsOpen && storedSize && (
-                      <p className="shrink-0 pl-2 font-josefin text-[7px] tabular-nums uppercase tracking-[0.08em] text-text-dark">
-                        {storedSize}
-                      </p>
-                    )}
-
-                    {actionsOpen && song.status === "failed" && (
-                      <button
-                        onClick={() => handleRetrySong(song)}
-                        disabled={
-                          retryingSongId === song.id ||
-                          deletingSongId === song.id
-                        }
-                        className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-gold disabled:cursor-default disabled:opacity-50"
-                      >
-                        {retryingSongId === song.id ? "…" : "Retry"}
-                      </button>
-                    )}
-
-                    {actionsOpen && (
-                      <button
-                        onClick={() => handleDeleteSong(song)}
-                        disabled={deletingSongId === song.id}
-                        className="h-11 cursor-pointer border-none bg-transparent px-2 font-josefin text-[8px] uppercase tracking-[0.12em] text-terracotta disabled:cursor-default disabled:opacity-50"
-                      >
-                        {deletingSongId === song.id
-                          ? "…"
-                          : confirmDeleteId === song.id
-                            ? "Delete?"
-                            : "Delete"}
-                      </button>
-                    )}
-
-                    <button
-                      aria-label={`Actions for ${song.title}`}
-                      aria-expanded={actionsOpen}
-                      onClick={() => {
-                        setActiveSongId((current) =>
-                          current === song.id ? null : song.id,
-                        );
-                        setConfirmDeleteId(null);
-                      }}
-                      className="flex h-11 w-7 shrink-0 cursor-pointer items-center justify-end border-none bg-transparent font-josefin text-[15px] text-text-dark"
-                    >
-                      ⋮
-                    </button>
-                  </div>
-                );
-              })}
-            </section>
+              <button
+                aria-label={`Actions for ${song.title}`}
+                aria-expanded={actionsOpen}
+                onClick={() => {
+                  setActiveSongId((current) =>
+                    current === song.id ? null : song.id,
+                  );
+                  setConfirmDeleteId(null);
+                }}
+                className="flex h-11 w-7 shrink-0 cursor-pointer items-center justify-end border-none bg-transparent font-josefin text-[15px] text-text-dark"
+              >
+                ⋮
+              </button>
+            </div>
           );
         })}
 
