@@ -8,7 +8,7 @@ import TuningPicker from "./_components/TuningPicker";
 import { usePitchDetection } from "./_hooks/usePitchDetection";
 import {
   TUNINGS,
-  centsToTargetFolded,
+  centsBetween,
   closestString,
   type Tuning,
 } from "./_lib/tunings";
@@ -37,16 +37,19 @@ function Tuner() {
   const searchParams = useSearchParams();
   const [tuning, setTuning] = useState<Tuning>(() => {
     const requested = searchParams.get("tuning");
-    return TUNINGS.find((candidate) => candidate.id === requested) ?? TUNINGS[0];
+    return (
+      TUNINGS.find((candidate) => candidate.id === requested) ?? TUNINGS[0]
+    );
   });
   const [pinned, setPinned] = useState<number | null>(null);
-  const { reading, running, starting, error, start, stop } =
-    usePitchDetection({
-      minFrequency: 30,
-      maxFrequency: 700,
-      minClarity: 0.8,
-      silenceRms: 0.006,
-    });
+  const { reading, running, starting, error, start, stop } = usePitchDetection({
+    minFrequency:
+      Math.min(...tuning.strings.map((string) => string.frequency)) * 0.75,
+    maxFrequency:
+      Math.max(...tuning.strings.map((string) => string.frequency)) * 1.4,
+    minClarity: 0.85,
+    silenceRms: 0.0015,
+  });
 
   const match = useMemo(() => {
     if (reading.frequency === null) return null;
@@ -55,7 +58,7 @@ function Tuner() {
       if (!string) return null;
       return {
         string,
-        cents: centsToTargetFolded(reading.frequency, string.frequency),
+        cents: centsBetween(reading.frequency, string.frequency),
         index: pinned,
       };
     }
@@ -63,6 +66,8 @@ function Tuner() {
   }, [reading.frequency, tuning, pinned]);
 
   const cents = match?.cents ?? null;
+  const usableCents =
+    reading.stable && cents !== null && Math.abs(cents) <= 700 ? cents : null;
   const inTune =
     running &&
     reading.stable &&
@@ -75,9 +80,21 @@ function Tuner() {
 
   let status = "Tap start, then pluck one string";
   if (starting) status = "Starting microphone…";
+  else if (running && reading.issue === "interrupted")
+    status = "Microphone interrupted · tap reconnect";
+  else if (running && reading.issue === "clipping")
+    status = "Too loud · move the phone away";
+  else if (running && reading.issue === "noisy")
+    status = "Mute other strings · pluck one string";
   else if (running && reading.frequency === null)
     status = "Listening · pluck one string";
+  else if (running && reading.issue === "quiet")
+    status = "Pluck again · move the phone closer";
   else if (running && !reading.stable) status = "Hold the note steady";
+  else if (running && match === null)
+    status = "Tap the string you want to tune";
+  else if (cents !== null && Math.abs(cents) > 700)
+    status = "Different octave · check the string";
   else if (inTune) status = "In tune";
   else if (cents !== null && cents < 0) status = "Tune up · flat";
   else if (cents !== null) status = "Tune down · sharp";
@@ -124,19 +141,21 @@ function Tuner() {
           }`}
         >
           {status}
-          {reading.stable && cents !== null && !inTune
-            ? <span aria-hidden> · {Math.abs(Math.round(cents))}¢</span>
-            : ""}
+          {usableCents !== null && !inTune ? (
+            <span aria-hidden> · {Math.abs(Math.round(usableCents))}¢</span>
+          ) : (
+            ""
+          )}
         </p>
       </section>
 
-      <TuningGauge cents={reading.stable ? cents : null} inTune={inTune} />
+      <TuningGauge cents={usableCents} inTune={inTune} />
 
       <div className="flex flex-col gap-2">
         <StringRow
           tuning={tuning}
           activeIndex={activeIndex}
-          cents={reading.stable ? cents : null}
+          cents={usableCents}
           pinnedIndex={pinned}
           onSelect={setPinned}
         />
@@ -147,15 +166,22 @@ function Tuner() {
 
       <button
         type="button"
-        onClick={running ? stop : start}
-        disabled={starting}
+        onClick={() => {
+          if (running && reading.issue === "interrupted") {
+            stop();
+            void start();
+          } else if (running || starting) stop();
+          else void start();
+        }}
         className="min-h-12 w-full cursor-pointer border border-gold bg-transparent px-5 font-josefin text-[10px] uppercase tracking-[0.18em] text-gold transition-opacity disabled:cursor-wait disabled:opacity-60"
       >
         {starting
-          ? "Starting microphone…"
-          : running
-            ? "Stop tuner"
-            : "Start tuner"}
+          ? "Cancel microphone"
+          : running && reading.issue === "interrupted"
+            ? "Reconnect microphone"
+            : running
+              ? "Stop tuner"
+              : "Start tuner"}
       </button>
 
       {error ? (

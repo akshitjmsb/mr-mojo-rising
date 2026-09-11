@@ -24,19 +24,14 @@ const GAUGE_TICKS = Array.from({ length: 11 }, (_, index) => {
       y1={y1}
       x2={x2}
       y2={y2}
-      stroke={
-        value === 0 ? "var(--color-gold)" : "var(--color-border-dark)"
-      }
+      stroke={value === 0 ? "var(--color-gold)" : "var(--color-border-dark)"}
       strokeWidth={value === 0 ? 1.5 : 0.7}
     />
   );
 });
 
 export default function TuningGauge({ cents, inTune }: Props) {
-  const clamped = Math.max(
-    -GAUGE_RANGE,
-    Math.min(GAUGE_RANGE, cents ?? 0),
-  );
+  const clamped = Math.max(-GAUGE_RANGE, Math.min(GAUGE_RANGE, cents ?? 0));
   const angle = (clamped / GAUGE_RANGE) * 60;
 
   return (
@@ -51,6 +46,7 @@ export default function TuningGauge({ cents, inTune }: Props) {
         {GAUGE_TICKS}
         <circle cx="100" cy="95" r="3" fill="var(--color-border)" />
         <line
+          opacity={cents === null ? 0 : 1}
           x1="100"
           y1="95"
           x2="100"
@@ -64,13 +60,37 @@ export default function TuningGauge({ cents, inTune }: Props) {
             transformOrigin: "100px 95px",
           }}
         />
-        <text x="20" y="108" fill="var(--color-text-darkest)" fontSize="7" fontFamily="var(--font-josefin)" letterSpacing="0.15em" textAnchor="middle">
+        <text
+          x="20"
+          y="108"
+          fill="var(--color-text-darkest)"
+          fontSize="7"
+          fontFamily="var(--font-josefin)"
+          letterSpacing="0.15em"
+          textAnchor="middle"
+        >
           FLAT
         </text>
-        <text x="100" y="108" fill="var(--color-text-muted)" fontSize="7" fontFamily="var(--font-josefin)" letterSpacing="0.2em" textAnchor="middle">
-          IN TUNE
+        <text
+          x="100"
+          y="108"
+          fill="var(--color-text-muted)"
+          fontSize="7"
+          fontFamily="var(--font-josefin)"
+          letterSpacing="0.2em"
+          textAnchor="middle"
+        >
+          {inTune ? "IN TUNE" : "0"}
         </text>
-        <text x="180" y="108" fill="var(--color-text-darkest)" fontSize="7" fontFamily="var(--font-josefin)" letterSpacing="0.15em" textAnchor="middle">
+        <text
+          x="180"
+          y="108"
+          fill="var(--color-text-darkest)"
+          fontSize="7"
+          fontFamily="var(--font-josefin)"
+          letterSpacing="0.15em"
+          textAnchor="middle"
+        >
           SHARP
         </text>
       </svg>

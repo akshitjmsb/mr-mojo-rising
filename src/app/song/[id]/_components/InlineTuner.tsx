@@ -6,12 +6,9 @@ import { usePitchDetection } from "@/app/(main)/tuner/_hooks/usePitchDetection";
 import {
   EB_BASS_TUNING,
   TUNINGS,
-  centsToTargetFolded,
+  centsBetween,
 } from "@/app/(main)/tuner/_lib/tunings";
-import {
-  playReferenceNote,
-  stopReferenceAudio,
-} from "@/lib/reference-audio";
+import { playReferenceNote, stopReferenceAudio } from "@/lib/reference-audio";
 
 interface Props {
   instrument: "guitar" | "bass";
@@ -48,11 +45,12 @@ export default function InlineTuner({
     () =>
       reading.frequency === null
         ? null
-        : centsToTargetFolded(reading.frequency, target.frequency),
+        : centsBetween(reading.frequency, target.frequency),
     [reading.frequency, target.frequency],
   );
   const stableSignal =
     running &&
+    reading.stable &&
     cents !== null &&
     Math.abs(cents) <= IN_TUNE_CENTS &&
     reading.clarity >= 0.78 &&
@@ -74,9 +72,7 @@ export default function InlineTuner({
 
       if (elapsed < STABLE_MS) return;
       setTuned((current) =>
-        current.map((value, index) =>
-          index === targetIndex ? true : value,
-        ),
+        current.map((value, index) => (index === targetIndex ? true : value)),
       );
       stableSinceRef.current = null;
       setHoldProgress(0);
@@ -223,11 +219,15 @@ export default function InlineTuner({
 
       {!running && !allTuned && !error && (
         <p className="mt-2 text-center font-josefin text-[8px] leading-relaxed tracking-[0.08em] text-text-darkest">
-          Your browser will ask for microphone permission. Audio stays on this device.
+          Your browser will ask for microphone permission. Audio stays on this
+          device.
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-center font-josefin text-[9px] leading-relaxed text-terracotta">
+        <p
+          role="alert"
+          className="mt-2 text-center font-josefin text-[9px] leading-relaxed text-terracotta"
+        >
           {error}
         </p>
       )}

@@ -46,12 +46,7 @@ export const EB_BASS_TUNING: Tuning = {
   id: "eb-bass",
   label: "E♭ Standard Bass",
   description: "E♭ A♭ D♭ G♭",
-  strings: [
-    note("E♭1", 27),
-    note("A♭1", 32),
-    note("D♭2", 37),
-    note("G♭2", 42),
-  ],
+  strings: [note("E♭1", 27), note("A♭1", 32), note("D♭2", 37), note("G♭2", 42)],
 };
 
 // MIDI numbers for standard guitar (low to high): E2=40, A2=45, D3=50, G3=55, B3=59, E4=64
@@ -135,16 +130,6 @@ export function centsBetween(frequency: number, target: number) {
   return 1200 * Math.log2(frequency / target);
 }
 
-/**
- * Cents from `frequency` to `target`, folded to the nearest octave. Use when
- * the target string is fixed (pinned) so a harmonic still reads as a small
- * offset from that string rather than ±1200¢.
- */
-export function centsToTargetFolded(frequency: number, target: number) {
-  const base = centsBetween(frequency, target);
-  return base - Math.round(base / 1200) * 1200;
-}
-
 export interface MatchResult {
   string: GuitarString;
   cents: number;
@@ -152,10 +137,8 @@ export interface MatchResult {
 }
 
 /**
- * Closest string in the tuning to `frequency`. Automatic identification only
- * tolerates a one-octave detector error: folding every octave would make E2
- * and E4 indistinguishable. A manually pinned string can use the broader
- * `centsToTargetFolded` harmonic tolerance safely.
+ * Match actual concert pitch, never an octave-folded substitute. Otherwise
+ * Drop D's D3 is mistaken for D2, and a different string can appear in tune.
  */
 export function closestString(
   frequency: number,
@@ -165,13 +148,11 @@ export function closestString(
   let best: MatchResult | null = null;
   for (let i = 0; i < tuning.strings.length; i++) {
     const s = tuning.strings[i];
-    const base = centsBetween(frequency, s.frequency);
-    const cents = [base, base - 1200, base + 1200].reduce((closest, value) =>
-      Math.abs(value) < Math.abs(closest) ? value : closest,
-    );
+    const cents = centsBetween(frequency, s.frequency);
     if (best === null || Math.abs(cents) < Math.abs(best.cents)) {
       best = { string: s, cents, index: i };
     }
   }
-  return best;
+  // A badly detuned/ambiguous note needs an explicit target, not a guess.
+  return best && Math.abs(best.cents) <= 150 ? best : null;
 }
