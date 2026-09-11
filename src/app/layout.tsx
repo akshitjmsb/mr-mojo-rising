@@ -9,6 +9,7 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
+import { VocalPlayerProvider } from "@/components/VocalPlayer";
 
 // Doors theme fonts — psychedelic dive bar
 const playfair = Playfair_Display({
@@ -101,7 +102,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider><VocalPlayerProvider>{children}</VocalPlayerProvider></ThemeProvider>
       </body>
     </html>
   );

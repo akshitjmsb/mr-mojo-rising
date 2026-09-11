@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useVocalPlayer } from "./VocalPlayer";
 
 const TABS = [
   { label: "Add Song", href: "/" },
   { label: "Songs", href: "/practice" },
+  { label: "Player", href: "/player" },
   { label: "Tuner", href: "/tuner" },
 ];
 
 export default function TabNav() {
   const pathname = usePathname();
+  const player = useVocalPlayer();
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
@@ -28,6 +31,9 @@ export default function TabNav() {
           <Link
             key={tab.href}
             href={tab.href}
+            onClick={() => {
+              if (tab.href === "/player" && pathname !== "/player") player.start();
+            }}
             className={`block whitespace-nowrap border-b py-3 font-josefin text-[10px] font-light uppercase tracking-[0.2em] transition-colors duration-300 ${
               active
                 ? "border-gold text-gold"
