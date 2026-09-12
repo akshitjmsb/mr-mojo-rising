@@ -71,19 +71,23 @@ if [ "${#missing_vars[@]}" -gt 0 ]; then
 fi
 
 echo "Starting Mr. Mojo Rising Mac server..."
-echo "Turso URL: $TURSO_DATABASE_URL"
 echo "Worker concurrency: ${WORKER_CONCURRENCY:-1}"
 
-PYTHON_BIN="python3"
-if [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
-  PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
-fi
+PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+[ -x "$PYTHON_BIN" ] || { echo "Project Python environment missing; worker cannot start."; exit 1; }
+export OUTPUT_DIR="$ROOT_DIR/.runtime/audio"
+export SEPARATOR_MODEL_DIR="$ROOT_DIR/.runtime/models"
+export HF_HOME="$ROOT_DIR/.runtime/cache/huggingface"
+export TORCH_HOME="$ROOT_DIR/.runtime/cache/torch"
+export PIP_CACHE_DIR="$ROOT_DIR/.runtime/cache/pip"
+export TMPDIR="$ROOT_DIR/.runtime/tmp"
+mkdir -p "$OUTPUT_DIR" "$SEPARATOR_MODEL_DIR" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$TMPDIR"
 
 # yt-dlp must track YouTube's player changes more closely than the rest of the
 # frozen ML environment. Refresh it at most daily; a network failure is
 # non-fatal because the worker can continue with its last known-good version.
 YTDLP_UPDATE_INTERVAL_SECONDS="${YTDLP_UPDATE_INTERVAL_SECONDS:-86400}"
-YTDLP_STATE_DIR="${YTDLP_STATE_DIR:-$HOME/Library/Application Support/MrMojoRising/state}"
+YTDLP_STATE_DIR="$ROOT_DIR/.runtime/state"
 YTDLP_UPDATE_STAMP="$YTDLP_STATE_DIR/yt-dlp-updated"
 mkdir -p "$YTDLP_STATE_DIR"
 
@@ -99,9 +103,9 @@ fi
 
 if [ "$stamp_age" -ge "$YTDLP_UPDATE_INTERVAL_SECONDS" ]; then
   echo "Refreshing YouTube downloader..."
-  if "$PYTHON_BIN" -m pip install --disable-pip-version-check --quiet --upgrade "yt-dlp[default]"; then
+  if "$PYTHON_BIN" -c 'import subprocess,sys; sys.exit(subprocess.run([sys.executable,"-m","pip","install","--disable-pip-version-check","--quiet","--upgrade","yt-dlp[default]"],timeout=120).returncode)'; then
     touch "$YTDLP_UPDATE_STAMP"
-    echo "YouTube downloader: $($SCRIPT_DIR/venv/bin/yt-dlp --version 2>/dev/null || echo ready)"
+    echo "YouTube downloader: $("$PYTHON_BIN" -m yt_dlp --version 2>/dev/null || echo unavailable)"
   else
     echo "Warning: downloader refresh failed; continuing with the installed version."
   fi

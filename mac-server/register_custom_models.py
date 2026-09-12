@@ -19,7 +19,7 @@ MODELS_JSON = (
 MODEL_DIR = Path(
     os.environ.get(
         "SEPARATOR_MODEL_DIR",
-        str(Path.home() / "Library" / "Application Support" / "MrMojoRising" / "separator-models"),
+        str(SCRIPT_DIR.parent / ".runtime" / "models"),
     )
 ).expanduser()
 

@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import traceback
 import wave
@@ -24,6 +25,8 @@ import torch
 import requests
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from worker_runtime import acquire_worker_lock, readiness, tool_ready
 from pydantic import BaseModel
 
 from blob_storage import upload_file as blob_upload_file
@@ -79,6 +82,7 @@ from youtube_download import (
     discover_javascript_runtime,
     is_recoverable_download_failure,
     ytdlp_version,
+    ytdlp_command,
 )
 
 app = FastAPI(title="Mr. Mojo Rising — Mac Server")
@@ -92,13 +96,17 @@ app.add_middleware(
 
 # Config
 API_SECRET = os.environ.get("API_SECRET", "dev-secret")
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/tmp/mojo-stems"))
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+RUNTIME_DIR = PROJECT_DIR / ".runtime"
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(RUNTIME_DIR / "audio")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "hq-v4-guitar-focus")
 
-VENV_PYTHON = str(Path(__file__).resolve().parent / "venv" / "bin" / "python")
-_VENV_YTDLP = Path(VENV_PYTHON).with_name("yt-dlp")
-YTDLP_BIN = os.environ.get("YTDLP_BIN", str(_VENV_YTDLP) if _VENV_YTDLP.exists() else "yt-dlp")
+VENV_PYTHON = sys.executable
+YTDLP_BIN = ytdlp_command(VENV_PYTHON, os.environ.get("YTDLP_BIN"))
+WORKER_LOCK = None
+DEPENDENCIES_READY = False
+ACTIVE_JOBS = 0
 YTDLP_AUTO_UPDATE_ON_FAILURE = os.environ.get(
     "YTDLP_AUTO_UPDATE_ON_FAILURE", "true"
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -129,9 +137,9 @@ DEMUCS_SEGMENT = os.environ.get("DEMUCS_SEGMENT")
 # Vocal refine pass: re-separates vocals with BS-Roformer (audio-separator),
 # which is markedly cleaner than Demucs for voice. Demucs still provides
 # drums/bass/guitar. Non-fatal — falls back to the Demucs vocals on failure.
-SEPARATOR_BIN = os.environ.get(
-    "SEPARATOR_BIN", str(Path(__file__).resolve().parent / "venv-sep" / "bin" / "audio-separator")
-)
+SEPARATOR_PYTHON = str(PROJECT_DIR / "mac-server" / "venv-sep" / "bin" / "python")
+SEPARATOR_BIN = SEPARATOR_PYTHON
+SEPARATOR_COMMAND = [SEPARATOR_PYTHON, "-c", "from audio_separator.utils.cli import main; main()"]
 VOCAL_REFINE_ENABLED = os.environ.get("VOCAL_REFINE_ENABLED", "true").strip().lower() in {
     "1",
     "true",
@@ -152,7 +160,7 @@ GUITAR_REFINE_ENABLED = os.environ.get("GUITAR_REFINE_ENABLED", "true").strip().
 GUITAR_REFINE_MODEL = os.environ.get("GUITAR_REFINE_MODEL", "mel_band_roformer_guitar_becruily.ckpt")
 SEPARATOR_MODEL_DIR = os.environ.get(
     "SEPARATOR_MODEL_DIR",
-    str(Path.home() / "Library" / "Application Support" / "MrMojoRising" / "separator-models"),
+    str(RUNTIME_DIR / "models"),
 )
 SEPARATOR_USE_AUTOCAST = os.environ.get("SEPARATOR_USE_AUTOCAST", "false").strip().lower() in {
     "1",
@@ -282,13 +290,17 @@ class ProcessRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_workers():
-    global REQUEUE_TASK, WORKER_STATUS_TASK, WORKER_COMMAND_TASK
+    global REQUEUE_TASK, WORKER_STATUS_TASK, WORKER_COMMAND_TASK, WORKER_LOCK, DEPENDENCIES_READY
+
+    WORKER_LOCK = acquire_worker_lock(RUNTIME_DIR / "worker.lock")
 
     js_runtime = discover_javascript_runtime()
     downloader_version = await asyncio.to_thread(ytdlp_version, YTDLP_BIN)
-    if not js_runtime or not downloader_version:
+    dependency_status = await check_dependencies(js_runtime, downloader_version)
+    DEPENDENCIES_READY = dependency_status["ready"]
+    if not DEPENDENCIES_READY:
         raise RuntimeError(
-            "YouTube downloader is not ready: yt-dlp and Deno 2.3+ or Node 22+ are required"
+            f"Worker dependencies are not ready: {dependency_status['checks']}"
         )
 
     log_event(
@@ -355,6 +367,7 @@ async def startup_workers():
 
 @app.on_event("shutdown")
 async def shutdown_workers():
+    global WORKER_LOCK
     for task in WORKER_TASKS:
         task.cancel()
 
@@ -373,6 +386,10 @@ async def shutdown_workers():
         WORKER_COMMAND_TASK.cancel()
         await asyncio.gather(WORKER_COMMAND_TASK, return_exceptions=True)
 
+    if WORKER_LOCK:
+        WORKER_LOCK.close()
+        WORKER_LOCK = None
+
     try:
         await asyncio.to_thread(update_worker_status, WORKER_ID, "stopped")
     except Exception as exc:
@@ -385,8 +402,11 @@ async def health():
         asyncio.to_thread(discover_javascript_runtime),
         asyncio.to_thread(ytdlp_version, YTDLP_BIN),
     )
-    return {
-        "status": "ok",
+    dependency_status = await check_dependencies(js_runtime, downloader_version)
+    return JSONResponse(status_code=200 if dependency_status["ready"] else 503, content={
+        "status": "ok" if dependency_status["ready"] else "degraded",
+        "runtime_version": "project-worker-v2",
+        "readiness": dependency_status,
         "worker_id": WORKER_ID,
         "concurrency": WORKER_CONCURRENCY,
         "poll_interval_seconds": QUEUE_POLL_INTERVAL_SECONDS,
@@ -398,7 +418,16 @@ async def health():
             "javascript_runtime": js_runtime.name if js_runtime else None,
             "javascript_runtime_version": js_runtime.version if js_runtime else None,
         },
-    }
+    })
+
+
+async def check_dependencies(js_runtime, downloader_version):
+    ffmpeg_ok, separator_ok = await asyncio.gather(
+        asyncio.to_thread(tool_ready, ["ffmpeg", "-version"]),
+        asyncio.to_thread(tool_ready, [*SEPARATOR_COMMAND, "--version"], 20),
+    )
+    return readiness(downloader=bool(downloader_version), javascript=bool(js_runtime),
+                     ffmpeg=ffmpeg_ok, separator=separator_ok)
 
 
 # Backward-compatible manual enqueue endpoint (not used by app primary flow).
@@ -491,16 +520,24 @@ async def get_status(song_id: str):
 
 
 async def worker_loop(slot: int):
+    global ACTIVE_JOBS
     worker_name = f"{WORKER_ID}:{slot}"
 
     while True:
         try:
+            if not DEPENDENCIES_READY:
+                await asyncio.sleep(5)
+                continue
             job = await asyncio.to_thread(claim_next_job, worker_name)
             if not job:
                 await asyncio.sleep(QUEUE_POLL_INTERVAL_SECONDS)
                 continue
 
-            await process_claimed_job(worker_name, job)
+            ACTIVE_JOBS += 1
+            try:
+                await process_claimed_job(worker_name, job)
+            finally:
+                ACTIVE_JOBS -= 1
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -543,8 +580,22 @@ async def stale_requeue_loop():
 
 
 async def worker_status_loop():
+    global DEPENDENCIES_READY
     while True:
         try:
+            js_runtime, version = await asyncio.gather(
+                asyncio.to_thread(discover_javascript_runtime),
+                asyncio.to_thread(ytdlp_version, YTDLP_BIN),
+            )
+            status = await check_dependencies(js_runtime, version)
+            was_ready = DEPENDENCIES_READY
+            DEPENDENCIES_READY = status["ready"]
+            if not DEPENDENCIES_READY:
+                log_event("worker.dependencies_unhealthy", checks=status["checks"])
+                if not ACTIVE_JOBS:
+                    await asyncio.to_thread(update_worker_status, WORKER_ID, "degraded")
+            elif not was_ready and not ACTIVE_JOBS:
+                await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
             await asyncio.to_thread(touch_worker_status, WORKER_ID)
         except asyncio.CancelledError:
             raise
@@ -761,7 +812,7 @@ async def process_claimed_job(worker_name: str, job: dict):
             await asyncio.gather(pipeline_task, return_exceptions=True)
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
-        await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
+        await asyncio.to_thread(update_worker_status, WORKER_ID, "idle" if DEPENDENCIES_READY else "degraded")
 
 
 async def heartbeat_loop(job_id: str, worker_name: str):
@@ -1240,7 +1291,7 @@ async def run_primary_separation(
     job_id: str,
 ) -> None:
     cmd = [
-        SEPARATOR_BIN,
+        *SEPARATOR_COMMAND,
         str(audio_path),
         "-m",
         PRIMARY_SEPARATION_MODEL,
@@ -1306,7 +1357,7 @@ async def refine_stem(
         shutil.rmtree(refine_dir)
     refine_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        SEPARATOR_BIN,
+        *SEPARATOR_COMMAND,
         str(audio_path),
         "-m",
         model,

@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,10 +79,26 @@ def discover_javascript_runtime(
     return None
 
 
-def ytdlp_version(ytdlp_bin: str) -> str | None:
+def command_prefix(command: str | list[str]) -> list[str]:
+    """Keep paths containing spaces intact; never parse commands through a shell."""
+    return [command] if isinstance(command, str) else list(command)
+
+
+def ytdlp_command(python: str = sys.executable, configured: str | None = None) -> list[str]:
+    """Console-script shebangs retain old venv paths after a folder move.
+
+    Run the installed module with the active interpreter instead. An explicitly
+    configured executable is used only if it actually runs, not just exists.
+    """
+    if configured and ytdlp_version(configured):
+        return [configured]
+    return [python, "-m", "yt_dlp"]
+
+
+def ytdlp_version(ytdlp_bin: str | list[str]) -> str | None:
     try:
         result = subprocess.run(
-            [ytdlp_bin, "--version"],
+            [*command_prefix(ytdlp_bin), "--version"],
             capture_output=True,
             check=True,
             text=True,
@@ -94,7 +111,7 @@ def ytdlp_version(ytdlp_bin: str) -> str | None:
 
 def build_download_attempts(
     *,
-    ytdlp_bin: str,
+    ytdlp_bin: str | list[str],
     runtime: JavaScriptRuntime,
     output_template: Path,
     youtube_url: str,
@@ -106,8 +123,9 @@ def build_download_attempts(
     videos that do not require standard web-client proof-of-origin tokens.
     Each is attempted separately to avoid cross-client token/URL mismatches.
     """
+    prefix = command_prefix(ytdlp_bin)
     common = [
-        ytdlp_bin,
+        *prefix,
         "--ignore-config",
         "--js-runtimes",
         runtime.ytdlp_arg,
@@ -135,7 +153,7 @@ def build_download_attempts(
         str(output_template),
     ]
     if cookies_from_browser:
-        common[1:1] = ["--cookies-from-browser", cookies_from_browser]
+        common[len(prefix):len(prefix)] = ["--cookies-from-browser", cookies_from_browser]
 
     clients: tuple[tuple[str, str | None], ...] = (
         ("default", None),
@@ -146,7 +164,7 @@ def build_download_attempts(
     for name, client in clients:
         command = list(common)
         if client:
-            command[1:1] = [
+            command[len(prefix):len(prefix)] = [
                 "--extractor-args",
                 f"youtube:player_client={client}",
             ]

@@ -49,6 +49,7 @@ next-env.d.ts
 
 # local runtime logs
 .mmr-logs/
+.runtime/
 
 # claude code local settings
 .claude/
