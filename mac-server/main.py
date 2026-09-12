@@ -1090,6 +1090,7 @@ async def warmup_models():
 
 
 def extract_title_artist(work_dir: Path) -> tuple[str, str | None]:
+    from song_metadata import clean_song_title
     info_path = work_dir / "original.info.json"
     title = "Unknown Title"
     artist = None
@@ -1116,24 +1117,7 @@ def extract_title_artist(work_dir: Path) -> tuple[str, str | None]:
         except Exception:
             pass
 
-    if " - " in title:
-        left, right = (part.strip() for part in title.split(" - ", 1))
-        normalized_artist = "".join((artist or "").casefold().split())
-        normalized_left = "".join(left.casefold().split())
-        normalized_right = "".join(right.casefold().split())
-
-        # YouTube titles commonly use both "Artist - Song" and "Song - Artist".
-        # The uploader is the best free signal for deciding which side is which.
-        if normalized_artist and normalized_right == normalized_artist:
-            title = left or title
-        elif normalized_artist and normalized_left == normalized_artist:
-            title = right or title
-        else:
-            title = right or title
-            if left and not artist:
-                artist = left
-
-    return title, artist
+    return clean_song_title(title, artist)
 
 
 def preserve_vocal_coverage(
