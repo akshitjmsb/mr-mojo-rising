@@ -91,8 +91,9 @@ export default function SongMap({
   onRangeChange,
 }: Props) {
   const pieces = useMemo(() => {
+    const accompaniment = stemLayers.find(layer => layer.layer_key === "vocals_rhythm");
     return selectPrimarySongLayers(stemLayers).filter(({ kind }) =>
-      kind !== "lead" && (kind !== "rhythm" || stemLayers.some(layer => layer.instrument === "vocals")),
+      kind !== "lead" && (kind !== "rhythm" || Boolean(accompaniment)),
     ).map<MapPiece>(
       ({ kind, layer, dedicated }) => {
         const measuredReady = layer.quality_gate_status === "ready";
@@ -136,7 +137,7 @@ export default function SongMap({
           kind: "lyrics",
           status: publiclyReady ? "Ready" : "Best available",
           qualityNote,
-          downloadLayerKey: `${stemLayers.find(item => item.instrument === "vocals")!.layer_key}|${layer.layer_key}`,
+          downloadLayerKey: accompaniment!.layer_key,
         };
       },
     );

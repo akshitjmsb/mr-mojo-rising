@@ -2408,6 +2408,26 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         stage_done(stage="quality_gate", song_id=song_id, job_id=job_id, started=quality_started)
 
 
+    # Materialize the listening combination: phones receive ONE audio stream.
+    from accompaniment_mix import render_accompaniment
+    rhythm = stems_dir / "rhythm-focus.wav"
+    if not valid_wav(rhythm):
+        rhythm = stems_dir / "guitar-focus.wav"
+    mix_path = stems_dir / "vocals-rhythm.wav"
+    mix_report = await asyncio.to_thread(render_accompaniment, stems_dir / "vocals.wav", rhythm, mix_path)
+    mix_urls = await upload_targets(
+        [("mix", mix_path, f"stems/{song_id}/vocals-rhythm.wav")],
+        song_id=song_id, job_id=job_id, label="vocal accompaniment upload",
+    )
+    assert_job_active(db, job_id, song_id)
+    upsert_stem_layers(db, song_id, [{
+        "layer_key": "vocals_rhythm", "label": "Vocals + Rhythm Guitar",
+        "instrument": "guitar", "role": "accompaniment", "url": mix_urls["mix"],
+        "source_model": "single-stream-mix-v1", "quality_status": "ready", "sort_order": 3,
+    }])
+    log_event("accompaniment.rendered", song_id=song_id, **mix_report)
+
+
 def classify_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if "timed out" in msg or isinstance(exc, asyncio.TimeoutError):

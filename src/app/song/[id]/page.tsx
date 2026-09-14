@@ -196,8 +196,8 @@ export default function SongPlayerPage() {
   const audioUrls = useMemo(() => {
     if (!lessonReady) return [];
     if (stemMode === "rhythm_vocals") {
-      const rhythm = rhythmFocusUrl ?? stems?.guitar_url;
-      return stems?.vocals_url && rhythm ? [stems.vocals_url, rhythm] : [];
+      const mix = stemLayers.find(layer => layer.layer_key === "vocals_rhythm")?.url;
+      return mix ? [mix] : [];
     }
     if (stemMode === "guitar")
       return stems?.guitar_url ? [stems.guitar_url] : [];
@@ -208,7 +208,7 @@ export default function SongPlayerPage() {
     if (stemMode === "full")
       return stems?.original_url ? [stems.original_url] : [];
     return [];
-  }, [leadFocusUrl, lessonReady, rhythmFocusUrl, stemMode, stems]);
+  }, [leadFocusUrl, lessonReady, rhythmFocusUrl, stemMode, stems, stemLayers]);
 
   // Carries position + play state across stem switches so changing stems
   // doesn't restart the song.
