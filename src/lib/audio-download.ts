@@ -5,6 +5,25 @@ export type DecodedAudio = {
   getChannelData(channel: number): Float32Array;
 };
 
+export function mixDecodedAudio(tracks: DecodedAudio[]): DecodedAudio {
+  if (!tracks.length) throw new Error("No audio tracks available.");
+  if (tracks.length === 1) return tracks[0];
+  const sampleRate = tracks[0].sampleRate;
+  if (tracks.some(track => track.sampleRate !== sampleRate || Math.abs(track.length - tracks[0].length) > sampleRate * 0.1)) {
+    throw new Error("These tracks are not aligned; cannot download the mix.");
+  }
+  const length = Math.max(...tracks.map(track => track.length));
+  const numberOfChannels = Math.max(...tracks.map(track => track.numberOfChannels));
+  return { sampleRate, length, numberOfChannels, getChannelData(channel) {
+    const output = new Float32Array(length);
+    for (const track of tracks) {
+      const input = track.getChannelData(Math.min(channel, track.numberOfChannels - 1));
+      for (let i = 0; i < input.length; i++) output[i] += input[i] / tracks.length;
+    }
+    return output;
+  }};
+}
+
 function writeAscii(view: DataView, offset: number, value: string) {
   for (let index = 0; index < value.length; index += 1) {
     view.setUint8(offset + index, value.charCodeAt(index));

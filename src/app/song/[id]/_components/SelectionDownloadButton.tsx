@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   downloadFileName,
   encodeWavSelection,
+  mixDecodedAudio,
 } from "@/lib/audio-download";
 
 type Props = {
@@ -48,8 +49,11 @@ export default function SelectionDownloadButton({
     let audioContext: AudioContext | null = null;
 
     try {
+      audioContext = new AudioContext();
+      const context = audioContext;
+      const decodedTracks = await Promise.all(layerKey.split("|").map(async key => {
       const response = await fetch(
-        `/api/songs/${songId}/download?layer=${encodeURIComponent(layerKey)}`,
+        `/api/songs/${songId}/download?layer=${encodeURIComponent(key)}`,
       );
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as {
@@ -59,8 +63,9 @@ export default function SelectionDownloadButton({
       }
 
       const source = await response.arrayBuffer();
-      audioContext = new AudioContext();
-      const decoded = await audioContext.decodeAudioData(source);
+      return context.decodeAudioData(source);
+      }));
+      const decoded = mixDecodedAudio(decodedTracks);
       const wav = encodeWavSelection(decoded, start, end);
       const blob = new Blob([wav], { type: "audio/wav" });
       saveBlob(blob, downloadFileName(songTitle, pieceLabel, sectionLabel));

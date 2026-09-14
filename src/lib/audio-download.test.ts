@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { downloadFileName, encodeWavSelection } from "./audio-download";
+import { downloadFileName, encodeWavSelection, mixDecodedAudio } from "./audio-download";
+
+test("mix preserves timing and leaves headroom for two tracks", () => {
+  const make = (samples: number[]) => ({ sampleRate: 100, numberOfChannels: 1,
+    length: samples.length, getChannelData: () => Float32Array.from(samples) });
+  const mixed = mixDecodedAudio([make([1, 0, 0.5]), make([1, 0.5, 0])]);
+  assert.deepEqual([...mixed.getChannelData(0)], [1, 0.25, 0.25]);
+  assert.throws(() => mixDecodedAudio([make([1]), { ...make([1]), sampleRate: 200 }]), /aligned/);
+});
 
 test("encodes only the requested sample range as PCM WAV", () => {
   const left = Float32Array.from([-1, -0.5, 0, 0.5, 1]);

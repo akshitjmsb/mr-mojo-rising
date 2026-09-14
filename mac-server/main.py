@@ -1818,22 +1818,21 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 job_id=job_id,
                 model=VOCAL_REFINE_MODEL,
                 stem_label="Vocals",
-                target_filename="vocals.wav",
+                target_filename="vocals-specialist.wav",
                 checkpoint=checkpoint,
-                checkpoint_stage="vocal_refine",
+                checkpoint_stage="vocal_refine_clean_v2",
                 single_stem=True,
             )
-            fallback_windows = await asyncio.to_thread(
-                preserve_vocal_coverage,
-                refined_vocal_path,
-                primary_vocals_path,
+            from vocal_quality import publish_clean_vocal
+            vocal_report = await asyncio.to_thread(
+                publish_clean_vocal, refined_vocal_path, primary_vocals_path,
                 stems_dir / "vocals.wav",
             )
             log_event(
-                "vocals.coverage_preserved",
+                "vocals.clean_candidate_published",
                 song_id=song_id,
                 job_id=job_id,
-                fallback_windows=fallback_windows,
+                **vocal_report,
             )
         except Exception as exc:
             log_event(
@@ -1942,7 +1941,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
         [song_id],
     )
     if (
-        checkpoint.upload_done(song_id, "final_v3_content_addressed")
+        checkpoint.upload_done(song_id, "final_v4_clean_vocals")
         and final_row
         and all(final_row.values())
         and all("/preview/" not in str(value) for value in final_row.values())
@@ -1980,7 +1979,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                     "url": final_urls["vocals_url"],
                     "source_model": (
                         VOCAL_REFINE_MODEL
-                        if checkpoint.compute_done("vocal_refine")
+                        if checkpoint.compute_done("vocal_refine_clean_v2")
                         else separation_source_model
                     ),
                     "quality_status": "ready",
@@ -2002,7 +2001,7 @@ async def process_pipeline(job_id: str, song_id: str, youtube_url: str):
                 },
             ],
         )
-        checkpoint.mark_upload(song_id, "final_v3_content_addressed")
+        checkpoint.mark_upload(song_id, "final_v4_clean_vocals")
     stage_done(stage="upload", song_id=song_id, job_id=job_id, started=upload_started)
 
     # Stage: transcribe (guitar stem → tab notes). Non-fatal — the song is

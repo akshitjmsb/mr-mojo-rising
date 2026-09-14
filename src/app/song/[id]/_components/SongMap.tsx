@@ -24,7 +24,7 @@ import SoloPhraseTab from "./SoloPhraseTab";
 import SyncedLyrics from "./SyncedLyrics";
 import SelectionRange from "./SelectionRange";
 
-type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full";
+type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full" | "rhythm_vocals";
 
 type MapKind = "overview" | "chords" | "notes" | "lyrics" | "audio";
 
@@ -91,7 +91,9 @@ export default function SongMap({
   onRangeChange,
 }: Props) {
   const pieces = useMemo(() => {
-    return selectPrimarySongLayers(stemLayers).map<MapPiece>(
+    return selectPrimarySongLayers(stemLayers).filter(({ kind }) =>
+      kind !== "lead" && (kind !== "rhythm" || stemLayers.some(layer => layer.instrument === "vocals")),
+    ).map<MapPiece>(
       ({ kind, layer, dedicated }) => {
         const measuredReady = layer.quality_gate_status === "ready";
         const sourceReady =
@@ -129,12 +131,12 @@ export default function SongMap({
         }
         return {
           key: `${kind}:${layer.layer_key}`,
-          label: kind === "rhythm" ? "Rhythm Guitar" : "Lead Guitar",
-          source: dedicated ? kind : "guitar",
-          kind: kind === "rhythm" ? "chords" : "notes",
+          label: "Vocals + Rhythm Guitar",
+          source: "rhythm_vocals",
+          kind: "lyrics",
           status: publiclyReady ? "Ready" : "Best available",
           qualityNote,
-          downloadLayerKey: layer.layer_key,
+          downloadLayerKey: `${stemLayers.find(item => item.instrument === "vocals")!.layer_key}|${layer.layer_key}`,
         };
       },
     );

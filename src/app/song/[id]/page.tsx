@@ -27,7 +27,7 @@ type PracticeRange = {
   end: number;
 };
 
-type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full";
+type AudioSource = "guitar" | "lead" | "rhythm" | "vocals" | "full" | "rhythm_vocals";
 
 function defaultPracticeProfile(songId: string): PracticeProfile {
   const tuning = getSongPracticeTuning(songId, "standard");
@@ -195,6 +195,10 @@ export default function SongPlayerPage() {
 
   const audioUrls = useMemo(() => {
     if (!lessonReady) return [];
+    if (stemMode === "rhythm_vocals") {
+      const rhythm = rhythmFocusUrl ?? stems?.guitar_url;
+      return stems?.vocals_url && rhythm ? [stems.vocals_url, rhythm] : [];
+    }
     if (stemMode === "guitar")
       return stems?.guitar_url ? [stems.guitar_url] : [];
     if (stemMode === "lead") return leadFocusUrl ? [leadFocusUrl] : [];
@@ -224,7 +228,7 @@ export default function SongPlayerPage() {
       const audio = new Audio(url);
       audio.preload = "auto";
       audio.playbackRate = speed;
-      audio.volume = 1;
+      audio.volume = audioUrls.length > 1 ? 0.5 : 1;
       // Slowing down must not drop the pitch — this is a learning system.
       audio.preservesPitch = true;
       return audio;
@@ -355,7 +359,10 @@ export default function SongPlayerPage() {
   }
 
   function playAudioGroup() {
-    return Promise.all(audioGroupRef.current.map((audio) => audio.play()));
+    return Promise.all(audioGroupRef.current.map((audio) => audio.play())).catch(error => {
+      pauseAudioGroup();
+      throw error;
+    });
   }
 
   function playLessonRange(
