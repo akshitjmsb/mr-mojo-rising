@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import type { Chord, Lyrics } from "@/lib/database.types";
-import { transposeChord } from "@/lib/guitar";
+import { activeLyricChord, lyricChordAnchors, lyricChordLabel } from "@/lib/lyric-chords";
 import {
   findActiveWordKey,
   findCurrentLineIndex,
@@ -137,35 +137,8 @@ export default function SyncedLyrics({
       MAX_ACTIVE_LINE_SECONDS,
     );
   }, [currentIndex, currentTime, lines]);
-  const chordByWordKey = useMemo(() => {
-    const timedWords = lines.flatMap((line, lineIndex) =>
-      (line.words ?? []).map((word, wordIndex) => ({
-        key: `${lineIndex}:${wordIndex}`,
-        time: word.time,
-      })),
-    );
-    const anchors = new Map<string, string[]>();
-    if (timedWords.length === 0) return anchors;
-
-    for (const chord of chords) {
-      if (chord.verification_state !== "verified") continue;
-      let anchor: (typeof timedWords)[number] | undefined;
-      let smallestDistance = Number.POSITIVE_INFINITY;
-      for (const word of timedWords) {
-        const delta = word.time - chord.start_time;
-        const eligible = delta >= 0 ? delta <= 1.5 : Math.abs(delta) <= 0.6;
-        if (eligible && Math.abs(delta) < smallestDistance) {
-          anchor = word;
-          smallestDistance = Math.abs(delta);
-        }
-      }
-      if (!anchor) continue;
-      const label = transposeChord(chord.chord_standard, chordShapeShift);
-      const current = anchors.get(anchor.key) ?? [];
-      if (current[current.length - 1] !== label) anchors.set(anchor.key, [...current, label]);
-    }
-    return anchors;
-  }, [chordShapeShift, chords, lines]);
+  const chordByWordKey = useMemo(() => lyricChordAnchors(lines, chords, chordShapeShift), [chordShapeShift, chords, lines]);
+  const activeChord = activeLyricChord(chords, currentTime);
   const visibleLines = useMemo(() => {
     if (lines.length === 0) return [];
 
@@ -239,13 +212,16 @@ export default function SyncedLyrics({
     <div className="mt-4 border-t border-border-dark pt-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-          Lyrics
+          Lyrics & chords
         </p>
         <p className="font-josefin text-[7px] uppercase tracking-[0.1em] text-gold/75">
           {lyrics?.source.startsWith("local-vocal-align/")
-            ? "Aligned to this vocal · chords above words"
-            : "Synced · tap a line to jump"}
+            ? "Auto-aligned · ≈ estimated chord"
+            : "Catalog timing · ≈ estimated chord"}
         </p>
+      </div>
+      <div className="mb-2 min-h-9 font-playfair text-[24px] text-gold" aria-label="Current chord" data-current-chord={activeChord?.chord_standard ?? ""}>
+        {activeChord ? lyricChordLabel(activeChord, chordShapeShift) : "—"}
       </div>
       <div
         ref={containerRef}

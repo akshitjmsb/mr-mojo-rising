@@ -424,7 +424,10 @@ def align_lyrics_to_vocals(
     # the full mix with likely source languages and transliterate Whisper's
     # native-script words before matching. Stop immediately once quality passes.
     catalog_is_latin = _mostly_latin(" ".join(line.text for line in lines))
-    if not report.passed and catalog_is_latin:
+    if catalog_is_latin and (
+        not report.passed or report.word_coverage < HIGH_CONFIDENCE_WORD_COVERAGE
+        or report.line_coverage < HIGH_CONFIDENCE_LINE_COVERAGE
+    ):
         fallback_path = reference_path or vocal_path
         fallback_mode = "reference" if reference_path else "vocal"
         for language in ("hi", "ur", "en"):
@@ -434,7 +437,8 @@ def align_lyrics_to_vocals(
             if is_better(candidate_report, report):
                 enhanced_lrc, report = candidate_lrc, candidate_report
                 best_mode = f"{fallback_mode}-{language}"
-            if report.passed:
+            if (report.passed and report.word_coverage >= HIGH_CONFIDENCE_WORD_COVERAGE
+                    and report.line_coverage >= HIGH_CONFIDENCE_LINE_COVERAGE):
                 break
     plain_text = lyrics.get("plain_text") or "\n".join(line.text for line in lines)
     if not enhanced_lrc:
