@@ -34,11 +34,15 @@ def idx2voca_chord():
 def audio_file_to_features(audio_file, config):
     """CQT log-magnitude features matching the BTC training pipeline.
 
-    Returns (feature[n_bins, T], seconds_per_frame, song_duration_seconds).
+    Returns (feature[n_bins, T], frame_times[T], song_duration_seconds).
+
+    CQT is centered separately in each chunk. Preserve those actual origins;
+    neither a global hop clock nor inst_len/timestep describes every frame.
     """
     original_wav, sr = librosa.load(audio_file, sr=config.mp3["song_hz"], mono=True)
     chunk_samples = int(config.mp3["song_hz"] * config.mp3["inst_len"])
     parts = []
+    frame_times = []
     cursor = 0
     while len(original_wav) > cursor + chunk_samples:
         parts.append(
@@ -50,6 +54,7 @@ def audio_file_to_features(audio_file, config):
                 hop_length=config.feature["hop_length"],
             )
         )
+        frame_times.append((cursor + np.arange(parts[-1].shape[1]) * config.feature["hop_length"]) / sr)
         cursor += chunk_samples
     parts.append(
         librosa.cqt(
@@ -60,8 +65,8 @@ def audio_file_to_features(audio_file, config):
             hop_length=config.feature["hop_length"],
         )
     )
+    frame_times.append((cursor + np.arange(parts[-1].shape[1]) * config.feature["hop_length"]) / sr)
     feature = np.concatenate(parts, axis=1)
     feature = np.log(np.abs(feature) + 1e-6)
-    feature_per_second = config.mp3["inst_len"] / config.model["timestep"]
     song_length_second = len(original_wav) / config.mp3["song_hz"]
-    return feature, feature_per_second, song_length_second
+    return feature, np.concatenate(frame_times), song_length_second

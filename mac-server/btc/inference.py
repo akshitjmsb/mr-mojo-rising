@@ -113,7 +113,7 @@ def predict_chords(audio_path: str) -> list[dict]:
     std: float = state["std"]
     idx_to_chord = state["idx_to_chord"]
 
-    feature, feature_per_second, song_length_second = audio_file_to_features(
+    feature, frame_times, song_length_second = audio_file_to_features(
         audio_path, config
     )
     feature = feature.T  # (T, n_bins)
@@ -161,8 +161,9 @@ def predict_chords(audio_path: str) -> list[dict]:
     def _flush(end_frame: int):
         if cur_idx in (168, 169):  # 'X' or 'N'
             return
-        start_t = cur_start_frame * feature_per_second
-        end_t = min(end_frame * feature_per_second, song_length_second)
+        start_t = float(frame_times[cur_start_frame])
+        end_t = float(frame_times[end_frame]) if end_frame < valid_frames else song_length_second
+        end_t = min(end_t, song_length_second)
         if end_t - start_t < 0.1:
             return
         label = idx_to_chord[cur_idx]

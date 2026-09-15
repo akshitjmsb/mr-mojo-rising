@@ -215,9 +215,11 @@ export default function SyncedLyrics({
           Lyrics & chords
         </p>
         <p className="font-josefin text-[7px] uppercase tracking-[0.1em] text-gold/75">
-          {lyrics?.source.startsWith("local-vocal-align/")
-            ? "Auto-aligned · ≈ estimated chord"
-            : "Catalog timing · ≈ estimated chord"}
+          {lyrics?.source.includes("timing=estimated")
+            ? "Estimated timing · ≈ estimated chord"
+            : lyrics?.source.startsWith("local-vocal-align/")
+              ? "Auto-aligned · ≈ estimated chord"
+              : "Catalog timing · ≈ estimated chord"}
         </p>
       </div>
       <div className="mb-2 min-h-9 font-playfair text-[24px] text-gold" aria-label="Current chord" data-current-chord={activeChord?.chord_standard ?? ""}>
