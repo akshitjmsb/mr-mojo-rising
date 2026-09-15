@@ -36,7 +36,7 @@ export default function TuningGauge({ cents, inTune }: Props) {
 
   return (
     <div className="relative w-full">
-      <svg viewBox="0 0 200 110" className="block w-full" aria-hidden>
+      <svg viewBox="0 0 200 110" className="mx-auto block max-h-[90px] w-full" aria-hidden>
         <path
           d="M 16 95 A 84 84 0 0 1 184 95"
           fill="none"

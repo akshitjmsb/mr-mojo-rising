@@ -61,7 +61,7 @@ export default function TabNav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="grid grid-cols-4 border-b border-border-darkest px-5"
+      className="grid shrink-0 grid-cols-4 border-b border-border-darkest px-4"
     >
       {TABS.map((tab) => {
         const active = isActive(tab.href);

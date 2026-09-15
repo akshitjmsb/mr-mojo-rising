@@ -8,6 +8,7 @@ import {
 } from "@/lib/audio-download";
 
 type Props = {
+  compact?: boolean;
   songId: string;
   songTitle: string;
   layerKey: string;
@@ -36,6 +37,7 @@ export default function SelectionDownloadButton({
   sectionLabel,
   start,
   end,
+  compact = false,
 }: Props) {
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState("");
@@ -88,14 +90,16 @@ export default function SelectionDownloadButton({
         type="button"
         onClick={downloadSelection}
         disabled={preparing}
-        className="min-h-9 w-full rounded-[2px] border border-border-dark bg-transparent px-3 font-josefin text-[7px] uppercase tracking-[0.13em] text-text-dark disabled:opacity-55"
+        aria-label={preparing ? "Preparing download" : "Download selection"}
+        title="Download selection"
+        className="flex min-h-11 w-full items-center justify-center rounded border border-border-dark bg-transparent px-2 font-josefin text-[10px] text-text-muted disabled:opacity-55"
       >
-        {preparing ? "Preparing…" : "Download selection"}
+        {compact ? (preparing ? "…" : <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5" /></svg>) : preparing ? "Preparing…" : "Download selection"}
       </button>
       {error ? (
         <p
           role="alert"
-          className="mt-2 font-josefin text-[8px] leading-relaxed tracking-[0.06em] text-terracotta"
+          className="col-span-full mt-2 font-josefin text-[10px] leading-relaxed text-terracotta"
         >
           {error}
         </p>

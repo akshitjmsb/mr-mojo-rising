@@ -372,12 +372,12 @@ function AddSongPageInner() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-7 p-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-3 p-4">
       <div>
         <p className="font-playfair text-[26px] font-bold italic leading-[1.25] text-text">
           {content.searchHero.title}
         </p>
-        <p className="mt-2.5 font-josefin text-[12px] font-light leading-[1.8] tracking-[0.1em] text-text-muted">
+        <p className="mt-1 font-josefin text-[12px] leading-relaxed text-text-muted">
           {content.searchHero.subtitle}
         </p>
         <div className="mt-3">
@@ -513,7 +513,7 @@ function AddSongPageInner() {
 
       {/* Search results */}
       {searchResults.length > 0 && (
-        <div className="-mx-6" aria-label="YouTube results">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" aria-label="YouTube results">
           {searchResults.map((result) => {
             const existingSong = existingSongForUrl(result.url);
             const existingSongReady = isLessonReady(existingSong);
@@ -579,11 +579,8 @@ function AddSongPageInner() {
       )}
 
       {!searching && searchResults.length === 0 && !resolved && !input && (
-        <div className="flex flex-col gap-2.5 border border-border-darkest bg-input-bg/40 p-4">
-          <p className="font-josefin text-[10px] uppercase tracking-[0.2em] text-gold">
-            Tip
-          </p>
-          <p className="font-josefin text-[12px] leading-[1.7] tracking-[0.04em] text-text-muted">
+        <div className="mt-auto pb-2">
+          <p className="font-josefin text-[11px] leading-relaxed text-text-muted">
             {content.shareTip}
           </p>
         </div>

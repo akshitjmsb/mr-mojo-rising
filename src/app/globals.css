@@ -279,3 +279,24 @@ body,
 [data-theme="ali"] .flicker {
   animation: patter 9s ease-in-out infinite;
 }
+
+/* Fixed phone workspace: navigation/transport stay put; lists own their scroll. */
+html, body { height: 100%; }
+body {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.app-shell > main { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.app-shell > main:has(.song-player) { display: flex; flex-direction: column; overflow: hidden; }
+.app-shell > main > header { flex-shrink: 0; }
+.app-shell > main:has([aria-label="Current tuning reading"]) { gap: 8px; padding: 12px; }
+.app-shell input[type="search"], .app-shell select { font-size: 16px; }
+@media (max-height: 550px) {
+  .app-shell > main:has(.song-player) { overflow-y: auto; }
+  .song-player { min-height: 400px; }
+}

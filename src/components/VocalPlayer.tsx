@@ -223,7 +223,7 @@ export function VocalPlayerProvider({ children }: { children: ReactNode }) {
         }}
       />
       {current && ownsAudio && pathname !== "/player" ? (
-        <div className="sticky bottom-0 z-20 mx-auto flex max-w-[420px] items-center gap-3 border-t border-gold/40 bg-bg px-5 py-3">
+        <div className="z-20 mx-auto flex w-full max-w-[480px] shrink-0 items-center gap-2 border-t border-gold/40 bg-bg px-4 py-1">
           <Link href="/player" className="min-w-0 flex-1 truncate font-josefin text-[12px] text-gold">{current.title} · Vocals</Link>
           <button onClick={value.toggle} className="min-h-11 px-2 text-gold" aria-label={playing ? "Pause vocals" : "Play vocals"}>{playing ? "Pause" : "Play"}</button>
           <button onClick={next} className="min-h-11 px-2 text-gold" aria-label="Next song">Next</button>
@@ -237,17 +237,16 @@ export function VocalPlayerScreen() {
   const player = useVocalPlayer();
   const label = (seconds: number) => `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
   return (
-    <main className="flex-1 px-5 py-6">
-      <p className="font-josefin text-[10px] uppercase tracking-[0.16em] text-text-muted">Full songs · Only vocals</p>
-      <h1 className="mt-3 font-playfair text-[28px] italic text-text">{player.current?.title ?? "Your vocals, nonstop."}</h1>
-      <p className="mt-2 font-josefin text-[12px] text-text-muted">{player.current?.artist ?? `${player.tracks.length} songs in your library`}</p>
+    <main className="flex min-h-0 flex-1 flex-col px-4 py-3">
+      <p className="font-josefin text-[10px] text-text-muted">Vocals · {player.tracks.length} songs</p>
+      <h1 className="mt-2 line-clamp-2 font-playfair text-[23px] italic text-text">{player.current?.title ?? "Your vocals, nonstop."}</h1>
       {player.current ? (
-        <div className="mt-6">
+        <div className="mt-2 shrink-0">
           <input type="range" min="0" max={player.duration || 1} step="0.1" value={Math.min(player.time, player.duration || 1)} onChange={(e) => player.seek(Number(e.target.value))} aria-label="Playback position" className="h-10 w-full accent-gold" />
           <div className="flex justify-between font-josefin text-[10px] tabular-nums text-text-muted"><span>{label(player.time)}</span><span>{label(player.duration)}</span></div>
         </div>
       ) : null}
-      <div className="mt-6 grid grid-cols-[1fr_1.5fr_1fr] gap-2">
+      <div className="mt-3 grid shrink-0 grid-cols-[1fr_1.5fr_1fr] gap-2">
         <button disabled={!player.tracks.length} onClick={player.previous} aria-label="Previous song" className="min-h-14 border border-border-dark text-text-muted disabled:opacity-40">Previous</button>
         <button disabled={player.loading || !player.tracks.length} onClick={player.toggle} className="min-h-14 border border-gold bg-gold/10 text-gold disabled:opacity-40">{player.loading ? "Loading…" : player.playing ? "Pause" : "Play"}</button>
         <button disabled={!player.tracks.length} onClick={player.next} aria-label="Next song" className="min-h-14 border border-border-dark text-text-muted disabled:opacity-40">Next</button>
@@ -255,11 +254,10 @@ export function VocalPlayerScreen() {
       <button onClick={player.setShuffle} aria-pressed={player.shuffle} className={`mt-3 min-h-11 w-full font-josefin text-[11px] uppercase tracking-[0.12em] ${player.shuffle ? "text-gold" : "text-text-muted"}`}>Shuffle {player.shuffle ? "on" : "off"}</button>
       {player.error ? <p role="alert" className="mt-3 text-sm text-terracotta">{player.error} {!player.tracks.length ? <button onClick={() => void player.refresh()} className="underline">Retry</button> : null}</p> : null}
       {!player.loading && !player.tracks.length && !player.error ? <p className="mt-4 text-sm text-text-muted">Your completed songs will appear here. <Link href="/" className="text-gold underline">Add a song</Link></p> : null}
-      <ol className="mt-6 divide-y divide-border-dark border-t border-border-dark" aria-label="Vocal songs">
+      <ol className="mt-2 min-h-0 flex-1 divide-y divide-border-dark overflow-y-auto overscroll-contain border-t border-border-dark" aria-label="Vocal songs">
         {player.tracks.map((track) => <li key={track.id}>
           <button onClick={() => player.start(track.id)} aria-current={player.current?.id === track.id ? "true" : undefined} className={`w-full py-4 text-left ${player.current?.id === track.id ? "text-gold" : "text-text"}`}>
             <span className="block font-playfair text-[18px] italic">{track.title}</span>
-            <span className="mt-1 block font-josefin text-[10px] text-text-muted">{track.artist}</span>
           </button>
         </li>)}
       </ol>

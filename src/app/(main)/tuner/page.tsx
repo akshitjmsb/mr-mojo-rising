@@ -111,9 +111,6 @@ function Tuner() {
         <h1 className="font-playfair text-[28px] font-bold italic leading-tight text-text">
           Tuner
         </h1>
-        <p className="mt-1 font-josefin text-[11px] tracking-[0.08em] text-text-muted">
-          Pluck one string. Let it ring.
-        </p>
       </header>
 
       <TuningPicker selected={tuning} onChange={changeTuning} />

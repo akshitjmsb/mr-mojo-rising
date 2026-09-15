@@ -25,7 +25,7 @@ export default function ThemeToggle() {
       onClick={toggleTheme}
       aria-label={`Switch to ${LABELS[next]} theme`}
       title={`${content.label} theme — tap for ${LABELS[next]}`}
-      className="group flex h-7 items-center gap-1.5 rounded-full border border-border-darkest bg-transparent px-2.5 font-josefin text-[8px] font-light uppercase tracking-[0.22em] text-text-darkest transition-colors duration-300 hover:border-gold hover:text-gold"
+      className="group flex h-11 shrink-0 items-center gap-1.5 rounded-full bg-transparent px-2 font-josefin text-[9px] uppercase tracking-[0.1em] text-text-muted hover:text-gold"
     >
       {theme === "doors" && (
         <svg

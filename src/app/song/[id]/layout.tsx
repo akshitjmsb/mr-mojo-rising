@@ -1,7 +1,6 @@
 import AppShell from "@/components/AppShell";
 import Header from "@/components/Header";
 import TabNav from "@/components/TabNav";
-import Footer from "@/components/Footer";
 import { queryOne } from "@/lib/queries";
 import type { Song } from "@/lib/database.types";
 
@@ -27,7 +26,6 @@ export default async function SongLayout({
       />
       <TabNav />
       {children}
-      <Footer />
     </AppShell>
   );
 }

@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
  */
 export default function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative z-[1] mx-auto flex min-h-screen max-w-[420px] flex-col">
+    <div className="app-shell relative z-[1] mx-auto flex min-h-0 w-full max-w-[480px] flex-1 flex-col overflow-hidden">
       {children}
     </div>
   );

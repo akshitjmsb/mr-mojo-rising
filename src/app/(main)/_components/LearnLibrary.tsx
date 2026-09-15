@@ -153,7 +153,7 @@ export default function LearnLibrary() {
   );
 
   return (
-    <main className="flex-1">
+    <main className="flex min-h-0 flex-1 flex-col">
       <div className="px-5 pt-4 pb-2">
         <h1 className="sr-only">Songs</h1>
         {loading && (
@@ -176,7 +176,7 @@ export default function LearnLibrary() {
         />
       )}
 
-      <div className="pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2" aria-label="Song list">
         {sortedSongs.map((song) => {
           const workerOnline = (song.worker_online_count ?? 0) > 0;
           const playable = isLessonReady(song);
