@@ -362,6 +362,7 @@ async def startup_workers():
     REQUEUE_TASK = asyncio.create_task(stale_requeue_loop())
     WORKER_STATUS_TASK = asyncio.create_task(worker_status_loop())
     WORKER_COMMAND_TASK = asyncio.create_task(worker_command_loop())
+    WORKER_TASKS.append(asyncio.create_task(storage_cleanup_loop()))
     await asyncio.to_thread(update_worker_status, WORKER_ID, "idle")
 
 
@@ -543,6 +544,26 @@ async def worker_loop(slot: int):
         except Exception as exc:
             log_event("worker.loop_error", worker_id=worker_name, error=str(exc))
             await asyncio.sleep(QUEUE_POLL_INTERVAL_SECONDS)
+
+
+async def storage_cleanup_loop():
+    """Retry persisted file deletions even if the phone has closed the app."""
+    url = SONG_READY_WEBHOOK_URL.rsplit("/api/", 1)[0] + "/api/storage/cleanup"
+    while True:
+        try:
+            response = await asyncio.to_thread(
+                requests.post, url,
+                headers={"Authorization": f"Bearer {API_SECRET}"}, timeout=25,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("checked"):
+                log_event("storage.cleanup", **result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_event("storage.cleanup_retry", error=str(exc))
+        await asyncio.sleep(60)
 
 
 async def stale_requeue_loop():

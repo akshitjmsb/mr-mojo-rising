@@ -23,26 +23,35 @@ export default function StorageMeter({ refreshKey, mode, onUsage }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/storage", { cache: "no-store" })
+    let requestId = 0;
+    const refresh = () => {
+      const currentRequest = ++requestId;
+      void fetch("/api/storage", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((nextUsage: StorageUsage | null) => {
-        if (!cancelled && nextUsage) {
+        if (!cancelled && currentRequest === requestId) {
           setUsage(nextUsage);
-          onUsage?.(nextUsage);
+          if (nextUsage) onUsage?.(nextUsage);
         }
       })
       .catch(() => {
-        // Capacity context must never block the catalog.
+        if (!cancelled && currentRequest === requestId) setUsage(null);
       });
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [onUsage, refreshKey]);
 
   if (!usage) return null;
 
-  const songsRemaining = usage.estimated_songs_remaining;
-  const nearlyFull = songsRemaining !== null && songsRemaining <= 3;
+  const nearlyFull = usage.remaining_bytes <= usage.limit_bytes * 0.1;
   const percentage = Math.min(
     100,
     Math.max(0, (usage.used_bytes / usage.limit_bytes) * 100),
@@ -74,10 +83,7 @@ export default function StorageMeter({ refreshKey, mode, onUsage }: Props) {
     );
   }
 
-  const capacity =
-    songsRemaining === null
-      ? `${Math.round(usage.used_bytes / 1_000_000)} MB used`
-      : `Space for about ${songsRemaining} more song${songsRemaining === 1 ? "" : "s"}`;
+  const capacity = `${Math.floor(usage.remaining_bytes / 1_000_000)} MB free · ${Math.round(usage.limit_bytes / 1_000_000)} MB total`;
 
   return (
     <p

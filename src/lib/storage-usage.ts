@@ -22,3 +22,10 @@ export function summarizeBlobStorage(blobs: StoredBlob[]): BlobStorageSummary {
 
   return { totalBytes, songBytes };
 }
+
+export function storageCapacity(inventory: BlobStorageSummary, readySongIds: string[], limit: number) {
+  const sizes = readySongIds.map(id => inventory.songBytes[id] ?? 0).filter(size => size > 0);
+  const average = sizes.length ? sizes.reduce((sum, size) => sum + size, 0) / sizes.length : 0;
+  const remaining = Math.max(0, limit - inventory.totalBytes);
+  return { remaining, average, estimatedSongs: average > 0 ? Math.floor(remaining / average) : null };
+}

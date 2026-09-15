@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { del, list } from "@vercel/blob";
+import { getTursoClient } from "@/lib/turso";
+import { retryBlobCleanup } from "@/lib/blob-cleanup";
+import { songBlobPrefix } from "@/lib/blob-cleanup-core";
 import { execute, queryAll, queryOne } from "@/lib/queries";
 import type {
   Chord,
@@ -80,23 +82,6 @@ function legacyStemLayers(stems: Stem | null): StemLayer[] {
   );
 }
 
-async function listSongBlobUrls(songId: string) {
-  const urls: string[] = [];
-  let cursor: string | undefined;
-
-  for (let page = 0; page < 100; page += 1) {
-    const result = await list({
-      prefix: `stems/${songId}/`,
-      limit: 1_000,
-      cursor,
-    });
-    urls.push(...result.blobs.map((blob) => blob.url));
-    if (!result.hasMore || !result.cursor) return urls;
-    cursor = result.cursor;
-  }
-
-  throw new Error("Song blob listing exceeded the safety page limit.");
-}
 
 export async function GET(
   _request: Request,
@@ -264,68 +249,31 @@ export async function DELETE(
 ) {
   const { id } = await params;
 
-  const song = await queryOne<Song>(`SELECT id FROM songs WHERE id = ?`, [id]);
-  if (!song) {
-    return NextResponse.json({ error: "Song not found" }, { status: 404 });
+  try { songBlobPrefix(id); } catch {
+    return NextResponse.json({ error: "Invalid song ID" }, { status: 400 });
   }
-
-  const stems = await queryOne<Stem>(`SELECT * FROM stems WHERE song_id = ?`, [
-    id,
-  ]);
-  let stemLayers: StemLayer[] = [];
+  const tx = await getTursoClient().transaction("write");
   try {
-    stemLayers = await queryAll<StemLayer>(
-      `SELECT * FROM stem_layers WHERE song_id = ?`,
-      [id],
-    );
-  } catch {
-    // The legacy stems row still covers blob cleanup before migration.
-  }
-
-  const referencedUrls = stems
-    ? [
-        stems.original_url,
-        stems.guitar_url,
-        stems.vocals_url,
-        stems.drums_url,
-        stems.bass_url,
-        ...stemLayers.map((layer) => layer.url),
-      ].filter(
-        (url): url is string => typeof url === "string" && url.length > 0,
-      )
-    : [];
-  let storedUrls: string[] = [];
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    try {
-      storedUrls = await listSongBlobUrls(id);
-    } catch (err) {
-      console.error("Failed to list all song blob files", err);
+    // The durable cleanup record and cancellation are atomic. A failed file
+    // deletion can no longer disappear together with its song record.
+    await tx.execute({ sql: `INSERT INTO blob_cleanup_jobs (song_id)
+      SELECT id FROM songs WHERE id = ? ON CONFLICT(song_id) DO NOTHING`, args: [id] });
+    const pending = await tx.execute({ sql: "SELECT song_id FROM blob_cleanup_jobs WHERE song_id = ?", args: [id] });
+    if (!pending.rows.length) {
+      await tx.rollback();
+      return NextResponse.json({ error: "Song not found" }, { status: 404 });
     }
-  }
-
-  // Delete the database row first. Its cascading job deletion causes the Mac
-  // worker to release the lease and terminate any expensive subprocess.
-  try {
-    await execute(`DELETE FROM songs WHERE id = ?`, [id]);
+    await tx.execute({ sql: "DELETE FROM songs WHERE id = ?", args: [id] });
+    await tx.commit();
   } catch (err) {
+    await tx.rollback();
     console.error("Failed to delete song", err);
-    return NextResponse.json(
-      { error: "Failed to delete song" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Failed to delete song" }, { status: 500 });
+  } finally { tx.close(); }
+
+  // Best effort now; the authenticated worker keeps retrying persisted jobs.
+  try { await retryBlobCleanup(id); } catch (error) {
+    console.error("[blob-cleanup] deferred", error);
   }
-
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    const urls = [...new Set([...referencedUrls, ...storedUrls])];
-
-    if (urls.length > 0) {
-      try {
-        await del(urls, { token: process.env.BLOB_READ_WRITE_TOKEN });
-      } catch (err) {
-        console.error("Failed to delete blob files", err);
-      }
-    }
-  }
-
-  return NextResponse.json({ success: true, id });
+  return NextResponse.json({ success: true, id, cleanup_pending: true });
 }

@@ -1,7 +1,7 @@
 import { list } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { queryOne } from "@/lib/queries";
-import { summarizeBlobStorage } from "@/lib/storage-usage";
+import { queryAll } from "@/lib/queries";
+import { summarizeBlobStorage, storageCapacity } from "@/lib/storage-usage";
 
 const HOBBY_STORAGE_LIMIT_BYTES = 1_000_000_000;
 const MAX_LIST_PAGES = 100;
@@ -22,22 +22,18 @@ async function blobStorageInventory() {
 
 export async function GET() {
   try {
-    const songsPromise = queryOne<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM songs
+    const songsPromise = queryAll<{ id: string }>(
+      `SELECT id FROM songs
        WHERE status = 'ready' AND processing_stage = 'complete'`,
     );
-    const [inventory, songRow] = await Promise.all([
+    const [inventory, songs] = await Promise.all([
       blobStorageInventory(),
       songsPromise,
     ]);
     const usedBytes = inventory.totalBytes;
-    const songCount = Number(songRow?.count ?? 0);
-    const averageSongBytes = songCount > 0 ? usedBytes / songCount : 0;
-    const remainingBytes = Math.max(0, HOBBY_STORAGE_LIMIT_BYTES - usedBytes);
-    const estimatedSongsRemaining =
-      averageSongBytes > 0
-        ? Math.floor(remainingBytes / averageSongBytes)
-        : null;
+    const songCount = songs.length;
+    const { average: averageSongBytes, remaining: remainingBytes, estimatedSongs: estimatedSongsRemaining } =
+      storageCapacity(inventory, songs.map(song => song.id), HOBBY_STORAGE_LIMIT_BYTES);
 
     return NextResponse.json(
       {
