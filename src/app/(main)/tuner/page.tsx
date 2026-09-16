@@ -85,7 +85,7 @@ function Tuner() {
   const idleTarget = pinned === null ? null : targets.strings[pinned];
   const activeIndex = reading.stable ? (match?.index ?? null) : pinned;
   const noteLabel =
-    (reading.stable ? heard?.name : null) ?? "—";
+    heard?.name ?? "—";
 
   let status = "Tap start, then pluck one string";
   if (starting) status = "Starting microphone…";
@@ -148,21 +148,20 @@ function Tuner() {
         aria-label="Current tuning reading"
         className="flex flex-col items-center gap-1"
       >
-        <div className="flex min-h-[52px] items-baseline gap-2">
+        <div aria-label="Detected frequency" data-detected-hz={reading.frequency ?? ""} className="flex min-h-[52px] items-baseline gap-2 tabular-nums">
           <span
             className={`font-playfair text-[48px] font-black italic leading-none transition-colors ${
               inTune ? "text-gold" : "text-text"
             }`}
           >
-            {noteLabel.replace(/\d/, "")}
+            {reading.frequency !== null ? reading.frequency.toFixed(1) : "—"}
           </span>
           <span className="font-josefin text-[15px] text-text-muted">
-            {noteLabel.match(/\d/)?.[0] ?? ""}
+            Hz
           </span>
         </div>
         <p className="font-josefin text-[12px] tabular-nums text-text-muted">
-          Detected: {reading.stable && reading.frequency !== null ? reading.frequency.toFixed(2) : "—"} Hz
-          {" · "}Target: {(reading.stable ? match?.string.frequency : idleTarget?.frequency)?.toFixed(2) ?? "—"} Hz
+          {noteLabel}{" · "}Target: {(match?.string.frequency ?? idleTarget?.frequency)?.toFixed(2) ?? "—"} Hz
         </p>
         {pinned !== null ? <p className="font-josefin text-[10px] text-text-muted">Pinned target: {idleTarget?.name}</p> : null}
         <p
