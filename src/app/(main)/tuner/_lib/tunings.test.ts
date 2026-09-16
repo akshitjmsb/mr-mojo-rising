@@ -6,7 +6,52 @@ import {
   centsBetween,
   closestString,
   midiToFrequency,
+  frequencyToMidi,
+  detectedNote,
+  tuningAtReference,
+  validReferenceA,
 } from "./tunings";
+
+test("440 and 432 open-string targets derive from MIDI, without mutating defaults", () => {
+  const standard = TUNINGS[0];
+  const expected = [80.91, 108, 144.16, 192.43, 242.45, 323.63];
+  const shifted = tuningAtReference(standard, 432);
+  shifted.strings.forEach((string, i) => {
+    assert.ok(Math.abs(string.frequency - expected[i]) < 0.015);
+    assert.ok(Math.abs(string.frequency / standard.strings[i].frequency - 432 / 440) < 1e-12);
+  });
+  assert.equal(standard.strings[1].frequency, 110);
+});
+
+test("A2, A3 and A4 retain exact octave identity for each reference", () => {
+  for (const reference of [415, 432, 440, 442.35, 466]) {
+    for (const [midi, divisor] of [[45, 4], [57, 2], [69, 1]]) {
+      const f = reference / divisor;
+      assert.equal(midiToFrequency(midi, reference), f);
+      assert.equal(frequencyToMidi(f, reference), midi);
+      assert.equal(detectedNote(f, reference)?.name, `A${Math.floor(midi / 12) - 1}`);
+      assert.equal(detectedNote(f, reference)?.cents, 0);
+    }
+  }
+});
+
+test("all tunings and frets use the same selected reference", () => {
+  for (const reference of [415, 432, 440, 466]) for (const tuning of TUNINGS) {
+    for (const string of tuningAtReference(tuning, reference).strings) {
+      for (let fret = 0; fret <= 24; fret++) {
+        const f = string.frequency * 2 ** (fret / 12);
+        assert.equal(detectedNote(f, reference)?.midi, string.midi + fret);
+      }
+    }
+  }
+});
+
+test("signed cents and custom bounds", () => {
+  assert.ok(Math.abs(detectedNote(217.2, 432)!.cents - 9.591) < 0.01);
+  assert.ok(detectedNote(215, 432)!.cents < 0);
+  for (const v of [NaN, Infinity, 0, 414.99, 466.01]) assert.equal(validReferenceA(v), false);
+  assert.equal(detectedNote(0, 432), null);
+});
 
 test("E-flat standard contains the correct six concert pitches", () => {
   const tuning = TUNINGS.find((candidate) => candidate.id === "eb-standard");

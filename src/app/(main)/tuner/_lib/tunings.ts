@@ -27,10 +27,16 @@ const NOTE_NAMES = [
 ];
 
 const A4_MIDI = 69;
-const A4_FREQ = 440;
+export const DEFAULT_REFERENCE_A = 440;
+export const MIN_REFERENCE_A = 415;
+export const MAX_REFERENCE_A = 466;
 
-export function midiToFrequency(midi: number) {
-  return A4_FREQ * Math.pow(2, (midi - A4_MIDI) / 12);
+export function validReferenceA(value: number) {
+  return Number.isFinite(value) && value >= MIN_REFERENCE_A && value <= MAX_REFERENCE_A;
+}
+
+export function midiToFrequency(midi: number, referenceA = DEFAULT_REFERENCE_A) {
+  return referenceA * Math.pow(2, (midi - A4_MIDI) / 12);
 }
 
 export function midiToName(midi: number) {
@@ -119,8 +125,19 @@ export const TUNINGS: Tuning[] = [
   EB_BASS_TUNING,
 ];
 
-export function frequencyToMidi(freq: number) {
-  return 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
+export function frequencyToMidi(freq: number, referenceA = DEFAULT_REFERENCE_A) {
+  return 12 * Math.log2(freq / referenceA) + A4_MIDI;
+}
+
+export function tuningAtReference(tuning: Tuning, referenceA: number): Tuning {
+  return { ...tuning, strings: tuning.strings.map(string => ({ ...string, frequency: midiToFrequency(string.midi, referenceA) })) };
+}
+
+export function detectedNote(frequency: number, referenceA = DEFAULT_REFERENCE_A) {
+  if (!Number.isFinite(frequency) || frequency <= 0 || !validReferenceA(referenceA)) return null;
+  const midi = Math.round(frequencyToMidi(frequency, referenceA));
+  const target = midiToFrequency(midi, referenceA);
+  return { midi, name: midiToName(midi), frequency: target, cents: centsBetween(frequency, target) };
 }
 
 /**

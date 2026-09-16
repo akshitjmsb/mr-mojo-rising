@@ -9,7 +9,10 @@ import { usePitchDetection } from "./_hooks/usePitchDetection";
 import {
   TUNINGS,
   centsBetween,
-  closestString,
+  detectedNote,
+  tuningAtReference,
+  midiToFrequency,
+  validReferenceA,
   type Tuning,
 } from "./_lib/tunings";
 
@@ -42,19 +45,23 @@ function Tuner() {
     );
   });
   const [pinned, setPinned] = useState<number | null>(null);
+  const [referenceA, setReferenceA] = useState(440);
+  const [customReference, setCustomReference] = useState(false);
+  const [referenceDraft, setReferenceDraft] = useState("440.00");
+  const targets = useMemo(() => tuningAtReference(tuning, referenceA), [tuning, referenceA]);
   const { reading, running, starting, error, start, stop } = usePitchDetection({
     minFrequency:
-      Math.min(...tuning.strings.map((string) => string.frequency)) * 0.75,
-    maxFrequency:
-      Math.max(...tuning.strings.map((string) => string.frequency)) * 1.4,
+      Math.min(...tuning.strings.map((string) => midiToFrequency(string.midi, 415))) * 0.75,
+    maxFrequency: midiToFrequency(88, 466) * 1.05,
     minClarity: 0.85,
     silenceRms: 0.0015,
   });
 
+  const heard = detectedNote(reading.frequency ?? 0, referenceA);
   const match = useMemo(() => {
     if (reading.frequency === null) return null;
     if (pinned !== null) {
-      const string = tuning.strings[pinned];
+      const string = targets.strings[pinned];
       if (!string) return null;
       return {
         string,
@@ -62,8 +69,10 @@ function Tuner() {
         index: pinned,
       };
     }
-    return closestString(reading.frequency, tuning);
-  }, [reading.frequency, tuning, pinned]);
+    const note = detectedNote(reading.frequency, referenceA);
+    if (!note) return null;
+    return { string: note, cents: note.cents, index: targets.strings.findIndex(string => string.midi === note.midi) };
+  }, [reading.frequency, targets, pinned, referenceA]);
 
   const cents = match?.cents ?? null;
   const usableCents =
@@ -73,10 +82,10 @@ function Tuner() {
     reading.stable &&
     cents !== null &&
     Math.abs(cents) <= IN_TUNE_CENTS;
-  const idleTarget = pinned === null ? null : tuning.strings[pinned];
+  const idleTarget = pinned === null ? null : targets.strings[pinned];
   const activeIndex = reading.stable ? (match?.index ?? null) : pinned;
   const noteLabel =
-    (reading.stable ? match?.string.name : null) ?? idleTarget?.name ?? "—";
+    (reading.stable ? heard?.name : null) ?? "—";
 
   let status = "Tap start, then pluck one string";
   if (starting) status = "Starting microphone…";
@@ -113,15 +122,35 @@ function Tuner() {
         </h1>
       </header>
 
+      <div className="flex shrink-0 items-center justify-between gap-2 font-josefin text-[12px]">
+        <span>Reference: A4 = {referenceA.toFixed(2)} Hz</span>
+        <select aria-label="Reference pitch" value={customReference ? "custom" : String(referenceA)}
+          onChange={event => {
+            const value = event.target.value;
+            setCustomReference(value === "custom");
+            if (value !== "custom") { setReferenceA(Number(value)); setReferenceDraft(Number(value).toFixed(2)); }
+          }} className="min-h-11 rounded border border-border bg-bg px-2 text-gold">
+          <option value="440">440 Hz</option><option value="432">432 Hz</option><option value="custom">Custom</option>
+        </select>
+      </div>
+      {customReference ? <label className="flex items-center justify-between gap-2 font-josefin text-[12px]">
+        A4 · 415–466 Hz
+        <input aria-label="Custom A4 reference in Hz" type="number" min="415" max="466" step="0.01" value={referenceDraft}
+          aria-invalid={!validReferenceA(Number(referenceDraft))}
+          onChange={event => { setReferenceDraft(event.target.value); const value = Number(event.target.value); if (validReferenceA(value)) setReferenceA(value); }}
+          onBlur={() => setReferenceDraft(referenceA.toFixed(2))}
+          className="min-h-11 w-28 rounded border border-border bg-bg px-2 text-gold" />
+      </label> : null}
+
       <TuningPicker selected={tuning} onChange={changeTuning} />
 
       <section
         aria-label="Current tuning reading"
         className="flex flex-col items-center gap-1"
       >
-        <div className="flex min-h-[74px] items-baseline gap-2">
+        <div className="flex min-h-[52px] items-baseline gap-2">
           <span
-            className={`font-playfair text-[72px] font-black italic leading-none transition-colors ${
+            className={`font-playfair text-[48px] font-black italic leading-none transition-colors ${
               inTune ? "text-gold" : "text-text"
             }`}
           >
@@ -131,6 +160,11 @@ function Tuner() {
             {noteLabel.match(/\d/)?.[0] ?? ""}
           </span>
         </div>
+        <p className="font-josefin text-[12px] tabular-nums text-text-muted">
+          Detected: {reading.stable && reading.frequency !== null ? reading.frequency.toFixed(2) : "—"} Hz
+          {" · "}Target: {(reading.stable ? match?.string.frequency : idleTarget?.frequency)?.toFixed(2) ?? "—"} Hz
+        </p>
+        {pinned !== null ? <p className="font-josefin text-[10px] text-text-muted">Pinned target: {idleTarget?.name}</p> : null}
         <p
           aria-live="polite"
           className={`min-h-4 font-josefin text-[9px] uppercase tracking-[0.16em] ${
@@ -138,8 +172,8 @@ function Tuner() {
           }`}
         >
           {status}
-          {usableCents !== null && !inTune ? (
-            <span aria-hidden> · {Math.abs(Math.round(usableCents))}¢</span>
+          {reading.stable && cents !== null ? (
+            <span> · {cents > 0 ? "+" : ""}{cents.toFixed(1)} cents</span>
           ) : (
             ""
           )}
@@ -150,14 +184,14 @@ function Tuner() {
 
       <div className="flex flex-col gap-2">
         <StringRow
-          tuning={tuning}
+          tuning={targets}
           activeIndex={activeIndex}
           cents={usableCents}
           pinnedIndex={pinned}
           onSelect={setPinned}
         />
         <p className="text-center font-josefin text-[8px] tracking-[0.08em] text-text-darkest">
-          Auto finds the string · tap one to lock the target
+          Auto identifies any note · tap a string to lock its target
         </p>
       </div>
 

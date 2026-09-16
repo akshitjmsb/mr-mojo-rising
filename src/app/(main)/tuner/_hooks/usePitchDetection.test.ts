@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { yinDetect } from "./usePitchDetection";
-import { TUNINGS } from "../_lib/tunings";
+import { TUNINGS, detectedNote, midiToFrequency } from "../_lib/tunings";
+
+test("432/440 and custom reference fundamentals survive the existing detector", () => {
+  for (const reference of [415, 432, 440, 466]) for (const midi of [40, 45, 50, 55, 57, 59, 64, 69]) {
+    const expected = midiToFrequency(midi, reference);
+    for (const rate of [44100, 48000]) {
+      const result = yinDetect(sineWave(expected, rate), rate, 0.15, 29, 1500);
+      assert.ok(result.frequency);
+      const note = detectedNote(result.frequency, reference)!;
+      assert.equal(note.midi, midi);
+      assert.ok(Math.abs(note.cents) < 2);
+    }
+  }
+});
 
 function sineWave(frequency: number, sampleRate = 48_000, length = 4096) {
   return Float32Array.from(
