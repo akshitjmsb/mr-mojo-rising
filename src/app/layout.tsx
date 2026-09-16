@@ -10,6 +10,7 @@ import {
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
 import { VocalPlayerProvider } from "@/components/VocalPlayer";
+import NotificationBadge from "@/components/NotificationBadge";
 
 // Doors theme fonts — psychedelic dive bar
 const playfair = Playfair_Display({
@@ -102,6 +103,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
+        <NotificationBadge />
         <ThemeProvider><VocalPlayerProvider>{children}</VocalPlayerProvider></ThemeProvider>
       </body>
     </html>
