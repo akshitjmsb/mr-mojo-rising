@@ -23,6 +23,11 @@ from unidecode import unidecode
 LINE_TIMESTAMP_RE = re.compile(r"\[(\d{1,3}):(\d{2}(?:\.\d+)?)\]\s*(.*)")
 INLINE_TIMESTAMP_RE = re.compile(r"<\d{1,3}:\d{2}(?:\.\d+)?>")
 WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
+CREDIT_RE = re.compile(r"^\s*(?:作词|作詞|作曲|编曲|編曲|词|詞|曲|lyricist|composer|arranger|lyrics\s+by|music\s+by|written\s+by|produced\s+by)\s*[:：]", re.IGNORECASE)
+
+
+def clean_plain_lyrics(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if not CREDIT_RE.match(line)).strip()
 
 DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
 MIN_WORD_SIMILARITY = 0.48
@@ -103,7 +108,7 @@ def parse_catalog_lines(lyrics: dict[str, Any]) -> list[CatalogLine]:
                 continue
             minutes, seconds, text = match.groups()
             clean_text = INLINE_TIMESTAMP_RE.sub("", text).strip()
-            if clean_text:
+            if clean_text and not CREDIT_RE.match(clean_text):
                 lines.append(
                     CatalogLine(
                         time=int(minutes) * 60 + float(seconds),
@@ -119,7 +124,7 @@ def parse_catalog_lines(lyrics: dict[str, Any]) -> list[CatalogLine]:
     return [
         CatalogLine(time=float(index), text=line.strip())
         for index, line in enumerate(plain_text.splitlines())
-        if line.strip()
+        if line.strip() and not CREDIT_RE.match(line)
     ]
 
 
@@ -440,7 +445,7 @@ def align_lyrics_to_vocals(
             if (report.passed and report.word_coverage >= HIGH_CONFIDENCE_WORD_COVERAGE
                     and report.line_coverage >= HIGH_CONFIDENCE_LINE_COVERAGE):
                 break
-    plain_text = lyrics.get("plain_text") or "\n".join(line.text for line in lines)
+    plain_text = clean_plain_lyrics(lyrics.get("plain_text") or "\n".join(line.text for line in lines))
     if not enhanced_lrc:
         return {
             "synced_lrc": None,

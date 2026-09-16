@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import type { Chord, Lyrics } from "@/lib/database.types";
 import { activeLyricChord, lyricChordAnchors, lyricChordLabel } from "@/lib/lyric-chords";
+import { cleanLyricText } from "@/lib/lyric-text";
 import {
   findActiveWordKey,
   findCurrentLineIndex,
@@ -122,7 +123,7 @@ export default function SyncedLyrics({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const syncedLrc = lyrics?.synced_lrc;
   const lines = useMemo(
-    () => (syncedLrc ? parseLrc(syncedLrc) : []),
+    () => (syncedLrc ? parseLrc(cleanLyricText(syncedLrc)) : []),
     [syncedLrc],
   );
   const candidateIndex = findCurrentLineIndex(lines, currentTime);
@@ -179,36 +180,11 @@ export default function SyncedLyrics({
     container.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
   }, [currentIndex]);
 
-  if (lines.length === 0) {
-    if (!lyrics?.plain_text) {
-      return (
-        <p className="mt-4 border-t border-border-dark pt-4 text-center font-josefin text-[8px] leading-relaxed tracking-[0.08em] text-text-dark">
-          Synced lyrics are not available for this recording yet.
-        </p>
-      );
-    }
-
-    return (
-      <div className="mt-4 border-t border-border-dark pt-4">
-        <p className="mb-3 font-josefin text-[8px] uppercase tracking-[0.12em] text-text-muted">
-          Lyrics · not time-synced
-        </p>
-        <div className="max-h-64 overflow-y-auto rounded-[2px] border border-border-dark bg-bg/25 px-4 py-3">
-          <p className="whitespace-pre-wrap font-josefin text-[11px] font-light leading-[1.8] text-text-secondary">
-            {lyrics.plain_text}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (visibleLines.length === 0) {
-    return (
-      <p className="mt-4 border-t border-border-dark pt-4 text-center font-josefin text-[8px] leading-relaxed tracking-[0.08em] text-text-dark">
-        No vocals are timestamped inside this part.
-      </p>
-    );
-  }
+  const plainText = cleanLyricText(lyrics?.plain_text ?? "");
+  const lyricStatus = lines.length === 0
+    ? plainText ? "Lyrics not synced" : "Lyrics unavailable"
+    : lyrics?.source.includes("timing=estimated") ? "Estimated lyric timing"
+      : lyrics?.source.startsWith("local-vocal-align/") ? "Auto-aligned lyrics" : "Catalog lyric timing";
 
   return (
     <div className={compact ? "flex min-h-0 flex-1 flex-col border-t border-border-dark pt-2" : "mt-4 border-t border-border-dark pt-4"}>
@@ -217,29 +193,30 @@ export default function SyncedLyrics({
           Lyrics & chords
         </p>
         <p className="font-josefin text-[7px] uppercase tracking-[0.1em] text-gold/75">
-          {lyrics?.source.includes("timing=estimated")
-            ? "Estimated timing · ≈ estimated chord"
-            : lyrics?.source.startsWith("local-vocal-align/")
-              ? "Auto-aligned · ≈ estimated chord"
-              : "Catalog timing · ≈ estimated chord"}
+          {lyricStatus}
         </p>
       </div>
       <div className="mb-2 min-h-9 font-playfair text-[24px] text-gold" aria-label="Current chord" data-current-chord={activeChord?.chord_standard ?? ""}>
         {activeChord ? lyricChordLabel(activeChord, chordShapeShift) : "—"}
+        <span className="ml-3 font-josefin text-[9px] text-text-muted">
+          {chords.length ? "Estimated chord · audio timing" : "Chords unavailable"}
+        </span>
       </div>
       <div
         ref={containerRef}
         className={compact ? "min-h-0 flex-1 overflow-y-auto overscroll-contain rounded border border-border-dark bg-bg/25 px-3 py-2" : "max-h-64 overflow-y-auto rounded-[2px] border border-border-dark bg-bg/25 px-4 py-7 scroll-smooth"}
-        aria-label="Synchronized lyrics"
+        aria-label={lines.length ? "Synchronized lyrics" : "Unsynced lyrics"}
       >
-        <LyricLineList
+        {lines.length === 0 ? <p className="whitespace-pre-wrap font-josefin text-[12px] leading-relaxed text-text-secondary">
+          {plainText || "Lyrics could not be prepared. Audio and available chords still work."}
+        </p> : visibleLines.length === 0 ? <p className="font-josefin text-[12px] text-text-muted">No lyrics in this selection. Chords follow the audio.</p> : <LyricLineList
           lines={visibleLines}
           currentIndex={currentIndex}
           activeWordKey={activeWordKey}
           chordByWordKey={chordByWordKey}
           rangeStart={range.start}
           onSeek={onSeek}
-        />
+        />}
       </div>
     </div>
   );

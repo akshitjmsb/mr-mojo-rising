@@ -13,6 +13,12 @@ from lyrics_align import (
 
 
 class LyricsAlignTests(unittest.TestCase):
+    def test_credit_lines_are_not_counted_as_missing_sung_words(self):
+        lines = parse_catalog_lines({"synced_lrc": "[00:00.00]作词 : A writer\n[00:00.10]Composer: A writer\n[00:05.00]Music is my life"})
+        self.assertEqual(lines, [CatalogLine(5.0, "Music is my life")])
+        plain = parse_catalog_lines({"plain_text": "作曲 : A writer\nSing it again\nSing it again"})
+        self.assertEqual([line.text for line in plain], ["Sing it again", "Sing it again"])
+
     def test_detects_romanized_lyrics(self):
         self.assertTrue(_mostly_latin("jaanay na koi pehchane na koi"))
         self.assertFalse(_mostly_latin("جانے نہ کوئی"))
