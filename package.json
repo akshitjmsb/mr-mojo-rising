@@ -17,6 +17,7 @@
     "db:migrate": "tsx --env-file=.env.local src/lib/migrate.ts"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@coderline/alphatab": "^1.8.4",
     "@libsql/client": "^0.15.0",
     "@vercel/blob": "^0.27.0",

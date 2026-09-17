@@ -109,5 +109,37 @@ export function downloadFileName(
     .filter(Boolean)
     .join("-")
     .slice(0, 120);
-  return `${slug || "song-selection"}.wav`;
+  return `${slug || "song-selection"}.mp3`;
+}
+
+/** Encode only the selection at 320 kbps. Yield between batches on mobile. */
+export async function encodeMp3Selection(audio: DecodedAudio, startSeconds: number, endSeconds: number): Promise<Blob> {
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || endSeconds <= startSeconds) {
+    throw new Error("Choose a valid start and end time.");
+  }
+  if (![32000, 44100, 48000].includes(audio.sampleRate) || audio.numberOfChannels < 1 || audio.numberOfChannels > 2) {
+    throw new Error("This audio format cannot be exported as high-quality MP3.");
+  }
+  const start = Math.max(0, Math.min(audio.length, Math.floor(startSeconds * audio.sampleRate)));
+  const end = Math.max(start, Math.min(audio.length, Math.ceil(endSeconds * audio.sampleRate)));
+  if (end <= start) throw new Error("The selected section contains no audio.");
+  const { Mp3Encoder } = await import("@breezystack/lamejs");
+  const encoder = new Mp3Encoder(audio.numberOfChannels, audio.sampleRate, 320);
+  const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+  const parts: ArrayBuffer[] = [];
+  let batch = 0;
+  for (let frame = start; frame < end; frame += 1152) {
+    const size = Math.min(1152, end - frame);
+    const pcm = channels.map(channel => {
+      const data = new Int16Array(size);
+      for (let i = 0; i < size; i++) data[i] = pcm16(channel[frame + i]);
+      return data;
+    });
+    const encoded = encoder.encodeBuffer(pcm[0], pcm[1]);
+    if (encoded.length) parts.push(Uint8Array.from(encoded).buffer);
+    if (++batch % 32 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  const tail = encoder.flush();
+  if (tail.length) parts.push(Uint8Array.from(tail).buffer);
+  return new Blob(parts, { type: "audio/mpeg" });
 }

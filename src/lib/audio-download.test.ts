@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { downloadFileName, encodeWavSelection, mixDecodedAudio } from "./audio-download";
+import { downloadFileName, encodeWavSelection, encodeMp3Selection, mixDecodedAudio } from "./audio-download";
 
 test("mix preserves timing and leaves headroom for two tracks", () => {
   const make = (samples: number[]) => ({ sampleRate: 100, numberOfChannels: 1,
@@ -38,6 +38,24 @@ test("encodes only the requested sample range as PCM WAV", () => {
 test("creates a readable selection filename", () => {
   assert.equal(
     downloadFileName("Patience", "Lead Guitar", "Guitar Solo"),
-    "patience-lead-guitar-guitar-solo.wav",
+    "patience-lead-guitar-guitar-solo.mp3",
   );
+});
+
+test("MP3 export produces real 320 kbps MPEG frames for mono and stereo selections", async () => {
+  for (const numberOfChannels of [1, 2]) {
+    const sampleRate = 44100;
+    const data = Float32Array.from({ length: sampleRate * 3 }, (_, i) => Math.sin(2 * Math.PI * 440 * i / sampleRate) * .2);
+    const audio = { sampleRate, numberOfChannels, length: data.length, getChannelData: () => data };
+    const blob = await encodeMp3Selection(audio, 1, 2);
+    assert.equal(blob.type, "audio/mpeg");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    assert.equal(bytes[0], 0xff);
+    assert.equal(bytes[1] & 0xe0, 0xe0);
+    assert.equal(bytes[2] >> 4, 14); // MPEG-1 Layer III bitrate index 14 = 320 kbps.
+    assert.ok(blob.size > 39000 && blob.size < 44000, `one second, not full track: ${blob.size}`);
+    await assert.rejects(encodeMp3Selection(audio, 2, 1), /valid/);
+    await assert.rejects(encodeMp3Selection(audio, 5, 6), /no audio/);
+    await assert.rejects(encodeMp3Selection(audio, NaN, 1), /valid/);
+  }
 });

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import {
   downloadFileName,
-  encodeWavSelection,
+  encodeMp3Selection,
   mixDecodedAudio,
 } from "@/lib/audio-download";
 
@@ -51,7 +51,7 @@ export default function SelectionDownloadButton({
     let audioContext: AudioContext | null = null;
 
     try {
-      audioContext = new AudioContext();
+      audioContext = new AudioContext({ sampleRate: 44100 });
       const context = audioContext;
       const decodedTracks = await Promise.all(layerKey.split("|").map(async key => {
       const response = await fetch(
@@ -68,8 +68,7 @@ export default function SelectionDownloadButton({
       return context.decodeAudioData(source);
       }));
       const decoded = mixDecodedAudio(decodedTracks);
-      const wav = encodeWavSelection(decoded, start, end);
-      const blob = new Blob([wav], { type: "audio/wav" });
+      const blob = await encodeMp3Selection(decoded, start, end);
       saveBlob(blob, downloadFileName(songTitle, pieceLabel, sectionLabel));
     } catch (downloadError) {
       setError(
@@ -91,7 +90,7 @@ export default function SelectionDownloadButton({
         onClick={downloadSelection}
         disabled={preparing}
         aria-label={preparing ? "Preparing download" : "Download selection"}
-        title="Download selection"
+        title="Download MP3 · 320 kbps"
         className="flex min-h-11 w-full items-center justify-center rounded border border-border-dark bg-transparent px-2 font-josefin text-[10px] text-text-muted disabled:opacity-55"
       >
         {compact ? (preparing ? "…" : <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5" /></svg>) : preparing ? "Preparing…" : "Download selection"}
