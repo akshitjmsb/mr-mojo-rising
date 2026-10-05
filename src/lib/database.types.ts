@@ -171,3 +171,4 @@ export type WorkerCommand = {
   handled_by: string | null;
   message: string | null;
 };
+export type { LessonRow, LessonPack } from "./lesson-types";

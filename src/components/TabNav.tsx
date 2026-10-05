@@ -36,6 +36,11 @@ const TABS = [
     ),
   },
   {
+    label: "Lessons",
+    href: "/lessons",
+    icon: (<><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H3V4Z" /><path d="M21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-3h5V4Z" /></>),
+  },
+  {
     label: "Tuner",
     href: "/tuner",
     icon: (
@@ -61,7 +66,7 @@ export default function TabNav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="grid shrink-0 grid-cols-4 border-b border-border-darkest px-4"
+      className="grid shrink-0 grid-cols-5 border-b border-border-darkest px-4"
     >
       {TABS.map((tab) => {
         const active = isActive(tab.href);

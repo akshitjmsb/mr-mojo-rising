@@ -1,7 +1,9 @@
 import { BLOB_CLEANUP_SCHEMA } from "./blob-cleanup-schema";
+import { LESSON_SCHEMA } from "./lesson-schema";
 
 export const SCHEMA_STATEMENTS: string[] = [
   BLOB_CLEANUP_SCHEMA,
+  ...LESSON_SCHEMA,
   `CREATE TABLE IF NOT EXISTS songs (
     id TEXT PRIMARY KEY,
     user_id TEXT,

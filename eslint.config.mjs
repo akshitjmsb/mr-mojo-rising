@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "mac-server/venv/**",
     "mac-server/venv-sep/**",
+    "mac-server/venv-lessons/**",
     "mac-server/__pycache__/**",
   ]),
 ]);

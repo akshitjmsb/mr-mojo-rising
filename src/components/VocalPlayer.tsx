@@ -48,7 +48,7 @@ export function VocalPlayerProvider({ children }: { children: ReactNode }) {
   const shuffled = useRef(false);
   const failed = useRef(new Set<string>());
   const request = useRef(0);
-  const ownsAudio = !pathname.startsWith("/song/") && !pathname.startsWith("/tuner");
+  const ownsAudio = !pathname.startsWith("/song/") && !pathname.startsWith("/tuner") && !pathname.startsWith("/lessons/");
 
   async function refresh() {
     if (!tracksRef.current.length) setLoading(true);

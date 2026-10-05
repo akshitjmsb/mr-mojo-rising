@@ -14,6 +14,8 @@
     "worker:install": "bash ./scripts/install-worker-launch-agent.sh",
     "worker:uninstall": "bash ./scripts/uninstall-worker-launch-agent.sh",
     "worker:status": "bash ./scripts/status-worker-launch-agent.sh",
+    "lessons:worker": "bash mac-server/start-lessons.sh",
+    "lessons:install": "python3 scripts/install-lesson-worker.py",
     "db:migrate": "tsx --env-file=.env.local src/lib/migrate.ts"
   },
   "dependencies": {
