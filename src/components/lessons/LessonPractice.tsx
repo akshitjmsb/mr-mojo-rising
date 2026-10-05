@@ -29,13 +29,16 @@ export default function LessonPractice({ pack }: { pack: LessonPack }) {
 
   function exportPack() {
     const lines = [`${metadata.song.value || pack.source.title}, ${metadata.artist.value || "Artist not stated"} | ${metadata.tuning.value || "Tuning not stated"} | capo ${metadata.capo.value || "not stated"} | ${metadata.level.value || "Level not stated"}`];
+    lines.push(`Teacher: ${pack.source.channel || "Not stated"} | Length: ${lessonTime(pack.source.duration)}`, `Key: ${metadata.key.value || "Not stated"}`);
+    if (metadata.gear.value) lines.push(`Tone / gear: ${metadata.gear.value}`);
+    for (const [label, fact] of Object.entries(metadata)) if (fact.review) lines.push(`[VERIFY] ${label}: ${fact.review}`);
     for (const s of pack.sections) {
       lines.push(`\n${lessonTime(s.start)} ${s.title}`, s.chords.map(c => c.name + (c.review ? " [VERIFY]" : "")).join(" → "));
       for (const c of s.chords) lines.push(c.name, ...["e", "B", "G", "D", "A", "E"].map((label, i) => `${label}|--${c.frets[i] ?? "?"}--|`), c.review ? `[VERIFY] ${c.review}` : "");
       for (const f of [s.strumming, s.picking, ...s.tips]) if (f.value || f.review) lines.push(`${f.value || ""}${f.review ? ` [VERIFY] ${f.review}` : ""}`);
       for (const p of s.phrases) lines.push(p.title, p.notes.length ? lessonTab(p.notes) : "[VERIFY] Tab not established", p.review ? `[VERIFY] ${p.review}` : "");
     }
-    lines.push("\nSong map", pack.songMap.value || "[VERIFY] Arrangement not stated", ...pack.resources.map(r => `${r.title}: ${r.url}`), ...pack.notices, `\nSource: ${pack.source.url || "Pasted transcript"}`, pack.source.captions);
+    lines.push("\nSong map", pack.songMap.value || "[VERIFY] Arrangement not stated", ...(pack.songMap.review ? [`[VERIFY] ${pack.songMap.review}`] : []), ...pack.resources.map(r => `${r.title}: ${r.url}`), ...pack.notices, `\nSource: ${pack.source.url || "Pasted transcript"}`, pack.source.captions);
     const blobUrl = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }));
     const anchor = document.createElement("a"); anchor.href = blobUrl; anchor.download = "mojo-lesson.txt"; anchor.click(); setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
   }
