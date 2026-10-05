@@ -3,10 +3,10 @@ import {
   Playfair_Display,
   Josefin_Sans,
   Special_Elite,
-  IBM_Plex_Sans,
   Lora,
   DM_Sans,
 } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
 import { VocalPlayerProvider } from "@/components/VocalPlayer";
@@ -33,10 +33,12 @@ const specialElite = Special_Elite({
   weight: ["400"],
 });
 
-const ibmPlexSans = IBM_Plex_Sans({
+// Bundle this font: the Google download URL can break Next's build-time loader.
+const ibmPlexSans = localFont({
+  src: "./fonts/IBM-Plex-Sans.ttf",
   variable: "--font-ibm-plex-dylan",
-  subsets: ["latin"],
-  weight: ["300", "400", "500"],
+  weight: "300 500",
+  display: "swap",
 });
 
 // Ali theme fonts — warm monsoon evening, Sufi acoustic warmth
