@@ -7,6 +7,30 @@ extracts each teaching section, and runs a second source-checking pass. It saves
 a structured pack for visual practice, original teacher playback, speed control,
 section/phrase looping, and a downloadable six-string text pack.
 
+## Why this architecture
+
+```mermaid
+flowchart TD
+  Mojo[Mojo interface] --> Queue[Durable lesson queue · Turso]
+  Callers[Future Ray / Robby callers] -.-> Queue
+  Queue --> Worker[Mac lesson worker]
+  Worker --> Source[Description + captions + selected frames]
+  Source --> Codex[Codex · ChatGPT subscription]
+  Codex --> Audit[Source audit + deterministic checks]
+  Audit --> Pack[Saved lesson pack + uncertainty flags]
+  Pack --> Practice[Shapes · tabs · teacher audio · loops]
+```
+
+The browser can close while extraction continues. Vercel handles short requests;
+the Mac handles downloads and model calls. Ray and Robby can become callers of the
+same queue without becoming dependencies for practice. The model adapter is isolated
+in `model_call`; a future audio-capable provider can keep the same pack contract.
+
+Source checks establish where a claim came from, not that it is musically correct.
+A second model pass can share the first pass's mistakes. Reliable audio verification
+and measured phrase timing remain separate work; this version deliberately reports
+that limit and offers the original teacher playback for checking.
+
 ## Run on your Mac
 
 1. Install Python 3.11+, Node, ffmpeg, and Codex CLI (the ChatGPT desktop app's
