@@ -39,6 +39,18 @@ class GroundingTests(unittest.TestCase):
         self.assertIsNone(value.value)
         self.assertIn("withheld", value.review)
 
+    def test_quotes_can_cross_caption_events_but_not_change_words(self):
+        transcript = "[10.00s] use the second fret\n[12.00s] on the third string"
+        value = fact("G string, fret 2")
+        value.evidence = [evidence("second fret on the third string", at=10.0)]
+        check_evidence(value, transcript, "", [], 200)
+        self.assertEqual(value.value, "G string, fret 2")
+        self.assertIsNone(value.review)
+        wrong = fact("G string, fret 3")
+        wrong.evidence = [evidence("third fret on the third string", at=10.0)]
+        check_evidence(wrong, transcript, "", [], 200)
+        self.assertIsNone(wrong.value)
+
     def test_chord_name_is_not_permission_to_invent(self):
         chord = Chord(name="C", frets=["0", "1", "0", "2", "3", "x"], evidence=[], review=None)
         check_evidence(chord, "C chord", "", [], 200)

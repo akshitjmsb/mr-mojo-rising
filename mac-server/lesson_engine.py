@@ -47,7 +47,7 @@ Return JSON conforming to the supplied schema, with ALL fields present.
 Keep titles to six words, review reasons brief, and tips short enough for practice cards.
 """
 
-ENGINE_VERSION = "lesson-v1.1"
+ENGINE_VERSION = "lesson-v1.2"
 
 
 def checkpoint(folder: Path, name: str, value):
@@ -179,6 +179,9 @@ def transcript_window(transcript: str, start: float | None, end: float | None):
 
 
 def normalize(text: str) -> str:
+    # Caption timestamps are transport metadata, not words spoken by the teacher.
+    # A faithful quote may span two adjacent caption events.
+    text = re.sub(r"(?m)^\[\d+(?:\.\d+)?s\]\s*", "", text)
     return " ".join(text.casefold().split())
 
 
