@@ -78,6 +78,9 @@ bash mac-server/start-lessons.sh --extract 'https://youtu.be/VIDEO_ID' --output 
 - Tab slots preserve event order and simultaneous notes; spacing is not rhythm.
   Source performance times are distinct from teaching timestamps. Untimed pasted
   text never gets invented playback ranges. Fast or occluded passages may be incomplete.
+- When exact phrase timing is unknown, playback offers a clearly labelled 24-second
+  source cue around cited transcript/frame evidence, bounded by the chapter. This is
+  a navigation aid, not a claimed musical performance interval; pack timing stays null.
 - Free links require an exact description excerpt containing both the destination
   and an explicit free claim. Destinations are not crawled; advertised access may
   require signup. Paid links are excluded.
@@ -105,3 +108,15 @@ Benchmark: `https://youtu.be/WHujjJEnZpI` (GuitarZero2Hero's acoustic Layla less
 Check D5 versus spoken D-minor harmony, teacher-specific Bb5/C5 voicings, the open-A
 variation, verse D/U caption corruption, and lesson time versus solo performance time.
 No benchmark musical material is hardcoded into the engine.
+
+The initial full run on 2026-10-04 took about 45 minutes and produced eight teaching
+sections, 83 phrase entries (68 with note data), and 755 ordered note events, including
+repeated/recap material. Spot checks preserved the partial D shape, Bb5/C5 voicings,
+open-A variation, shifted-D5 ending, the visible DUDUDUDU pattern, and the muted-high-e
+A variation. Only the advertised free ebook was retained; key and difficulty stayed
+unknown. This is a coverage check, not a note-by-note accuracy score.
+
+No exact phrase performance boundaries were established in that run, which led to
+the separate source-cue playback mode. The published sample's review wording was
+edited for clarity; note events and chord positions were unchanged. Full solo/audio
+accuracy remains unverified. Long lessons should be treated as background jobs.

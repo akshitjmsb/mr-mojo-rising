@@ -29,6 +29,23 @@ export function lessonTime(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
 }
 
+/** Source cues are navigation windows, never inferred musical performance bounds. */
+export function lessonPlayback(source: LessonPack["source"], section: LessonSection, phrase?: LessonPhrase) {
+  if (phrase?.start !== null && phrase?.start !== undefined && phrase.end !== null) {
+    return { start: phrase.start, end: phrase.end, kind: "phrase" as const };
+  }
+  if (source.url && phrase) {
+    const evidence = phrase.evidence.filter(e => (e.kind === "transcript" || e.kind === "visual") && e.at !== null && e.at >= (section.start ?? 0) && e.at < (section.end ?? source.duration ?? Infinity));
+    const spoken = evidence.filter(e => e.kind === "transcript");
+    const at = (spoken.length ? spoken : evidence).map(e => e.at!).sort((a, b) => a - b)[0];
+    if (at !== undefined) {
+      const start = Math.max(section.start ?? 0, at - 2);
+      return { start, end: Math.min(start + 24, section.end ?? Infinity, source.duration ?? Infinity), kind: "cue" as const };
+    }
+  }
+  return { start: section.start, end: section.end, kind: "section" as const };
+}
+
 /** Slots show note order only; they deliberately do not imply measured rhythm. */
 export function lessonTab(notes: LessonNote[]): string {
   const slots = [...new Set(notes.map(n => n.slot))].sort((a, b) => a - b);

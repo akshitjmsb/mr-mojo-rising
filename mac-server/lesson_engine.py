@@ -45,9 +45,12 @@ simultaneous notes share a slot. Technique symbols follow the note they lead FRO
 Review flags must describe uncertainties, conflicting evidence, or incomplete coverage.
 Return JSON conforming to the supplied schema, with ALL fields present.
 Keep titles to six words, review reasons brief, and tips short enough for practice cards.
+Describe uncertainties in plain musical language, without references to schemas,
+JSON, fields, or the extraction process. Song-map review concerns arrangement only;
+individual shapes, notes, and timing are reviewed with their sections and phrases.
 """
 
-ENGINE_VERSION = "lesson-v1.2"
+ENGINE_VERSION = "lesson-v1.3"
 
 
 def checkpoint(folder: Path, name: str, value):

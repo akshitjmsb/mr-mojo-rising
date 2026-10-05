@@ -24,7 +24,7 @@ function youtubeAPI() {
   return loading;
 }
 
-export default function TeacherPlayer({ url, start, end }: { url: string; start: number | null; end: number | null }) {
+export default function TeacherPlayer({ url, start, end, kind }: { url: string; start: number | null; end: number | null; kind: "phrase" | "cue" | "section" }) {
   const host = useRef<HTMLDivElement>(null);
   const player = useRef<Player | null>(null);
   const range = useRef({ start, end });
@@ -78,8 +78,9 @@ export default function TeacherPlayer({ url, start, end }: { url: string; start:
     setError(""); p.playVideo();
   }
   return <section className="mt-5 space-y-3" aria-label="Teacher playback">
-    <div className="flex gap-2"><button onClick={play} disabled={!ready} className="min-h-12 flex-1 rounded-xl bg-gold font-semibold text-bg disabled:opacity-40">{playing ? "Ⅱ Pause" : "▶ Hear the teacher"}</button><button disabled={!ready || start === null || end === null} aria-pressed={loop} onClick={() => { looping.current = !loop; setLoop(!loop); }} className={`min-h-12 rounded-xl border px-4 disabled:opacity-40 ${loop ? "border-gold text-gold" : "border-border text-text-muted"}`}>↻ Loop</button></div>
-    <div className="flex items-center justify-between text-xs text-text-muted"><span>{start === null ? "Full lesson" : `${lessonTime(start)}${end === null ? "" : `–${lessonTime(end)}`}`}</span><div className="flex gap-1">{[.5, .75, 1].map(speed => <button key={speed} disabled={!ready || !rates.includes(speed)} aria-pressed={speed === rate} onClick={() => { preferredRate.current = speed; player.current?.setPlaybackRate(speed); }} className={`min-h-10 min-w-12 rounded-lg disabled:opacity-30 ${speed === rate ? "bg-input-bg text-gold" : ""}`}>{speed * 100}%</button>)}</div></div>
+    <div className="flex gap-2"><button onClick={play} disabled={!ready} className="min-h-12 flex-1 rounded-xl bg-gold font-semibold text-bg disabled:opacity-40">{playing ? "Ⅱ Pause" : kind === "cue" ? "▶ Hear source cue" : "▶ Hear the teacher"}</button><button disabled={!ready || start === null || end === null} aria-pressed={loop} onClick={() => { looping.current = !loop; setLoop(!loop); }} className={`min-h-12 rounded-xl border px-4 disabled:opacity-40 ${loop ? "border-gold text-gold" : "border-border text-text-muted"}`}>↻ {kind === "cue" ? "Loop cue" : kind === "section" ? "Loop section" : "Loop"}</button></div>
+    <div className="flex items-center justify-between text-xs text-text-muted"><span>{start === null ? "Full lesson" : `${kind === "cue" ? "Source cue" : kind === "section" ? "Section" : "Phrase"} · ${lessonTime(start)}${end === null ? "" : `–${lessonTime(end)}`}`}</span><div className="flex gap-1">{[.5, .75, 1].map(speed => <button key={speed} disabled={!ready || !rates.includes(speed)} aria-pressed={speed === rate} onClick={() => { preferredRate.current = speed; player.current?.setPlaybackRate(speed); }} className={`min-h-10 min-w-12 rounded-lg disabled:opacity-30 ${speed === rate ? "bg-input-bg text-gold" : ""}`}>{speed * 100}%</button>)}</div></div>
+    {kind === "cue" && <p className="text-[10px] text-text-muted">Around the cited lesson moment · exact phrase timing unverified</p>}
     <div ref={host} className="min-h-[216px] overflow-hidden rounded-xl border border-border-darkest bg-input-bg" />
     {error && <p role="status" className="text-xs text-terracotta">{error}</p>}
     <a href={`${url}${start === null ? "" : `&t=${Math.floor(start)}s`}`} target="_blank" rel="noreferrer" className="block py-2 text-xs text-text-muted underline">Watch on YouTube ↗</a>
