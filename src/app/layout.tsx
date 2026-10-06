@@ -1,39 +1,34 @@
 import type { Metadata, Viewport } from "next";
-import {
-  Playfair_Display,
-  Josefin_Sans,
-  Special_Elite,
-  Lora,
-  DM_Sans,
-} from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme/ThemeProvider";
 import { VocalPlayerProvider } from "@/components/VocalPlayer";
 import NotificationBadge from "@/components/NotificationBadge";
 
+// Bundle theme fonts locally so production builds do not download from Google.
 // Doors theme fonts — psychedelic dive bar
-const playfair = Playfair_Display({
+const playfair = localFont({
+  src: "./fonts/PlayfairDisplay.ttf",
   variable: "--font-playfair-doors",
-  subsets: ["latin"],
-  weight: ["400", "700", "900"],
-  style: ["normal", "italic"],
+  weight: "400 900",
+  display: "swap",
 });
 
-const josefin = Josefin_Sans({
+const josefin = localFont({
+  src: "./fonts/JosefinSans.ttf",
   variable: "--font-josefin-doors",
-  subsets: ["latin"],
-  weight: ["100", "300", "400"],
+  weight: "100 700",
+  display: "swap",
 });
 
 // Dylan theme fonts — typewriter ink on yellowed paper
-const specialElite = Special_Elite({
+const specialElite = localFont({
+  src: "./fonts/SpecialElite.ttf",
   variable: "--font-special-elite-dylan",
-  subsets: ["latin"],
-  weight: ["400"],
+  weight: "400",
+  display: "swap",
 });
 
-// Bundle this font: the Google download URL can break Next's build-time loader.
 const ibmPlexSans = localFont({
   src: "./fonts/IBM-Plex-Sans.ttf",
   variable: "--font-ibm-plex-dylan",
@@ -42,17 +37,18 @@ const ibmPlexSans = localFont({
 });
 
 // Ali theme fonts — warm monsoon evening, Sufi acoustic warmth
-const lora = Lora({
+const lora = localFont({
+  src: "./fonts/Lora.ttf",
   variable: "--font-lora-ali",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  style: ["normal", "italic"],
+  weight: "400 700",
+  display: "swap",
 });
 
-const dmSans = DM_Sans({
+const dmSans = localFont({
+  src: "./fonts/DMSans.ttf",
   variable: "--font-dm-sans-ali",
-  subsets: ["latin"],
-  weight: ["300", "400", "500"],
+  weight: "100 1000",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
