@@ -98,7 +98,7 @@ async function getWorkerPayload() {
     status: onlineWorkers.length > 0 ? "online" : "offline",
     online_count: onlineWorkers.length,
     latest_worker: latestWorker,
-    workers,
+    workers: onlineWorkers,
     queue: {
       queued: queue?.queued ?? 0,
       running: queue?.running ?? 0,
